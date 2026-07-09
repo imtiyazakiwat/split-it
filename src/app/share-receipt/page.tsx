@@ -10,13 +10,6 @@ import Card from "@/components/ui/Card";
 import { GlassSelect } from "@/components/ui/GlassField";
 import AddExpenseModal from "@/components/AddExpenseModal";
 
-/**
- * Landing page registered as the Web Share Target (see app/manifest.ts).
- * When a user shares an image (e.g. a payment screenshot) from another app
- * into SplitIt, the browser POSTs it here as multipart/form-data. We read
- * the file client-side via a small companion route, then let the user pick
- * which group and finish creating the expense.
- */
 export default function ShareReceiptPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
@@ -31,10 +24,6 @@ export default function ShareReceiptPage() {
   }, [user]);
 
   useEffect(() => {
-    // The shared file arrives via a POST to this route. Since this is a
-    // client component, we grab it from the same-origin request using the
-    // Cache Storage bridge set up in the service worker, falling back to
-    // manual file selection if unavailable.
     if ("caches" in window) {
       caches.open("share-target-cache").then(async (cache) => {
         const res = await cache.match("shared-receipt");

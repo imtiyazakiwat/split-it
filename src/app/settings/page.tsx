@@ -12,7 +12,7 @@ import { GlassField } from "@/components/ui/GlassField";
 import GlassButton from "@/components/ui/GlassButton";
 
 export default function SettingsPage() {
-  const { user, loading } = useAuth();
+  const { user, loading, signOut } = useAuth();
   const router = useRouter();
   const [upiId, setUpiId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,25 +57,24 @@ export default function SettingsPage() {
     <div className="flex-1 flex flex-col">
       <TopBar title="Settings" onBack={() => router.push("/")} />
       <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 scroll-momentum">
-        <Card className="p-4 flex items-center gap-3">
-          {user.photoURL && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.photoURL}
-              alt=""
-              className="w-12 h-12 rounded-full"
-              referrerPolicy="no-referrer"
-            />
-          )}
-          <div className="min-w-0">
-            <p className="font-medium text-[var(--label-primary)] truncate">
-              {user.displayName || "User"}
-            </p>
-            <p className="text-[13px] text-[var(--label-tertiary)] truncate">{user.email}</p>
-          </div>
-        </Card>
-
         <Card className="p-4">
+          <div className="flex items-center gap-3 mb-3 pb-3 border-b border-[var(--border-subtle)]">
+            {user.photoURL && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={user.photoURL}
+                alt=""
+                className="w-12 h-12 rounded-full"
+                referrerPolicy="no-referrer"
+              />
+            )}
+            <div className="min-w-0 flex-1">
+              <p className="font-medium text-[var(--label-primary)] truncate">
+                {user.displayName || "User"}
+              </p>
+              <p className="text-[13px] text-[var(--label-tertiary)] truncate">{user.email}</p>
+            </div>
+          </div>
           <form onSubmit={handleSave} className="space-y-3.5">
             <GlassField
               label="Your UPI ID"
@@ -97,6 +96,15 @@ export default function SettingsPage() {
             </GlassButton>
           </form>
         </Card>
+        <button
+          onClick={async () => {
+            await signOut();
+            router.push("/");
+          }}
+          className="w-full text-center py-3 text-[15px] text-[var(--danger)] font-medium tap-shrink"
+        >
+          Sign Out
+        </button>
       </main>
     </div>
   );

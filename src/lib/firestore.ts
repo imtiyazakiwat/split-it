@@ -3,15 +3,15 @@ import {
   doc,
   addDoc,
   setDoc,
+  updateDoc,
   getDocs,
   query,
   where,
   onSnapshot,
-  updateDoc,
   arrayUnion,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { Group, Expense, Settlement, SplitType, ExpenseSplit } from "./types";
+import { Group, Expense, Settlement, SettlementStatus, SplitType, ExpenseSplit } from "./types";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -36,6 +36,16 @@ export async function createGroup(
   return groupRef.id;
 }
 
+export async function updateGroupProfile(
+  groupId: string,
+  data: { name?: string; description?: string }
+): Promise<void> {
+  const payload: Record<string, string> = {};
+  if (data.name !== undefined) payload.name = data.name;
+  if (data.description !== undefined) payload.description = data.description;
+  await updateDoc(doc(db, "groups", groupId), payload);
+}
+
 export async function joinGroupByCode(
   inviteCode: string,
   uid: string,
@@ -58,7 +68,14 @@ export function subscribeToUserGroups(
 ) {
   const q = query(collection(db, "groups"), where("memberIds", "array-contains", uid));
   return onSnapshot(q, (snap) => {
-    const groups = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Group));
+    const groups = snap.docs.map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        description: data.description || "",
+      } as Group;
+    });
     callback(groups);
   });
 }
@@ -72,7 +89,8 @@ export function subscribeToGroup(
       callback(null);
       return;
     }
-    callback({ id: snap.id, ...snap.data() } as Group);
+    const data = snap.data();
+    callback({ id: snap.id, ...data, description: data.description || "" } as Group);
   });
 }
 
@@ -83,7 +101,14 @@ export function subscribeToExpenses(
   const q = query(collection(db, "groups", groupId, "expenses"));
   return onSnapshot(q, (snap) => {
     const expenses = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() } as Expense))
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          receiptUrls: data.receiptUrls || [],
+        } as Expense;
+      })
       .sort((a, b) => b.createdAt - a.createdAt);
     callback(expenses);
   });
@@ -96,7 +121,16 @@ export function subscribeToSettlements(
   const q = query(collection(db, "groups", groupId, "settlements"));
   return onSnapshot(q, (snap) => {
     const settlements = snap.docs
-      .map((d) => ({ id: d.id, ...d.data() } as Settlement))
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id,
+          ...data,
+          receiptUrls: data.receiptUrls || [],
+          status: data.status || "approved",
+          updatedAt: data.updatedAt || data.createdAt,
+        } as Settlement;
+      })
       .sort((a, b) => b.createdAt - a.createdAt);
     callback(settlements);
   });
@@ -117,39 +151,56 @@ export async function addExpense(
     splitType: SplitType;
     splits: ExpenseSplit[];
     createdBy: string;
-    receiptUrl?: string;
+    receiptUrls?: string[];
     category?: string;
   }
 ): Promise<string> {
   const ref = await addDoc(collection(db, "groups", groupId, "expenses"), {
     ...stripUndefined(data),
+    receiptUrls: data.receiptUrls || [],
     groupId,
     createdAt: Date.now(),
   });
   return ref.id;
 }
 
-export async function addSettlement(
+export async function addSettlementRequest(
   groupId: string,
-  data: { fromUid: string; toUid: string; amount: number; note?: string; receiptUrl?: string }
+  data: {
+    fromUid: string;
+    toUid: string;
+    amount: number;
+    note?: string;
+    receiptUrls?: string[];
+    expenseIds?: string[];
+  }
 ): Promise<string> {
   const ref = await addDoc(collection(db, "groups", groupId, "settlements"), {
     ...stripUndefined(data),
+    receiptUrls: data.receiptUrls || [],
+    expenseIds: data.expenseIds || [],
     groupId,
+    status: "pending",
     createdAt: Date.now(),
   });
   return ref.id;
+}
+
+export async function updateSettlementStatus(
+  groupId: string,
+  settlementId: string,
+  status: SettlementStatus
+): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId, "settlements", settlementId), {
+    status,
+    updatedAt: Date.now(),
+  });
 }
 
 export async function updateUpiId(uid: string, upiId: string): Promise<void> {
   await setDoc(doc(db, "users", uid), { upiId }, { merge: true });
 }
 
-/**
- * Propagates a user's current profile (including UPI ID) into every group
- * they're a member of, so group.members[uid] stays in sync without needing
- * a separate users/{uid} lookup when rendering settle-up UI.
- */
 export async function syncProfileToGroups(
   uid: string,
   profile: { displayName: string; email: string; photoURL?: string; upiId?: string }

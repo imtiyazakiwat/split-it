@@ -16,6 +16,7 @@ export interface GroupMember {
 export interface Group {
   id: string;
   name: string;
+  description?: string;
   memberIds: string[];
   members: Record<string, GroupMember>;
   createdBy: string;
@@ -27,7 +28,7 @@ export type SplitType = "equal" | "exact" | "percentage";
 
 export interface ExpenseSplit {
   uid: string;
-  amount: number; // amount this user owes for this expense
+  amount: number;
 }
 
 export interface Expense {
@@ -38,11 +39,13 @@ export interface Expense {
   paidBy: string;
   splitType: SplitType;
   splits: ExpenseSplit[];
-  receiptUrl?: string;
+  receiptUrls: string[];
   createdBy: string;
   createdAt: number;
   category?: string;
 }
+
+export type SettlementStatus = "pending" | "approved" | "rejected";
 
 export interface Settlement {
   id: string;
@@ -50,14 +53,17 @@ export interface Settlement {
   fromUid: string;
   toUid: string;
   amount: number;
+  status: SettlementStatus;
   createdAt: number;
+  updatedAt?: number;
   note?: string;
-  receiptUrl?: string;
+  receiptUrls: string[];
+  expenseIds?: string[];
 }
 
 export interface Balance {
   uid: string;
-  netAmount: number; // positive = is owed money, negative = owes money
+  netAmount: number;
 }
 
 export interface SimplifiedTransaction {

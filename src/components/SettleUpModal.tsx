@@ -1,157 +1,230 @@
 "use client";
 
 import { useState } from "react";
-import { addSettlement } from "@/lib/firestore";
-import { uploadReceipt } from "@/lib/storage";
+import { Expense } from "@/lib/types";
+import { addSettlementRequest } from "@/lib/firestore";
+import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
-import { UPI_APPS, isLikelyAndroid, UpiPaymentParams } from "@/lib/upi";
 import GlassModal from "@/components/ui/GlassModal";
-import { GlassField } from "@/components/ui/GlassField";
 import GlassButton from "@/components/ui/GlassButton";
+
+interface ExpenseWithSelection {
+  expense: Expense;
+  selected: boolean;
+}
 
 export default function SettleUpModal({
   groupId,
   fromUid,
   toUid,
   toName,
-  toUpiId,
   suggestedAmount,
+  expensesOwed,
   onClose,
 }: {
   groupId: string;
   fromUid: string;
   toUid: string;
   toName: string;
-  toUpiId?: string;
   suggestedAmount: number;
+  expensesOwed: Expense[];
   onClose: () => void;
 }) {
-  const [amount, setAmount] = useState(suggestedAmount.toFixed(2));
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [items, setItems] = useState<ExpenseWithSelection[]>(
+    expensesOwed.map((e) => ({ expense: e, selected: false }))
+  );
+  const [customAmount, setCustomAmount] = useState("");
+  const [useCustom, setUseCustom] = useState(false);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [paidExternally, setPaidExternally] = useState(false);
 
-  const parsedAmount = parseFloat(amount) || 0;
-  const androidLikely = isLikelyAndroid();
+  const selectedTotal = items
+    .filter((i) => i.selected)
+    .reduce((sum, i) => {
+      const split = i.expense.splits.find((s) => s.uid === fromUid);
+      return sum + (split?.amount || 0);
+    }, 0);
 
-  const upiParams: UpiPaymentParams | null = toUpiId
-    ? { payeeVpa: toUpiId, payeeName: toName, amount: parsedAmount, note: "SplitIt settlement" }
-    : null;
+  const displayAmount = useCustom ? (parseFloat(customAmount) || 0) : selectedTotal;
 
-  function handlePayWithApp(buildUri: (p: UpiPaymentParams) => string) {
-    if (!upiParams || parsedAmount <= 0) return;
-    const uri = buildUri(upiParams);
-    // Navigate via a transient anchor rather than mutating
-    // window.location directly, so this stays a DOM-API side effect
-    // instead of reassigning a browser global in place.
-    const anchor = document.createElement("a");
-    anchor.href = uri;
-    anchor.rel = "noopener";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // Once they've launched a UPI app, prompt them to confirm it went through
-    // and optionally attach a screenshot before we record the settlement.
-    setPaidExternally(true);
+  function toggleItem(index: number) {
+    setItems((prev) => {
+      const next = [...prev];
+      next[index] = { ...next[index], selected: !next[index].selected };
+      return next;
+    });
+    if (useCustom) setUseCustom(false);
+  }
+
+  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    setReceiptFiles((prev) => [...prev, ...files]);
+  }
+
+  function removeReceipt(index: number) {
+    setReceiptFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const amt = parseFloat(amount);
-    if (!amt || amt <= 0) {
-      setError("Enter a valid amount.");
+    const amt = useCustom ? (parseFloat(customAmount) || 0) : selectedTotal;
+    if (amt <= 0) {
+      setError(useCustom ? "Enter a valid amount." : "Select at least one expense.");
       return;
     }
     setBusy(true);
     setError("");
     try {
-      let receiptUrl: string | undefined;
-      if (receiptFile) {
-        receiptUrl = await uploadReceipt(groupId, receiptFile, receiptFile.name);
+      let receiptUrls: string[] = [];
+      if (receiptFiles.length > 0) {
+        receiptUrls = await uploadMultipleReceipts(groupId, receiptFiles);
       }
-      await addSettlement(groupId, { fromUid, toUid, amount: amt, receiptUrl });
+      const expenseIds = items
+        .filter((i) => i.selected)
+        .map((i) => i.expense.id);
+      await addSettlementRequest(groupId, {
+        fromUid,
+        toUid,
+        amount: amt,
+        note: note.trim() || undefined,
+        receiptUrls,
+        expenseIds: expenseIds.length > 0 ? expenseIds : undefined,
+      });
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to record settlement");
+      setError(err instanceof Error ? err.message : "Failed to send settlement request");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <GlassModal title={`Settle up with ${toName}`} onClose={onClose}>
+    <GlassModal title={`Settle with ${toName}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
-        <GlassField
-          label="Amount"
-          autoFocus
-          type="number"
-          inputMode="decimal"
-          step="0.01"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-        />
-
-        {toUpiId ? (
-          <div>
-            <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
-              Pay with UPI
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {UPI_APPS.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  onClick={() => handlePayWithApp(app.buildUri)}
-                  disabled={parsedAmount <= 0}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink disabled:opacity-40"
-                >
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ backgroundColor: app.color }}
-                    aria-hidden
-                  />
-                  <span className="truncate">{app.label}</span>
-                </button>
-              ))}
-            </div>
-            {!androidLikely && (
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
-                UPI apps only open automatically on Android. On iOS, use the
-                app manually with {toName}&rsquo;s UPI ID:{" "}
-                <span className="font-medium text-[var(--label-secondary)]">{toUpiId}</span>
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className="text-[13px] text-[var(--label-tertiary)]">
-            {toName} hasn&rsquo;t added a UPI ID yet, so you&rsquo;ll need to pay them
-            directly (cash, UPI, etc.) and just record it here.
+        <div>
+          <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            Select expenses to settle
           </p>
+          <div className="space-y-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-1 max-h-60 overflow-y-auto">
+            {items.map((item, i) => {
+              const myShare = item.expense.splits.find((s) => s.uid === fromUid)?.amount || 0;
+              return (
+                <label
+                  key={item.expense.id}
+                  className="flex items-center gap-2.5 py-2 px-2.5 rounded-[var(--radius-sm)] tap-shrink"
+                >
+                  <input
+                    type="checkbox"
+                    checked={item.selected}
+                    onChange={() => toggleItem(i)}
+                    className="rounded accent-[var(--accent)] w-4 h-4 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[14px] text-[var(--label-primary)] truncate font-medium">
+                      {item.expense.description}
+                    </p>
+                    <p className="text-[12px] text-[var(--label-tertiary)]">
+                      {formatCurrency(myShare)} of {formatCurrency(item.expense.amount)}
+                    </p>
+                  </div>
+                  <span className="text-[14px] font-medium text-[var(--label-primary)] shrink-0">
+                    {formatCurrency(myShare)}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-medium text-[var(--label-secondary)]">
+            Total: {formatCurrency(displayAmount)}
+          </span>
+          <button
+            type="button"
+            onClick={() => setUseCustom(!useCustom)}
+            className="text-[13px] text-[var(--accent)] tap-shrink"
+          >
+            {useCustom ? "Use selected" : "Custom amount"}
+          </button>
+        </div>
+
+        {useCustom && (
+          <div>
+            <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+              Custom amount
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              inputMode="decimal"
+              value={customAmount}
+              onChange={(e) => setCustomAmount(e.target.value)}
+              placeholder="0.00"
+              autoFocus
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            />
+          </div>
         )}
 
-        {(paidExternally || !toUpiId) && (
-          <label className="block text-sm font-medium text-[var(--label-secondary)]">
-            Payment screenshot (optional)
+        <div>
+          <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+            Note (optional)
+          </label>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="For: dinner on Friday…"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+          />
+        </div>
+
+        <div>
+          <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            Payment screenshots (optional)
+          </p>
+          <label className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink">
+            {receiptFiles.length > 0
+              ? `${receiptFiles.length} file(s) selected — tap to add more`
+              : "Tap to select screenshots"}
             <input
               type="file"
               accept="image/*"
-              onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-              className="mt-1.5 w-full text-sm text-[var(--label-secondary)] file:mr-3 file:rounded-full file:border-0 file:bg-[var(--accent)]/10 file:text-[var(--accent)] file:px-3 file:py-1.5 file:text-sm"
+              multiple
+              onChange={handleReceipts}
+              className="hidden"
             />
           </label>
-        )}
+          {receiptFiles.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {receiptFiles.map((f, i) => (
+                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--label-secondary)]">
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeReceipt(i)}
+                    className="text-[var(--danger)] ml-2 shrink-0 tap-shrink"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <p className="text-[13px] text-[var(--label-tertiary)]">
-          Confirming here records that you paid {toName}{" "}
-          {formatCurrency(parsedAmount)}. SplitIt doesn&rsquo;t process the
-          payment itself — this just logs it.
+          This sends a settlement request to {toName}. They will need to approve
+          it for it to be reflected in the group balance.
         </p>
 
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 
         <GlassButton disabled={busy} className="w-full">
-          {busy ? "Recording…" : "Confirm Payment"}
+          {busy ? "Sending…" : "Send Settlement Request"}
         </GlassButton>
       </form>
     </GlassModal>

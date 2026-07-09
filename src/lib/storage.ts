@@ -1,9 +1,3 @@
-/**
- * Uploads a receipt image to ImgBB (https://api.imgbb.com) and returns the
- * public URL. Used instead of Firebase Storage since receipts are just
- * images shared between a trusted small group — no auth-scoped access
- * control on the image itself, so don't rely on this for sensitive data.
- */
 export async function uploadReceipt(
   _groupId: string,
   file: File | Blob,
@@ -34,4 +28,14 @@ export async function uploadReceipt(
   }
 
   return data.data.url as string;
+}
+
+export async function uploadMultipleReceipts(
+  groupId: string,
+  files: File[]
+): Promise<string[]> {
+  const urls = await Promise.all(
+    files.map((f) => uploadReceipt(groupId, f, f.name))
+  );
+  return urls;
 }

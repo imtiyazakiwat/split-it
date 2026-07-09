@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Group } from "@/lib/types";
 import { addExpense } from "@/lib/firestore";
-import { uploadReceipt } from "@/lib/storage";
+import { uploadMultipleReceipts } from "@/lib/storage";
 import { splitEqually } from "@/lib/balance";
 import GlassModal from "@/components/ui/GlassModal";
 import { GlassField, GlassSelect } from "@/components/ui/GlassField";
@@ -24,7 +24,7 @@ export default function AddExpenseModal({
   const [amount, setAmount] = useState("");
   const [paidBy, setPaidBy] = useState(currentUid);
   const [selectedMembers, setSelectedMembers] = useState<string[]>(group.memberIds);
-  const [receiptFile, setReceiptFile] = useState<File | null>(prefillReceipt || null);
+  const [receiptFiles, setReceiptFiles] = useState<File[]>(prefillReceipt ? [prefillReceipt] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,6 +32,15 @@ export default function AddExpenseModal({
     setSelectedMembers((prev) =>
       prev.includes(uid) ? prev.filter((m) => m !== uid) : [...prev, uid]
     );
+  }
+
+  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files || []);
+    setReceiptFiles((prev) => [...prev, ...files]);
+  }
+
+  function removeReceipt(index: number) {
+    setReceiptFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -44,9 +53,9 @@ export default function AddExpenseModal({
     setBusy(true);
     setError("");
     try {
-      let receiptUrl: string | undefined;
-      if (receiptFile) {
-        receiptUrl = await uploadReceipt(group.id, receiptFile, receiptFile.name);
+      let receiptUrls: string[] = [];
+      if (receiptFiles.length > 0) {
+        receiptUrls = await uploadMultipleReceipts(group.id, receiptFiles);
       }
       const splits = splitEqually(amt, selectedMembers);
       await addExpense(group.id, {
@@ -56,7 +65,7 @@ export default function AddExpenseModal({
         splitType: "equal",
         splits,
         createdBy: currentUid,
-        receiptUrl,
+        receiptUrls,
       });
       onClose();
     } catch (err) {
@@ -119,15 +128,39 @@ export default function AddExpenseModal({
           </div>
         </div>
 
-        <label className="block text-sm font-medium text-[var(--label-secondary)]">
-          Receipt (optional)
-          <input
-            type="file"
-            accept="image/*"
-            onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-            className="mt-1.5 w-full text-sm text-[var(--label-secondary)] file:mr-3 file:rounded-full file:border-0 file:bg-[var(--accent)]/10 file:text-[var(--accent)] file:px-3 file:py-1.5 file:text-sm"
-          />
-        </label>
+        <div>
+          <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            Receipts (optional)
+          </p>
+          <label className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink">
+            {receiptFiles.length > 0
+              ? `${receiptFiles.length} file(s) selected — tap to add more`
+              : "Tap to select receipt images"}
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={handleReceipts}
+              className="hidden"
+            />
+          </label>
+          {receiptFiles.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {receiptFiles.map((f, i) => (
+                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--label-secondary)]">
+                  <span className="truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => removeReceipt(i)}
+                    className="text-[var(--danger)] ml-2 shrink-0 tap-shrink"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
 

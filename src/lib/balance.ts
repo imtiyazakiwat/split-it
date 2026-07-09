@@ -1,10 +1,5 @@
 import { Expense, Settlement, Balance, SimplifiedTransaction } from "./types";
 
-/**
- * Computes net balance per user from a list of expenses and settlements.
- * Positive netAmount = this user is owed money overall.
- * Negative netAmount = this user owes money overall.
- */
 export function computeBalances(
   memberIds: string[],
   expenses: Expense[],
@@ -14,17 +9,14 @@ export function computeBalances(
   memberIds.forEach((uid) => (net[uid] = 0));
 
   for (const expense of expenses) {
-    // Payer is owed the full amount
     net[expense.paidBy] = (net[expense.paidBy] || 0) + expense.amount;
-    // Each participant owes their split
     for (const split of expense.splits) {
       net[split.uid] = (net[split.uid] || 0) - split.amount;
     }
   }
 
   for (const settlement of settlements) {
-    // fromUid paid toUid, so fromUid's debt decreases (net increases),
-    // toUid's credit decreases (net decreases)
+    if (settlement.status !== "approved") continue;
     net[settlement.fromUid] = (net[settlement.fromUid] || 0) + settlement.amount;
     net[settlement.toUid] = (net[settlement.toUid] || 0) - settlement.amount;
   }
@@ -35,10 +27,6 @@ export function computeBalances(
   }));
 }
 
-/**
- * Simplifies debts so the minimum number of transactions settle all balances.
- * Classic greedy algorithm: match the largest debtor with the largest creditor repeatedly.
- */
 export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
   const creditors = balances
     .filter((b) => b.netAmount > 0.01)
@@ -79,7 +67,6 @@ export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
 export function splitEqually(amount: number, memberIds: string[]): { uid: string; amount: number }[] {
   const share = Math.floor((amount / memberIds.length) * 100) / 100;
   const splits = memberIds.map((uid) => ({ uid, amount: share }));
-  // Distribute rounding remainder to the first member(s)
   const total = share * memberIds.length;
   const remainder = Math.round((amount - total) * 100) / 100;
   if (remainder !== 0) {
