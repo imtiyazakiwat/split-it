@@ -53,6 +53,8 @@ export default function ActivityTimeline({
   onReject,
   onForward,
   canForward,
+  onOpenExpense,
+  onOpenSettlement,
 }: {
   expenses: Expense[];
   settlements: Settlement[];
@@ -66,6 +68,8 @@ export default function ActivityTimeline({
   onReject: (s: Settlement) => void;
   onForward: (s: Settlement) => void;
   canForward: boolean;
+  onOpenExpense: (e: Expense) => void;
+  onOpenSettlement: (s: Settlement) => void;
 }) {
   const items: Item[] = [
     ...expenses
@@ -103,7 +107,10 @@ export default function ActivityTimeline({
                   <span className="text-[12px] font-medium text-slate-500">{bucket}</span>
                 </div>
               )}
-              <div className="relative flex items-start gap-3 py-1.5">
+              <div
+                className="relative flex items-start gap-3 py-1.5 cursor-pointer"
+                onClick={() => (e ? onOpenExpense(e) : s ? onOpenSettlement(s) : undefined)}
+              >
                 <span
                   className={`relative z-[1] w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
                     isSettlement ? "bg-green-100" : "bg-indigo-100"
@@ -127,8 +134,8 @@ export default function ActivityTimeline({
                       </p>
                       {isAdmin && (
                         <div className="flex gap-3 mt-1">
-                          <button onClick={() => onEditExpense(e)} className="text-[12px] text-indigo-600 tap-shrink">Edit</button>
-                          <button onClick={() => onDeleteExpense(e)} className="text-[12px] text-red-500 tap-shrink">Delete</button>
+                          <button onClick={(ev) => { ev.stopPropagation(); onEditExpense(e); }} className="text-[12px] text-indigo-600 tap-shrink">Edit</button>
+                          <button onClick={(ev) => { ev.stopPropagation(); onDeleteExpense(e); }} className="text-[12px] text-red-500 tap-shrink">Delete</button>
                         </div>
                       )}
                     </>
@@ -157,11 +164,11 @@ export default function ActivityTimeline({
                       )}
                       {s.status === "pending" && s.toUid === currentUid && (
                         <div className="flex gap-2 mt-1.5">
-                          <button onClick={() => onApprove(s)} className="rounded-full bg-indigo-600 text-white px-3 py-1 text-[12px] font-medium tap-shrink">Approve</button>
+                          <button onClick={(ev) => { ev.stopPropagation(); onApprove(s); }} className="rounded-full bg-indigo-600 text-white px-3 py-1 text-[12px] font-medium tap-shrink">Approve</button>
                           {canForward && (
-                            <button onClick={() => onForward(s)} className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-[12px] font-medium tap-shrink">Forward</button>
+                            <button onClick={(ev) => { ev.stopPropagation(); onForward(s); }} className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-[12px] font-medium tap-shrink">Forward</button>
                           )}
-                          <button onClick={() => onReject(s)} className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-[12px] font-medium tap-shrink">Reject</button>
+                          <button onClick={(ev) => { ev.stopPropagation(); onReject(s); }} className="rounded-full bg-slate-100 text-slate-600 px-3 py-1 text-[12px] font-medium tap-shrink">Reject</button>
                         </div>
                       )}
                     </>

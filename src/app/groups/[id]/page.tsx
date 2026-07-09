@@ -25,6 +25,7 @@ import AddExpenseModal from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
 import AddMemberModal from "@/components/group/AddMemberModal";
+import ActivityDetailModal from "@/components/group/ActivityDetailModal";
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 
@@ -56,6 +57,8 @@ export default function GroupPage() {
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
+  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
+  const [detailSettlement, setDetailSettlement] = useState<Settlement | null>(null);
   const [showEditGroup, setShowEditGroup] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -537,6 +540,8 @@ export default function GroupPage() {
             onReject={handleRejectSettlement}
             onForward={(s) => setForwardTarget(s)}
             canForward={myCreditors.length > 0}
+            onOpenExpense={setDetailExpense}
+            onOpenSettlement={setDetailSettlement}
           />
         </section>
       </main>
@@ -681,6 +686,20 @@ export default function GroupPage() {
           groupId={group.id}
           existingUids={group.memberIds}
           onClose={() => setShowAddMember(false)}
+        />
+      )}
+
+      {(detailExpense || detailSettlement) && (
+        <ActivityDetailModal
+          expense={detailExpense}
+          settlement={detailSettlement}
+          group={group}
+          memberName={memberName}
+          currentUid={currentUser.uid}
+          isAdmin={isAdmin}
+          onEditExpense={handleEditExpense}
+          onDeleteExpense={handleDeleteExpense}
+          onClose={() => { setDetailExpense(null); setDetailSettlement(null); }}
         />
       )}
 
