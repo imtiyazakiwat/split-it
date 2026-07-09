@@ -179,7 +179,7 @@ export default function GroupPage() {
 
   async function handleDeleteExpense(expense: Expense) {
     if (!group || !confirm(`Delete "${expense.description}"? This will hide it from the group.`)) return;
-    await deleteExpense(group.id, expense.id);
+    await deleteExpense(group.id, expense.id, currentUser.uid);
     showLocalNotification(
       "Expense deleted",
       `${expense.description} was deleted by admin`,
@@ -201,7 +201,7 @@ export default function GroupPage() {
         description: desc.trim(),
         amount: amt,
         paidBy,
-      });
+      }, currentUser.uid);
       setEditingExpense(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to update expense");

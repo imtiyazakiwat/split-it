@@ -17,6 +17,7 @@ import {
   Group, Expense, Settlement, SettlementStatus,
   SplitType, ExpenseSplit, EditAction,
 } from "./types";
+import { notifyGroupMembers, notifyUsers } from "./send-notification";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -144,6 +145,19 @@ export async function addExpense(
     groupId,
     createdAt: Date.now(),
   });
+
+  try {
+    const groupSnap = await getDoc(doc(db, "groups", groupId));
+    const groupName = groupSnap.data()?.name || "Group";
+    notifyGroupMembers(groupId, data.createdBy, {
+      title: groupName,
+      body: `New expense: ${data.description} — ₹${data.amount}`,
+      link: `/groups/${groupId}`,
+    });
+  } catch {
+    // notification is best-effort
+  }
+
   return ref.id;
 }
 
@@ -157,7 +171,8 @@ export async function updateExpense(
     splits?: ExpenseSplit[];
     receiptUrls?: string[];
     category?: string;
-  }
+  },
+  editedBy?: string
 ): Promise<void> {
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
     ...stripUndefined(data),
@@ -165,16 +180,49 @@ export async function updateExpense(
     updatedAt: Date.now(),
     editAction: "edited",
   });
+
+  if (editedBy) {
+    try {
+      const groupSnap = await getDoc(doc(db, "groups", groupId));
+      const groupName = groupSnap.data()?.name || "Group";
+      const desc = data.description || "Expense";
+      notifyGroupMembers(groupId, editedBy, {
+        title: groupName,
+        body: `${desc} was updated`,
+        link: `/groups/${groupId}`,
+      });
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 export async function deleteExpense(
   groupId: string,
-  expenseId: string
+  expenseId: string,
+  deletedBy?: string
 ): Promise<void> {
+  const snap = await getDoc(doc(db, "groups", groupId, "expenses", expenseId));
+  const desc = (snap.data()?.description as string) || "Expense";
+
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
     editAction: "deleted",
     updatedAt: Date.now(),
   });
+
+  if (deletedBy) {
+    try {
+      const groupSnap = await getDoc(doc(db, "groups", groupId));
+      const groupName = groupSnap.data()?.name || "Group";
+      notifyGroupMembers(groupId, deletedBy, {
+        title: groupName,
+        body: `${desc} was removed`,
+        link: `/groups/${groupId}`,
+      });
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 // ── Settlements ─────────────────────────────────────────────
@@ -219,6 +267,20 @@ export async function addSettlementRequest(
     status: "pending",
     createdAt: Date.now(),
   });
+
+  try {
+    const groupSnap = await getDoc(doc(db, "groups", groupId));
+    const group = groupSnap.data();
+    const fromName = (group?.members as Record<string, { displayName: string }>)?.[data.fromUid]?.displayName || "Someone";
+    notifyUsers([data.toUid], {
+      title: group?.name || "Settlement request",
+      body: `${fromName} requested ₹${data.amount} from you`,
+      link: `/groups/${groupId}`,
+    });
+  } catch {
+    // best-effort
+  }
+
   return ref.id;
 }
 
@@ -227,10 +289,36 @@ export async function updateSettlementStatus(
   settlementId: string,
   status: SettlementStatus
 ): Promise<void> {
+  let fromUid = "";
+  let amount = 0;
+  try {
+    const snap = await getDoc(doc(db, "groups", groupId, "settlements", settlementId));
+    if (snap.exists()) {
+      fromUid = (snap.data().fromUid as string) || "";
+      amount = (snap.data().amount as number) || 0;
+    }
+  } catch {
+    // best-effort
+  }
+
   await updateDoc(doc(db, "groups", groupId, "settlements", settlementId), {
     status,
     updatedAt: Date.now(),
   });
+
+  if (fromUid) {
+    try {
+      const groupSnap = await getDoc(doc(db, "groups", groupId));
+      const groupName = groupSnap.data()?.name || "Settlement";
+      notifyUsers([fromUid], {
+        title: groupName,
+        body: `Your settlement request of ₹${amount} was ${status}`,
+        link: `/groups/${groupId}`,
+      });
+    } catch {
+      // best-effort
+    }
+  }
 }
 
 // ── User Profile ────────────────────────────────────────────
