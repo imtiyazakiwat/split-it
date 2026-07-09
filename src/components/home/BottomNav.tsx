@@ -46,7 +46,7 @@ export default function BottomNav({ active }: { active: Tab }) {
 
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
-    { id: "activity", label: "Activity", href: "/", Icon: ActivityIcon },
+    { id: "activity", label: "Activity", href: "/activity", Icon: ActivityIcon },
     { id: "profile", label: "Profile", href: "/settings", Icon: ProfileIcon },
   ];
 
