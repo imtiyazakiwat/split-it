@@ -14,6 +14,7 @@ const firebaseConfig = {
 
 // Avoid re-initializing on hot reload / multiple imports
 export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+export const isFirebaseConfigReady = !!firebaseConfig.apiKey;
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);

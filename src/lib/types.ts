@@ -4,6 +4,7 @@ export interface UserProfile {
   email: string;
   photoURL?: string;
   upiId?: string;
+  fcmToken?: string;
 }
 
 export interface GroupMember {
@@ -17,6 +18,7 @@ export interface Group {
   id: string;
   name: string;
   description?: string;
+  photoURL?: string;
   memberIds: string[];
   members: Record<string, GroupMember>;
   createdBy: string;
@@ -31,6 +33,8 @@ export interface ExpenseSplit {
   amount: number;
 }
 
+export type EditAction = "edited" | "deleted";
+
 export interface Expense {
   id: string;
   groupId: string;
@@ -42,6 +46,8 @@ export interface Expense {
   receiptUrls: string[];
   createdBy: string;
   createdAt: number;
+  updatedAt?: number;
+  editAction?: EditAction;
   category?: string;
 }
 
@@ -70,4 +76,11 @@ export interface SimplifiedTransaction {
   fromUid: string;
   toUid: string;
   amount: number;
+}
+
+export interface NotificationPayload {
+  title: string;
+  body: string;
+  icon?: string;
+  link?: string;
 }

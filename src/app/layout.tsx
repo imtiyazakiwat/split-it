@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import PwaBootstrap from "@/components/PwaBootstrap";
+import NotificationSetup from "@/components/NotificationSetup";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -65,8 +66,11 @@ export default function RootLayout({
         <link rel="apple-touch-startup-image" href="/splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2)" />
       </head>
       <body className="min-h-full flex flex-col bg-[var(--background)]">
-        <AuthProvider>{children}</AuthProvider>
-        <PwaBootstrap />
+        <AuthProvider>
+          {children}
+          <PwaBootstrap />
+          <NotificationSetup />
+        </AuthProvider>
       </body>
     </html>
   );

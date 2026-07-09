@@ -158,23 +158,63 @@ export default function Home() {
               No groups yet. Create one or join with an invite code.
             </p>
           )}
-          {groups.map((group) => (
-            <Card
-              key={group.id}
-              interactive
-              onClick={() => router.push(`/groups/${group.id}`)}
-              className="p-4 flex items-center justify-between"
-            >
-              <div className="min-w-0">
-                <p className="font-medium text-[var(--label-primary)] truncate">{group.name}</p>
-                <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">
-                  {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Code:{" "}
-                  {group.inviteCode}
-                </p>
-              </div>
-              <span className="text-[var(--label-tertiary)] text-xl shrink-0 ml-2">›</span>
-            </Card>
-          ))}
+          {groups.map((group) => {
+            const memberPhotos = group.memberIds
+              .slice(0, 3)
+              .map((uid) => group.members[uid]?.photoURL)
+              .filter(Boolean) as string[];
+            return (
+              <Card
+                key={group.id}
+                interactive
+                onClick={() => router.push(`/groups/${group.id}`)}
+                className="p-4 flex items-center justify-between"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  {group.photoURL ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={group.photoURL}
+                      alt=""
+                      className="w-12 h-12 rounded-full object-cover shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
+                      <span className="text-lg font-semibold text-[var(--accent)]">
+                        {group.name.charAt(0).toUpperCase()}
+                      </span>
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="font-medium text-[var(--label-primary)] truncate">{group.name}</p>
+                    <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">
+                      {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
+                      {group.description ? ` · ${group.description}` : ""}
+                    </p>
+                    {memberPhotos.length > 0 && (
+                      <div className="flex -space-x-1.5 mt-1">
+                        {memberPhotos.map((url, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            key={i}
+                            src={url}
+                            alt=""
+                            className="w-5 h-5 rounded-full border border-[var(--surface)] object-cover"
+                          />
+                        ))}
+                        {group.memberIds.length > 3 && (
+                          <span className="w-5 h-5 rounded-full bg-[var(--border-subtle)] flex items-center justify-center text-[10px] text-[var(--label-tertiary)] border border-[var(--surface)]">
+                            +{group.memberIds.length - 3}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <span className="text-[var(--label-tertiary)] text-xl shrink-0 ml-2">›</span>
+              </Card>
+            );
+          })}
         </div>
       </main>
     </div>

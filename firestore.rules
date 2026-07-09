@@ -10,6 +10,11 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid in groupData.memberIds;
     }
 
+    function isGroupAdmin(groupId) {
+      return isSignedIn()
+        && request.auth.uid == get(/databases/$(database)/documents/groups/$(groupId)).data.createdBy;
+    }
+
     match /users/{userId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == userId;
@@ -30,7 +35,8 @@ service cloud.firestore {
         allow read: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data);
         allow create: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data)
           && request.auth.uid == request.resource.data.createdBy;
-        allow update, delete: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data);
+        allow update: if isGroupAdmin(groupId);
+        allow delete: if isGroupAdmin(groupId);
       }
 
       match /settlements/{settlementId} {

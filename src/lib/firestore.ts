@@ -4,6 +4,8 @@ import {
   addDoc,
   setDoc,
   updateDoc,
+  deleteDoc,
+  getDoc,
   getDocs,
   query,
   where,
@@ -11,11 +13,16 @@ import {
   arrayUnion,
 } from "firebase/firestore";
 import { db } from "./firebase";
-import { Group, Expense, Settlement, SettlementStatus, SplitType, ExpenseSplit } from "./types";
+import {
+  Group, Expense, Settlement, SettlementStatus,
+  SplitType, ExpenseSplit, EditAction,
+} from "./types";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
+
+// ── Groups ──────────────────────────────────────────────────
 
 export async function createGroup(
   name: string,
@@ -26,9 +33,7 @@ export async function createGroup(
   const groupRef = await addDoc(collection(db, "groups"), {
     name,
     memberIds: [creatorUid],
-    members: {
-      [creatorUid]: creatorProfile,
-    },
+    members: { [creatorUid]: creatorProfile },
     createdBy: creatorUid,
     createdAt: Date.now(),
     inviteCode,
@@ -38,11 +43,12 @@ export async function createGroup(
 
 export async function updateGroupProfile(
   groupId: string,
-  data: { name?: string; description?: string }
+  data: { name?: string; description?: string; photoURL?: string }
 ): Promise<void> {
-  const payload: Record<string, string> = {};
+  const payload: Record<string, string | undefined> = {};
   if (data.name !== undefined) payload.name = data.name;
   if (data.description !== undefined) payload.description = data.description;
+  if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
   await updateDoc(doc(db, "groups", groupId), payload);
 }
 
@@ -62,6 +68,14 @@ export async function joinGroupByCode(
   return groupDoc.id;
 }
 
+export async function getGroupByInviteCode(code: string): Promise<Group | null> {
+  const q = query(collection(db, "groups"), where("inviteCode", "==", code.toUpperCase()));
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  const d = snap.docs[0];
+  return { id: d.id, ...d.data() } as Group;
+}
+
 export function subscribeToUserGroups(
   uid: string,
   callback: (groups: Group[]) => void
@@ -70,11 +84,7 @@ export function subscribeToUserGroups(
   return onSnapshot(q, (snap) => {
     const groups = snap.docs.map((d) => {
       const data = d.data();
-      return {
-        id: d.id,
-        ...data,
-        description: data.description || "",
-      } as Group;
+      return { id: d.id, ...data, description: data.description || "" } as Group;
     });
     callback(groups);
   });
@@ -85,14 +95,13 @@ export function subscribeToGroup(
   callback: (group: Group | null) => void
 ) {
   return onSnapshot(doc(db, "groups", groupId), (snap) => {
-    if (!snap.exists()) {
-      callback(null);
-      return;
-    }
+    if (!snap.exists()) { callback(null); return; }
     const data = snap.data();
     callback({ id: snap.id, ...data, description: data.description || "" } as Group);
   });
 }
+
+// ── Expenses ────────────────────────────────────────────────
 
 export function subscribeToExpenses(
   groupId: string,
@@ -103,36 +112,10 @@ export function subscribeToExpenses(
     const expenses = snap.docs
       .map((d) => {
         const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          receiptUrls: data.receiptUrls || [],
-        } as Expense;
+        return { id: d.id, ...data, receiptUrls: data.receiptUrls || [] } as Expense;
       })
-      .sort((a, b) => b.createdAt - a.createdAt);
+      .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     callback(expenses);
-  });
-}
-
-export function subscribeToSettlements(
-  groupId: string,
-  callback: (settlements: Settlement[]) => void
-) {
-  const q = query(collection(db, "groups", groupId, "settlements"));
-  return onSnapshot(q, (snap) => {
-    const settlements = snap.docs
-      .map((d) => {
-        const data = d.data();
-        return {
-          id: d.id,
-          ...data,
-          receiptUrls: data.receiptUrls || [],
-          status: data.status || "approved",
-          updatedAt: data.updatedAt || data.createdAt,
-        } as Settlement;
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-    callback(settlements);
   });
 }
 
@@ -162,6 +145,59 @@ export async function addExpense(
     createdAt: Date.now(),
   });
   return ref.id;
+}
+
+export async function updateExpense(
+  groupId: string,
+  expenseId: string,
+  data: {
+    description?: string;
+    amount?: number;
+    paidBy?: string;
+    splits?: ExpenseSplit[];
+    receiptUrls?: string[];
+    category?: string;
+  }
+): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
+    ...stripUndefined(data),
+    receiptUrls: data.receiptUrls,
+    updatedAt: Date.now(),
+    editAction: "edited",
+  });
+}
+
+export async function deleteExpense(
+  groupId: string,
+  expenseId: string
+): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
+    editAction: "deleted",
+    updatedAt: Date.now(),
+  });
+}
+
+// ── Settlements ─────────────────────────────────────────────
+
+export function subscribeToSettlements(
+  groupId: string,
+  callback: (settlements: Settlement[]) => void
+) {
+  const q = query(collection(db, "groups", groupId, "settlements"));
+  return onSnapshot(q, (snap) => {
+    const settlements = snap.docs
+      .map((d) => {
+        const data = d.data();
+        return {
+          id: d.id, ...data,
+          receiptUrls: data.receiptUrls || [],
+          status: data.status || "approved",
+          updatedAt: data.updatedAt || data.createdAt,
+        } as Settlement;
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+    callback(settlements);
+  });
 }
 
 export async function addSettlementRequest(
@@ -197,6 +233,23 @@ export async function updateSettlementStatus(
   });
 }
 
+// ── User Profile ────────────────────────────────────────────
+
+export async function updateUserProfile(
+  uid: string,
+  data: { displayName?: string; photoURL?: string }
+): Promise<void> {
+  const payload: Record<string, string | undefined> = {};
+  if (data.displayName !== undefined) payload.displayName = data.displayName;
+  if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
+  await setDoc(doc(db, "users", uid), payload, { merge: true });
+  await syncProfileToGroups(uid, {
+    displayName: data.displayName || "",
+    email: "",
+    photoURL: data.photoURL,
+  });
+}
+
 export async function updateUpiId(uid: string, upiId: string): Promise<void> {
   await setDoc(doc(db, "users", uid), { upiId }, { merge: true });
 }
@@ -214,4 +267,19 @@ export async function syncProfileToGroups(
       })
     )
   );
+}
+
+export async function getUserProfile(uid: string) {
+  const snap = await getDoc(doc(db, "users", uid));
+  return snap.exists() ? snap.data() : null;
+}
+
+// ── FCM / Notifications ─────────────────────────────────────
+
+export async function saveFcmToken(uid: string, token: string): Promise<void> {
+  await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
+}
+
+export async function removeFcmToken(uid: string): Promise<void> {
+  await setDoc(doc(db, "users", uid), { fcmToken: "" }, { merge: true });
 }
