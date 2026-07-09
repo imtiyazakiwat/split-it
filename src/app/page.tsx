@@ -289,34 +289,36 @@ export default function Home() {
         )}
       </main>
 
-      {/* Floating Add */}
-      <div className="fixed z-30 right-4 bottom-[calc(6.5rem+env(safe-area-inset-bottom))] max-w-md left-1/2 -translate-x-1/2 pointer-events-none">
-        <div className="relative w-full h-0">
-          {showAdd && (
-            <div className="pointer-events-auto absolute right-0 bottom-16 w-44 bg-white rounded-2xl p-1.5 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.28)] animate-modal-in">
-              <button
-                onClick={() => { setShowAdd(false); setShowCreate(true); setError(""); }}
-                className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-slate-700 hover:bg-slate-50 tap-shrink"
-              >
-                + New Group
-              </button>
-              <button
-                onClick={() => { setShowAdd(false); setShowJoin(true); setError(""); }}
-                className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-slate-700 hover:bg-slate-50 tap-shrink"
-              >
-                Join Group
-              </button>
-            </div>
-          )}
-          <button
-            onClick={() => setShowAdd((v) => !v)}
-            className="pointer-events-auto absolute right-0 bottom-0 flex items-center gap-2 bg-white rounded-full pl-5 pr-6 py-4 shadow-[0_10px_30px_-6px_rgba(79,70,229,0.35)] tap-shrink"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            <span className="text-[16px] font-semibold text-indigo-600">Add</span>
-          </button>
+      {/* Floating Add — pinned bottom-right, clearing the tab bar */}
+      <div className="fixed z-30 inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] pointer-events-none">
+        <div className="max-w-md mx-auto px-4 flex justify-end">
+          <div className="relative pointer-events-auto">
+            {showAdd && (
+              <div className="absolute right-0 bottom-full mb-3 w-44 bg-white rounded-2xl p-1.5 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.28)] animate-modal-in">
+                <button
+                  onClick={() => { setShowAdd(false); setShowCreate(true); setError(""); }}
+                  className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-slate-700 hover:bg-slate-50 tap-shrink"
+                >
+                  + New Group
+                </button>
+                <button
+                  onClick={() => { setShowAdd(false); setShowJoin(true); setError(""); }}
+                  className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-slate-700 hover:bg-slate-50 tap-shrink"
+                >
+                  Join Group
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => setShowAdd((v) => !v)}
+              className="flex items-center gap-2 bg-white rounded-full pl-5 pr-6 py-4 shadow-[0_10px_30px_-6px_rgba(79,70,229,0.35)] tap-shrink"
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              <span className="text-[16px] font-semibold text-indigo-600">Add</span>
+            </button>
+          </div>
         </div>
       </div>
 

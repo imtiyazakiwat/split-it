@@ -15,16 +15,32 @@ import {
 } from "@/lib/firestore";
 import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
 import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
-import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
+import { uploadImage } from "@/lib/storage";
 import { showLocalNotification } from "@/lib/notifications";
-import TopBar from "@/components/TopBar";
-import Card from "@/components/ui/Card";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField, GlassSelect } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
 import AddExpenseModal from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
+import BottomNav from "@/components/home/BottomNav";
+import ActivityTimeline from "@/components/group/ActivityTimeline";
+
+function timeAgoShort(ts: number): string {
+  const m = Math.floor((Date.now() - ts) / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
+function createdAgoText(createdAt: number): string {
+  const days = Math.max(0, Math.floor((Date.now() - createdAt) / 86400000));
+  if (days === 0) return "today";
+  if (days === 1) return "1 day ago";
+  return `${days} days ago`;
+}
 
 export default function GroupPage() {
   const { id } = useParams<{ id: string }>();
@@ -36,7 +52,6 @@ export default function GroupPage() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
-  const [tab, setTab] = useState<"balances" | "activity">("balances");
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState(false);
   const [editName, setEditName] = useState("");
@@ -77,7 +92,6 @@ export default function GroupPage() {
 
   const balanceExpenses = expenses.filter((e) => !e.editAction);
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
-  const myBalance = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
   // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
   // per-expense picker showed gross expense amounts instead of the pairwise
   // net, letting you overpay. Revisit later; for now always use simplified.
@@ -89,13 +103,6 @@ export default function GroupPage() {
   const myCreditors = transactions
     .filter((t) => t.fromUid === currentUser.uid)
     .map((t) => ({ uid: t.toUid, name: memberName(t.toUid), amount: t.amount }));
-
-  const pendingSettlements = settlements.filter((s) => s.status === "pending");
-  const myPendingIncoming = pendingSettlements.filter((s) => s.toUid === currentUser.uid);
-  const myPendingOutgoing = pendingSettlements.filter((s) => s.fromUid === currentUser.uid);
-
-  const balanceColor =
-    myBalance > 0.01 ? "text-[var(--success)]" : myBalance < -0.01 ? "text-[var(--danger)]" : "text-[var(--label-primary)]";
 
   function handleOpenSettle(toUid: string, amount: number) {
     setSettleTarget({ toUid, amount });
@@ -261,256 +268,260 @@ export default function GroupPage() {
   }
 
   const activeExpenses = expenses.filter((e) => !e.editAction);
-  const deletedExpenses = expenses.filter((e) => e.editAction === "deleted");
-  const editedExpenses = expenses.filter((e) => e.editAction === "edited");
+
+  // ── Derived stats for the header/summary cards ──
+  const totalSpent = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const expenseCount = activeExpenses.length;
+
+  const settledExpenseIds = new Set<string>();
+  settlements
+    .filter((s) => s.status === "approved")
+    .forEach((s) => (s.expenseIds || []).forEach((eid) => settledExpenseIds.add(eid)));
+  const settledCount = activeExpenses.filter((e) => settledExpenseIds.has(e.id)).length;
+  const settledPct = expenseCount > 0 ? Math.round((settledCount / expenseCount) * 100) : 100;
+
+  const lastActivityItem = [
+    ...activeExpenses.map((e) => ({ ts: e.updatedAt || e.createdAt, label: `${e.description} added` })),
+    ...settlements.map((s) => ({ ts: s.createdAt, label: "payment logged" })),
+  ].sort((a, b) => b.ts - a.ts)[0];
+
+  // Largest single debt the current user owes (drives the "You owe" hero).
+  const myDebts = transactions
+    .filter((t) => t.fromUid === currentUser.uid)
+    .sort((a, b) => b.amount - a.amount);
+  const myCredits = transactions
+    .filter((t) => t.toUid === currentUser.uid)
+    .sort((a, b) => b.amount - a.amount);
+  const topDebt = myDebts[0];
+  const topCredit = myCredits[0];
+
+  // Per-member net balances for the balance chips (creditors first).
+  const memberBalances = [...balances].sort((a, b) => b.netAmount - a.netAmount);
+
+  const createdAgo = createdAgoText(group.createdAt);
 
   return (
-    <div className="flex-1 flex flex-col">
-      <TopBar title={group.name} onBack={() => router.push("/")} />
-      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 pb-28 scroll-momentum">
-        <Card className="p-5 text-center">
-          <p className="text-[13px] text-[var(--label-tertiary)] mb-1 uppercase tracking-wide">
-            Your balance
-          </p>
-          <p className={`text-[34px] font-semibold tracking-tight ${balanceColor}`}>
-            {myBalance > 0.01 && "+"}
-            {formatCurrency(myBalance)}
-          </p>
-          <p className="text-[13px] text-[var(--label-tertiary)] mt-1">
-            {myBalance > 0.01
-              ? "you are owed overall"
-              : myBalance < -0.01
-              ? "you owe overall"
-              : "all settled up"}
-          </p>
-        </Card>
-
-        {myPendingIncoming.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-[var(--label-secondary)]">
-              Pending settlement requests
-            </p>
-            {myPendingIncoming.map((s) => (
-              <Card key={s.id} className="p-3.5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-[15px] text-[var(--label-primary)]">
-                      <span className="font-medium">{memberName(s.fromUid)}</span> sent you{" "}
-                      <span className="font-semibold">{formatCurrency(s.amount)}</span>
-                    </p>
-                    {s.note && <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">{s.note}</p>}
-                    {s.receiptUrls.length > 0 && (
-                      <div className="flex gap-2 mt-1">
-                        {s.receiptUrls.map((url, i) => (
-                          <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-[var(--accent)]">Screenshot {i + 1}</a>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <div className="flex gap-2 mt-2">
-                  <GlassButton size="sm" onClick={() => handleApproveSettlement(s)} className="!px-3 !py-1 text-xs">Approve</GlassButton>
-                  {myCreditors.length > 0 && (
-                    <GlassButton size="sm" variant="ghost" onClick={() => setForwardTarget(s)} className="!px-3 !py-1 text-xs">Forward</GlassButton>
-                  )}
-                  <GlassButton size="sm" variant="ghost" onClick={() => handleRejectSettlement(s)} className="!px-3 !py-1 text-xs">Reject</GlassButton>
-                </div>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        {myPendingOutgoing.length > 0 && (
-          <div className="space-y-2">
-            <p className="text-sm font-medium text-[var(--label-secondary)]">Your pending requests</p>
-            {myPendingOutgoing.map((s) => (
-              <Card key={s.id} className="p-3.5 opacity-70">
-                <p className="text-[15px] text-[var(--label-primary)]">
-                  You sent <span className="font-medium">{memberName(s.toUid)}</span>{" "}
-                  <span className="font-semibold">{formatCurrency(s.amount)}</span>
-                </p>
-                <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">Awaiting approval</p>
-              </Card>
-            ))}
-          </div>
-        )}
-
-        <button
-          onClick={() => setShowGroupInfo(true)}
-          className="w-full text-left glass rounded-[var(--radius-lg)] p-3.5 tap-shrink"
-        >
-          <div className="flex items-center gap-3">
-            {group.photoURL ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={group.photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-                <span className="text-base font-semibold text-[var(--accent)]">{group.name.charAt(0).toUpperCase()}</span>
-              </div>
-            )}
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-[var(--label-primary)] truncate">{group.name}</p>
-              <p className="text-[13px] text-[var(--label-tertiary)]">
-                {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
-                {group.description ? ` · ${group.description}` : ""}
-              </p>
+    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
+      <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="flex items-center justify-between pt-2">
+          <button
+            onClick={() => router.push("/")}
+            aria-label="Back"
+            className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowGroupInfo(true)}
+            aria-label="Group menu"
+            className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="#475569">
+              <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+            </svg>
+          </button>
+        </div>
+      </header>
+      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-40 scroll-momentum space-y-5">
+        {/* Group hero */}
+        <div className="flex items-start gap-4">
+          {group.photoURL ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={group.photoURL} alt="" className="w-[88px] h-[88px] rounded-[22px] object-cover shrink-0 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.3)]" />
+          ) : (
+            <div className="w-[88px] h-[88px] rounded-[22px] bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 shadow-[0_8px_24px_-8px_rgba(79,70,229,0.5)]">
+              <span className="text-[34px] font-bold text-white">{group.name.charAt(0).toUpperCase()}</span>
             </div>
-            <span className="text-[var(--label-tertiary)] text-xl shrink-0 ml-2">›</span>
+          )}
+          <div className="min-w-0 flex-1 pt-1">
+            <div className="flex items-center gap-2">
+              <h1 className="text-[26px] font-extrabold text-slate-800 truncate">{group.name}</h1>
+              {isAdmin && (
+                <button
+                  onClick={handleOpenEditGroup}
+                  aria-label="Edit group"
+                  className="w-7 h-7 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.12)] flex items-center justify-center shrink-0 tap-shrink"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <p className="text-[14px] text-slate-400 mt-1">
+              {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created {createdAgo}
+            </p>
+            <div className="flex items-center mt-2.5">
+              <div className="flex -space-x-2">
+                {group.memberIds.slice(0, 3).map((uid) =>
+                  group.members[uid]?.photoURL ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img key={uid} src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full border-2 border-[var(--background)] object-cover" />
+                  ) : (
+                    <span key={uid} className="w-8 h-8 rounded-full border-2 border-[var(--background)] bg-slate-200 flex items-center justify-center text-[12px] font-medium text-slate-500">
+                      {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
+                    </span>
+                  )
+                )}
+              </div>
+              {group.memberIds.length > 3 && (
+                <span className="ml-1 h-8 min-w-8 px-2 rounded-full bg-indigo-50 flex items-center justify-center text-[12px] font-semibold text-indigo-600">
+                  +{group.memberIds.length - 3}
+                </span>
+              )}
+            </div>
           </div>
-        </button>
-
-        <div className="glass rounded-full p-1 text-sm font-medium flex">
-          <button
-            onClick={() => setTab("balances")}
-            className={`flex-1 rounded-full py-2 transition tap-shrink ${
-              tab === "balances" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"
-            }`}
-          >Balances</button>
-          <button
-            onClick={() => setTab("activity")}
-            className={`flex-1 rounded-full py-2 transition tap-shrink ${
-              tab === "activity" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"
-            }`}
-          >Activity</button>
         </div>
 
-        {tab === "balances" && (
-          <div className="space-y-2.5">
-            {transactions.length === 0 && (
-              <p className="text-center text-[var(--label-tertiary)] text-sm py-10">Everyone is settled up</p>
-            )}
-            {transactions.map((t, i) => (
-              <Card key={i} className="p-3.5 flex items-center justify-between">
-                <p className="text-[15px] text-[var(--label-primary)]">
-                  <span className="font-medium">{memberName(t.fromUid)}</span>{" "}
-                  <span className="text-[var(--label-tertiary)]">owes</span>{" "}
-                  <span className="font-medium">{memberName(t.toUid)}</span>
-                </p>
-                <div className="flex items-center gap-2 shrink-0 ml-2">
-                  <span className="font-semibold text-[var(--label-primary)]">{formatCurrency(t.amount)}</span>
-                  {t.fromUid === currentUser.uid && (
-                    <GlassButton size="sm" onClick={() => handleOpenSettle(t.toUid, t.amount)} className="!px-3 !py-1 text-xs">Settle</GlassButton>
-                  )}
-                </div>
-              </Card>
-            ))}
+        {/* Stats card */}
+        <div className="bg-white rounded-[22px] px-2 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.22)] flex divide-x divide-slate-100">
+          <div className="flex-1 px-3 min-w-0">
+            <p className="text-[12px] text-slate-400">Total spent</p>
+            <p className="text-[17px] font-bold text-indigo-600 mt-0.5 truncate">{formatCurrency(totalSpent)}</p>
+          </div>
+          <div className="flex-1 px-3 min-w-0">
+            <p className="text-[12px] text-slate-400">Expenses</p>
+            <p className="text-[17px] font-bold text-slate-800 mt-0.5">{expenseCount}</p>
+            <p className="text-[11px] text-slate-400">Total</p>
+          </div>
+          <div className="flex-1 px-3 min-w-0">
+            <p className="text-[12px] text-slate-400">Settled</p>
+            <p className="text-[17px] font-bold text-green-600 mt-0.5">{settledPct}%</p>
+            <p className="text-[11px] text-slate-400">{settledCount} of {expenseCount}</p>
+          </div>
+          <div className="flex-1 px-3 min-w-0">
+            <p className="text-[12px] text-slate-400">Last activity</p>
+            <p className="text-[15px] font-bold text-slate-800 mt-0.5 truncate">
+              {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
+            </p>
+            <p className="text-[11px] text-slate-400 truncate">{lastActivityItem?.label || "no activity"}</p>
+          </div>
+        </div>
+
+        {/* You owe / you're owed hero */}
+        {topDebt ? (
+          <div className="relative overflow-hidden rounded-[24px] p-5 bg-gradient-to-br from-rose-50 to-orange-50">
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>🏝️</span>
+            <div className="relative">
+              <p className="text-[12px] font-semibold tracking-wide text-slate-400">YOU OWE</p>
+              <p className="text-[22px] font-extrabold text-slate-800 mt-1">{memberName(topDebt.toUid)}</p>
+              <p className="text-[34px] font-extrabold text-red-500 leading-tight">{formatCurrency(topDebt.amount)}</p>
+              <button
+                onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
+                className="mt-3 inline-flex items-center gap-2 bg-red-500 text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
+              >
+                Settle up now
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ) : topCredit ? (
+          <div className="relative overflow-hidden rounded-[24px] p-5 bg-gradient-to-br from-emerald-50 to-teal-50">
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💰</span>
+            <div className="relative">
+              <p className="text-[12px] font-semibold tracking-wide text-slate-400">YOU&rsquo;LL RECEIVE</p>
+              <p className="text-[22px] font-extrabold text-slate-800 mt-1">{memberName(topCredit.fromUid)}</p>
+              <p className="text-[34px] font-extrabold text-green-600 leading-tight">{formatCurrency(topCredit.amount)}</p>
+              <p className="mt-2 text-[13px] text-slate-400">Waiting for {memberName(topCredit.fromUid)} to settle up.</p>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-[24px] p-6 bg-indigo-50/70 text-center">
+            <p className="text-[18px] font-bold text-slate-800">You&rsquo;re all settled up 🎉</p>
+            <p className="text-[13px] text-slate-400 mt-1">No outstanding balances in this group.</p>
           </div>
         )}
 
-        {tab === "activity" && (
-          <div className="space-y-2.5">
-            {activeExpenses.length === 0 && settlements.length === 0 && (
-              <p className="text-center text-[var(--label-tertiary)] text-sm py-10">No activity yet.</p>
-            )}
-            {[...activeExpenses.map((e) => ({ type: "expense" as const, data: e, ts: e.updatedAt || e.createdAt })),
-              ...editedExpenses.map((e) => ({ type: "expense" as const, data: e, ts: e.updatedAt || e.createdAt })),
-              ...deletedExpenses.map((e) => ({ type: "expense" as const, data: e, ts: e.updatedAt || e.createdAt })),
-              ...settlements.map((s) => ({ type: "settlement" as const, data: s, ts: s.createdAt }))]
-              .sort((a, b) => b.ts - a.ts)
-              .map((item, i) => {
-                if (item.type === "expense") {
-                  const e = item.data;
-                  if (e.editAction === "deleted") {
-                    return (
-                      <div key={i} className="rounded-[var(--radius-lg)] border border-[var(--danger)]/20 bg-[var(--danger)]/5 p-3.5 opacity-60">
-                        <p className="text-[14px] text-[var(--label-tertiary)]">
-                          <span className="font-medium">{memberName(e.createdBy)}</span> deleted expense <span className="line-through">{e.description}</span>
-                        </p>
-                      </div>
-                    );
-                  }
-                  if (e.editAction === "edited") {
-                    return (
-                      <Card key={i} className="p-3.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="font-medium text-[var(--label-primary)] truncate">{e.description}</p>
-                          <p className="font-semibold text-[var(--label-primary)] shrink-0">{formatCurrency(e.amount)}</p>
-                        </div>
-                        <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">
-                          {memberName(e.paidBy)} paid · split {e.splits.length} ways · edited
-                        </p>
-                        {e.receiptUrls.length > 0 && (
-                          <div className="flex gap-2 mt-1">
-                            {e.receiptUrls.map((url, ri) => (
-                              <a key={ri} href={url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-[var(--accent)]">Receipt {ri + 1}</a>
-                            ))}
-                          </div>
-                        )}
-                      </Card>
-                    );
-                  }
-                  return (
-                    <Card key={i} className="p-3.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-[var(--label-primary)] truncate">{e.description}</p>
-                          <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">
-                            {memberName(e.paidBy)} paid · split {e.splits.length} ways
-                          </p>
-                          {e.receiptUrls.length > 0 && (
-                            <div className="flex gap-2 mt-1">
-                              {e.receiptUrls.map((url, ri) => (
-                                <a key={ri} href={url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-[var(--accent)]">Receipt {ri + 1}</a>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span className="font-semibold text-[var(--label-primary)]">{formatCurrency(e.amount)}</span>
-                          {isAdmin && (
-                            <div className="flex gap-1">
-                              <button onClick={() => handleEditExpense(e)} className="text-[11px] text-[var(--accent)] tap-shrink">Edit</button>
-                              <button onClick={() => handleDeleteExpense(e)} className="text-[11px] text-[var(--danger)] tap-shrink">Delete</button>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                }
-
-                const s = item.data;
-                return (
-                  <div key={i} className={`rounded-[var(--radius-lg)] border p-3.5 ${
-                    s.status === "pending" ? "border-[var(--warning)]/25 bg-[var(--warning)]/10"
-                    : s.status === "approved" ? "border-[var(--success)]/25 bg-[var(--success)]/10"
-                    : "border-[var(--danger)]/25 bg-[var(--danger)]/10"
-                  }`}>
-                    <p className="text-[15px] text-[var(--label-primary)]">
-                      {s.status === "pending" ? (
-                        <><span className="font-medium">{memberName(s.fromUid)}</span> requested <span className="font-semibold">{formatCurrency(s.amount)}</span> from <span className="font-medium">{memberName(s.toUid)}</span></>
-                      ) : s.status === "rejected" ? (
-                        <><span className="font-medium">{memberName(s.fromUid)}</span> requested <span className="font-semibold">{formatCurrency(s.amount)}</span> from <span className="font-medium">{memberName(s.toUid)}</span> (rejected)</>
-                      ) : (
-                        <><span className="font-medium">{memberName(s.fromUid)}</span> paid <span className="font-medium">{memberName(s.toUid)}</span> <span className="font-semibold">{formatCurrency(s.amount)}</span></>
-                      )}
-                    </p>
-                    {s.note && <p className="text-[13px] text-[var(--label-tertiary)] mt-0.5">{s.note}</p>}
-                    {s.receiptUrls.length > 0 && (
-                      <div className="flex gap-2 mt-1">
-                        {s.receiptUrls.map((url, ri) => (
-                          <a key={ri} href={url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-[var(--accent)]">Screenshot {ri + 1}</a>
-                        ))}
-                      </div>
+        {/* Balances */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[20px] font-bold text-slate-800">Balances</h2>
+            <button onClick={() => setShowGroupInfo(true)} className="text-[14px] font-semibold text-indigo-600 tap-shrink">View all</button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
+            {memberBalances.map((b) => {
+              const isMe = b.uid === currentUser.uid;
+              const pos = b.netAmount > 0.01;
+              const neg = b.netAmount < -0.01;
+              return (
+                <div
+                  key={b.uid}
+                  className={`shrink-0 w-[190px] rounded-[18px] p-3.5 ${
+                    isMe ? (neg ? "bg-rose-50" : "bg-emerald-50") : "bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5">
+                    {isMe ? (
+                      <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold ${neg ? "bg-red-100 text-red-500" : "bg-green-100 text-green-600"}`}>You</span>
+                    ) : group.members[b.uid]?.photoURL ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={group.members[b.uid].photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
+                    ) : (
+                      <span className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shrink-0 text-[14px] font-medium text-slate-500">
+                        {(group.members[b.uid]?.displayName || "?").charAt(0).toUpperCase()}
+                      </span>
                     )}
-                    {s.status === "pending" && s.toUid === currentUser.uid && (
-                      <div className="flex gap-2 mt-2">
-                        <GlassButton size="sm" onClick={() => handleApproveSettlement(s)} className="!px-3 !py-1 text-xs">Approve</GlassButton>
-                        <GlassButton size="sm" variant="ghost" onClick={() => handleRejectSettlement(s)} className="!px-3 !py-1 text-xs">Reject</GlassButton>
-                      </div>
-                    )}
+                    <div className="min-w-0">
+                      <p className="text-[15px] font-semibold text-slate-800 truncate">{isMe ? "You" : memberName(b.uid)}</p>
+                      <p className={`text-[15px] font-bold ${pos ? "text-green-600" : neg ? "text-red-500" : "text-slate-400"}`}>
+                        {pos ? "+" : neg ? "-" : ""}{formatCurrency(Math.abs(b.netAmount))}
+                      </p>
+                    </div>
                   </div>
-                );
-              })}
+                  <span className={`inline-block mt-2 rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
+                    pos ? "bg-green-100 text-green-700" : neg ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"
+                  }`}>
+                    {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        )}
+        </section>
+
+        {/* Activity */}
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-[20px] font-bold text-slate-800">Activity</h2>
+          </div>
+          <ActivityTimeline
+            expenses={expenses}
+            settlements={settlements}
+            memberName={memberName}
+            currentUid={currentUser.uid}
+            isAdmin={isAdmin}
+            onEditExpense={handleEditExpense}
+            onDeleteExpense={handleDeleteExpense}
+            onApprove={handleApproveSettlement}
+            onReject={handleRejectSettlement}
+            onForward={(s) => setForwardTarget(s)}
+            canForward={myCreditors.length > 0}
+          />
+        </section>
       </main>
 
-      <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto w-full p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <GlassButton variant="primary" size="lg" className="w-full shadow-lg" onClick={() => setShowAddExpense(true)}>
-          + Add Expense
-        </GlassButton>
+      {/* Floating Add Expense */}
+      <div className="fixed z-30 inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] pointer-events-none">
+        <div className="max-w-md mx-auto px-4 flex justify-end">
+          <button
+            onClick={() => setShowAddExpense(true)}
+            className="pointer-events-auto flex flex-col items-center gap-1 tap-shrink"
+          >
+            <span className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)]">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </span>
+            <span className="text-[12px] font-semibold text-indigo-600">Add Expense</span>
+          </button>
+        </div>
       </div>
+
+      <BottomNav active="groups" />
 
       {showAddExpense && (
         <AddExpenseModal group={group} currentUid={currentUser.uid} onClose={() => setShowAddExpense(false)} />
