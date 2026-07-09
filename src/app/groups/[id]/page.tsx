@@ -24,6 +24,7 @@ import GlassModal from "@/components/ui/GlassModal";
 import AddExpenseModal from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
+import AddMemberModal from "@/components/group/AddMemberModal";
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 
@@ -54,6 +55,7 @@ export default function GroupPage() {
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
@@ -181,6 +183,22 @@ export default function GroupPage() {
       await removeMember(group.id, uid);
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to remove member");
+    }
+  }
+
+  async function handleLeaveGroup() {
+    if (!group) return;
+    const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
+    const warn =
+      Math.abs(net) > 0.01
+        ? `\n\nYou still have an unsettled balance of ${formatCurrency(Math.abs(net))} here.`
+        : "";
+    if (!confirm(`Leave "${group.name}"?${warn}`)) return;
+    try {
+      await removeMember(group.id, currentUser.uid);
+      router.push("/");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to leave group");
     }
   }
 
@@ -603,7 +621,17 @@ export default function GroupPage() {
             </div>
 
             <div className="border-t border-[var(--border-subtle)] pt-3">
-              <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">Members</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium text-[var(--label-secondary)]">Members</p>
+                {isAdmin && (
+                  <button
+                    onClick={() => { setShowGroupInfo(false); setShowAddMember(true); }}
+                    className="text-[13px] font-medium text-indigo-600 tap-shrink"
+                  >
+                    + Add member
+                  </button>
+                )}
+              </div>
               <div className="space-y-2">
                 {group.memberIds.map((uid) => (
                   <div key={uid} className="flex items-center gap-2.5">
@@ -635,8 +663,25 @@ export default function GroupPage() {
                 ))}
               </div>
             </div>
+
+            {!isAdmin && (
+              <button
+                onClick={handleLeaveGroup}
+                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink"
+              >
+                Leave group
+              </button>
+            )}
           </div>
         </GlassModal>
+      )}
+
+      {showAddMember && (
+        <AddMemberModal
+          groupId={group.id}
+          existingUids={group.memberIds}
+          onClose={() => setShowAddMember(false)}
+        />
       )}
 
       {/* Edit Group Modal */}

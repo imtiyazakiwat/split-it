@@ -9,10 +9,12 @@ import {
   getDocs,
   query,
   where,
+  limit,
   onSnapshot,
   arrayUnion,
   arrayRemove,
   deleteField,
+  type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
@@ -64,6 +66,68 @@ export async function removeMember(groupId: string, uid: string): Promise<void> 
     memberIds: arrayRemove(uid),
     [`members.${uid}`]: deleteField(),
   });
+}
+
+// Adds an existing app user to the group (admin action).
+export async function addMemberToGroup(
+  groupId: string,
+  uid: string,
+  profile: { displayName: string; email: string; photoURL?: string }
+): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId), {
+    memberIds: arrayUnion(uid),
+    [`members.${uid}`]: stripUndefined(profile),
+  });
+}
+
+export interface UserSearchResult {
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL?: string;
+}
+
+// Prefix search over the users collection by email and display name. Firestore
+// has no substring search, so this matches from the start of the field.
+export async function searchUsers(
+  term: string,
+  excludeUids: string[] = []
+): Promise<UserSearchResult[]> {
+  const t = term.trim();
+  if (t.length < 2) return [];
+  const exclude = new Set(excludeUids);
+  const results = new Map<string, UserSearchResult>();
+
+  const collect = (snap: QuerySnapshot) => {
+    snap.docs.forEach((d) => {
+      if (exclude.has(d.id) || results.has(d.id)) return;
+      const data = d.data();
+      results.set(d.id, {
+        uid: d.id,
+        displayName: (data.displayName as string) || "User",
+        email: (data.email as string) || "",
+        photoURL: (data.photoURL as string) || undefined,
+      });
+    });
+  };
+
+  const emailQ = query(
+    collection(db, "users"),
+    where("email", ">=", t.toLowerCase()),
+    where("email", "<=", t.toLowerCase() + "\uf8ff"),
+    limit(10)
+  );
+  const nameQ = query(
+    collection(db, "users"),
+    where("displayName", ">=", t),
+    where("displayName", "<=", t + "\uf8ff"),
+    limit(10)
+  );
+
+  const [emailSnap, nameSnap] = await Promise.all([getDocs(emailQ), getDocs(nameQ)]);
+  collect(emailSnap);
+  collect(nameSnap);
+  return Array.from(results.values()).slice(0, 10);
 }
 
 // Deletes the group document. Note: Firestore does not cascade, so the
