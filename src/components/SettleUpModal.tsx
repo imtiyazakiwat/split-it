@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Expense } from "@/lib/types";
+import { Expense, SettlementMode } from "@/lib/types";
 import { addSettlementRequest } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
@@ -20,6 +20,7 @@ export default function SettleUpModal({
   toName,
   suggestedAmount,
   expensesOwed,
+  mode,
   onClose,
 }: {
   groupId: string;
@@ -28,8 +29,14 @@ export default function SettleUpModal({
   toName: string;
   suggestedAmount: number;
   expensesOwed: Expense[];
+  mode: SettlementMode;
   onClose: () => void;
 }) {
+  // The per-expense picker only makes sense in "direct" mode, where the person
+  // you pay is tied to the expenses they actually paid. In "simplified" mode
+  // the payee may not have paid any expense you shared, so we settle the net.
+  const showPicker = mode === "direct" && expensesOwed.length > 0;
+
   const [items, setItems] = useState<ExpenseWithSelection[]>(
     expensesOwed.map((e) => ({ expense: e, selected: false }))
   );
@@ -47,7 +54,8 @@ export default function SettleUpModal({
       return sum + (split?.amount || 0);
     }, 0);
 
-  const displayAmount = useCustom ? (parseFloat(customAmount) || 0) : selectedTotal;
+  const baseAmount = showPicker ? selectedTotal : suggestedAmount;
+  const displayAmount = useCustom ? (parseFloat(customAmount) || 0) : baseAmount;
 
   function toggleItem(index: number) {
     setItems((prev) => {
@@ -69,9 +77,15 @@ export default function SettleUpModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const amt = useCustom ? (parseFloat(customAmount) || 0) : selectedTotal;
+    const amt = useCustom ? (parseFloat(customAmount) || 0) : baseAmount;
     if (amt <= 0) {
-      setError(useCustom ? "Enter a valid amount." : "Select at least one expense.");
+      setError(
+        useCustom
+          ? "Enter a valid amount."
+          : showPicker
+          ? "Select at least one expense."
+          : "Nothing to settle."
+      );
       return;
     }
     setBusy(true);
@@ -81,9 +95,9 @@ export default function SettleUpModal({
       if (receiptFiles.length > 0) {
         receiptUrls = await uploadMultipleReceipts(groupId, receiptFiles);
       }
-      const expenseIds = items
-        .filter((i) => i.selected)
-        .map((i) => i.expense.id);
+      const expenseIds = showPicker
+        ? items.filter((i) => i.selected).map((i) => i.expense.id)
+        : [];
       await addSettlementRequest(groupId, {
         fromUid,
         toUid,
@@ -103,6 +117,7 @@ export default function SettleUpModal({
   return (
     <GlassModal title={`Settle with ${toName}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
+        {showPicker && (
         <div>
           <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
             Select expenses to settle
@@ -137,6 +152,7 @@ export default function SettleUpModal({
             })}
           </div>
         </div>
+        )}
 
         <div className="flex items-center gap-3">
           <span className="text-sm font-medium text-[var(--label-secondary)]">
@@ -147,7 +163,7 @@ export default function SettleUpModal({
             onClick={() => setUseCustom(!useCustom)}
             className="text-[13px] text-[var(--accent)] tap-shrink"
           >
-            {useCustom ? "Use selected" : "Custom amount"}
+            {useCustom ? (showPicker ? "Use selected" : "Use suggested") : "Custom amount"}
           </button>
         </div>
 

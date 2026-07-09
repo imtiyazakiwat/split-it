@@ -14,6 +14,8 @@ export interface GroupMember {
   upiId?: string;
 }
 
+export type SettlementMode = "simplified" | "direct";
+
 export interface Group {
   id: string;
   name: string;
@@ -24,6 +26,9 @@ export interface Group {
   createdBy: string;
   createdAt: number;
   inviteCode: string;
+  // "simplified" (default): debts are auto-chained into the fewest payments.
+  // "direct": you settle each person based on the expenses you actually shared.
+  settlementMode?: SettlementMode;
 }
 
 export type SplitType = "equal" | "exact" | "percentage";
@@ -65,6 +70,9 @@ export interface Settlement {
   note?: string;
   receiptUrls: string[];
   expenseIds?: string[];
+  // When set, this settlement was created by forwarding an incoming payment
+  // (option b): it points to the settlement whose funds are being passed on.
+  forwardedFromSettlementId?: string;
 }
 
 export interface Balance {

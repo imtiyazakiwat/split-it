@@ -12,8 +12,8 @@ import {
   updateExpense,
   deleteExpense,
 } from "@/lib/firestore";
-import { Group, Expense, Settlement } from "@/lib/types";
-import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
+import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
+import { computeBalances, simplifyDebts, computeDirectDebts, formatCurrency } from "@/lib/balance";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { showLocalNotification } from "@/lib/notifications";
 import TopBar from "@/components/TopBar";
@@ -23,6 +23,7 @@ import { GlassField, GlassSelect } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
 import AddExpenseModal from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
+import ForwardModal from "@/components/ForwardModal";
 
 export default function GroupPage() {
   const { id } = useParams<{ id: string }>();
@@ -33,11 +34,13 @@ export default function GroupPage() {
   const [settlements, setSettlements] = useState<Settlement[]>([]);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
+  const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
   const [tab, setTab] = useState<"balances" | "activity">("balances");
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [editSettlementMode, setEditSettlementMode] = useState<SettlementMode>("simplified");
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
   const [editPhotoPreview, setEditPhotoPreview] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -71,9 +74,18 @@ export default function GroupPage() {
   const memberName = (uid: string) =>
     uid === currentUser.uid ? "You" : group?.members[uid]?.displayName || "Unknown";
 
-  const balances = computeBalances(group.memberIds, expenses.filter((e) => !e.editAction), settlements);
+  const balanceExpenses = expenses.filter((e) => !e.editAction);
+  const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   const myBalance = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
-  const simplified = simplifyDebts(balances);
+  const settlementMode: SettlementMode = group.settlementMode || "simplified";
+  const transactions =
+    settlementMode === "direct"
+      ? computeDirectDebts(group.memberIds, balanceExpenses, settlements)
+      : simplifyDebts(balances);
+  // People the current user owes (used for the "forward payment" flow).
+  const myCreditors = transactions
+    .filter((t) => t.fromUid === currentUser.uid)
+    .map((t) => ({ uid: t.toUid, name: memberName(t.toUid), amount: t.amount }));
 
   const pendingSettlements = settlements.filter((s) => s.status === "pending");
   const myPendingIncoming = pendingSettlements.filter((s) => s.toUid === currentUser.uid);
@@ -88,8 +100,22 @@ export default function GroupPage() {
 
   function getExpensesOwedTo(toUid: string): Expense[] {
     if (!group) return [];
+    // Expenses already covered by a prior settlement to this person shouldn't
+    // reappear in the picker (pending or approved requests both count; only
+    // rejected ones are still outstanding).
+    const settledExpenseIds = new Set<string>();
+    settlements.forEach((s) => {
+      if (
+        s.fromUid === currentUser.uid &&
+        s.toUid === toUid &&
+        s.status !== "rejected"
+      ) {
+        (s.expenseIds || []).forEach((id) => settledExpenseIds.add(id));
+      }
+    });
     return expenses.filter((e) => {
       if (e.editAction) return false;
+      if (settledExpenseIds.has(e.id)) return false;
       const mySplit = e.splits.find((s) => s.uid === currentUser.uid);
       return e.paidBy === toUid && mySplit && mySplit.amount > 0;
     });
@@ -114,6 +140,7 @@ export default function GroupPage() {
     if (!group) return;
     setEditName(group.name);
     setEditDesc(group.description || "");
+    setEditSettlementMode(group.settlementMode || "simplified");
     setEditPhotoPreview(group.photoURL || "");
     setEditPhotoFile(null);
     setShowEditGroup(true);
@@ -146,6 +173,7 @@ export default function GroupPage() {
         name: editName.trim(),
         description: editDesc.trim() || undefined,
         photoURL,
+        settlementMode: editSettlementMode,
       });
       setShowEditGroup(false);
     } catch (err) {
@@ -260,6 +288,9 @@ export default function GroupPage() {
                 </div>
                 <div className="flex gap-2 mt-2">
                   <GlassButton size="sm" onClick={() => handleApproveSettlement(s)} className="!px-3 !py-1 text-xs">Approve</GlassButton>
+                  {myCreditors.length > 0 && (
+                    <GlassButton size="sm" variant="ghost" onClick={() => setForwardTarget(s)} className="!px-3 !py-1 text-xs">Forward</GlassButton>
+                  )}
                   <GlassButton size="sm" variant="ghost" onClick={() => handleRejectSettlement(s)} className="!px-3 !py-1 text-xs">Reject</GlassButton>
                 </div>
               </Card>
@@ -323,10 +354,10 @@ export default function GroupPage() {
 
         {tab === "balances" && (
           <div className="space-y-2.5">
-            {simplified.length === 0 && (
+            {transactions.length === 0 && (
               <p className="text-center text-[var(--label-tertiary)] text-sm py-10">Everyone is settled up</p>
             )}
-            {simplified.map((t, i) => (
+            {transactions.map((t, i) => (
               <Card key={i} className="p-3.5 flex items-center justify-between">
                 <p className="text-[15px] text-[var(--label-primary)]">
                   <span className="font-medium">{memberName(t.fromUid)}</span>{" "}
@@ -471,7 +502,20 @@ export default function GroupPage() {
           toName={memberName(settleTarget.toUid)}
           suggestedAmount={settleTarget.amount}
           expensesOwed={getExpensesOwedTo(settleTarget.toUid)}
+          mode={settlementMode}
           onClose={() => setSettleTarget(null)}
+        />
+      )}
+
+      {forwardTarget && (
+        <ForwardModal
+          groupId={group.id}
+          meUid={currentUser.uid}
+          incomingId={forwardTarget.id}
+          incomingAmount={forwardTarget.amount}
+          fromName={memberName(forwardTarget.fromUid)}
+          creditors={myCreditors}
+          onClose={() => setForwardTarget(null)}
         />
       )}
 
@@ -555,6 +599,42 @@ export default function GroupPage() {
             </div>
             <GlassField label="Group name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Group name" />
             <GlassField label="Description" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Group description (optional)" />
+
+            <div>
+              <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1.5">
+                Settlement style
+              </label>
+              <div className="glass rounded-full p-1 text-sm font-medium flex">
+                <button
+                  type="button"
+                  onClick={() => setEditSettlementMode("simplified")}
+                  className={`flex-1 rounded-full py-2 transition tap-shrink ${
+                    editSettlementMode === "simplified"
+                      ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]"
+                      : "text-[var(--label-secondary)]"
+                  }`}
+                >
+                  Simplified
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditSettlementMode("direct")}
+                  className={`flex-1 rounded-full py-2 transition tap-shrink ${
+                    editSettlementMode === "direct"
+                      ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]"
+                      : "text-[var(--label-secondary)]"
+                  }`}
+                >
+                  Direct
+                </button>
+              </div>
+              <p className="text-[12px] text-[var(--label-tertiary)] mt-1.5">
+                {editSettlementMode === "simplified"
+                  ? "Debts are chained into the fewest payments — you may pay someone you didn't directly share an expense with."
+                  : "You settle each person based on the expenses you actually shared with them."}
+              </p>
+            </div>
+
             {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
             <GlassButton disabled={editBusy} className="w-full">{editBusy ? "Saving…" : "Save"}</GlassButton>
           </form>

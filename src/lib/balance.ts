@@ -64,6 +64,57 @@ export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
   return transactions;
 }
 
+/**
+ * Direct (non-simplified) debts: each person owes another based only on the
+ * expenses they actually shared, netted pairwise. Approved settlements between
+ * the two people reduce what the payer owes the payee. Unlike simplifyDebts,
+ * this never routes a debt through a third party.
+ */
+export function computeDirectDebts(
+  memberIds: string[],
+  expenses: Expense[],
+  settlements: Settlement[]
+): SimplifiedTransaction[] {
+  // owes[a][b] = how much a owes b
+  const owes: Record<string, Record<string, number>> = {};
+  const add = (a: string, b: string, amount: number) => {
+    if (!owes[a]) owes[a] = {};
+    owes[a][b] = (owes[a][b] || 0) + amount;
+  };
+
+  for (const expense of expenses) {
+    if (expense.editAction) continue;
+    for (const split of expense.splits) {
+      if (split.uid === expense.paidBy) continue;
+      add(split.uid, expense.paidBy, split.amount);
+    }
+  }
+
+  for (const s of settlements) {
+    if (s.status !== "approved") continue;
+    // s.fromUid paid s.toUid, reducing what fromUid owes toUid.
+    add(s.fromUid, s.toUid, -s.amount);
+  }
+
+  const transactions: SimplifiedTransaction[] = [];
+  const seen = new Set<string>();
+  for (const a of memberIds) {
+    for (const b of memberIds) {
+      if (a === b) continue;
+      const key = [a, b].sort().join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0);
+      if (net > 0.01) {
+        transactions.push({ fromUid: a, toUid: b, amount: Math.round(net * 100) / 100 });
+      } else if (net < -0.01) {
+        transactions.push({ fromUid: b, toUid: a, amount: Math.round(-net * 100) / 100 });
+      }
+    }
+  }
+  return transactions;
+}
+
 export function splitEqually(amount: number, memberIds: string[]): { uid: string; amount: number }[] {
   const share = Math.floor((amount / memberIds.length) * 100) / 100;
   const splits = memberIds.map((uid) => ({ uid, amount: share }));

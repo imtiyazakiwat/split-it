@@ -15,7 +15,7 @@ import {
 import { db } from "./firebase";
 import {
   Group, Expense, Settlement, SettlementStatus,
-  SplitType, ExpenseSplit, EditAction,
+  SplitType, ExpenseSplit, EditAction, SettlementMode,
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 
@@ -38,18 +38,20 @@ export async function createGroup(
     createdBy: creatorUid,
     createdAt: Date.now(),
     inviteCode,
+    settlementMode: "simplified",
   });
   return groupRef.id;
 }
 
 export async function updateGroupProfile(
   groupId: string,
-  data: { name?: string; description?: string; photoURL?: string }
+  data: { name?: string; description?: string; photoURL?: string; settlementMode?: SettlementMode }
 ): Promise<void> {
   const payload: Record<string, string | undefined> = {};
   if (data.name !== undefined) payload.name = data.name;
   if (data.description !== undefined) payload.description = data.description;
   if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
+  if (data.settlementMode !== undefined) payload.settlementMode = data.settlementMode;
   await updateDoc(doc(db, "groups", groupId), payload);
 }
 
@@ -257,6 +259,7 @@ export async function addSettlementRequest(
     note?: string;
     receiptUrls?: string[];
     expenseIds?: string[];
+    forwardedFromSettlementId?: string;
   }
 ): Promise<string> {
   const ref = await addDoc(collection(db, "groups", groupId, "settlements"), {
