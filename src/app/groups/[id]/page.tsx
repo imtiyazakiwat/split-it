@@ -11,9 +11,10 @@ import {
   updateSettlementStatus,
   updateExpense,
   deleteExpense,
+  deleteGroup,
 } from "@/lib/firestore";
 import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
-import { computeBalances, simplifyDebts, computeDirectDebts, formatCurrency } from "@/lib/balance";
+import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { showLocalNotification } from "@/lib/notifications";
 import TopBar from "@/components/TopBar";
@@ -77,11 +78,13 @@ export default function GroupPage() {
   const balanceExpenses = expenses.filter((e) => !e.editAction);
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   const myBalance = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
-  const settlementMode: SettlementMode = group.settlementMode || "simplified";
-  const transactions =
-    settlementMode === "direct"
-      ? computeDirectDebts(group.memberIds, balanceExpenses, settlements)
-      : simplifyDebts(balances);
+  // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
+  // per-expense picker showed gross expense amounts instead of the pairwise
+  // net, letting you overpay. Revisit later; for now always use simplified.
+  //   const transactions = settlementMode === "direct"
+  //     ? computeDirectDebts(group.memberIds, balanceExpenses, settlements)
+  //     : simplifyDebts(balances);
+  const transactions = simplifyDebts(balances);
   // People the current user owes (used for the "forward payment" flow).
   const myCreditors = transactions
     .filter((t) => t.fromUid === currentUser.uid)
@@ -134,6 +137,25 @@ export default function GroupPage() {
   function handleRejectSettlement(s: Settlement) {
     if (!group) return;
     updateSettlementStatus(group.id, s.id, "rejected");
+  }
+
+  async function handleDeleteGroup() {
+    if (!group) return;
+    if (
+      !confirm(
+        `Delete "${group.name}"? This removes the group and its balances for everyone in it. This can't be undone.`
+      )
+    )
+      return;
+    setEditBusy(true);
+    setEditError("");
+    try {
+      await deleteGroup(group.id);
+      router.push("/");
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to delete group");
+      setEditBusy(false);
+    }
   }
 
   function handleOpenEditGroup() {
@@ -500,9 +522,9 @@ export default function GroupPage() {
           fromUid={currentUser.uid}
           toUid={settleTarget.toUid}
           toName={memberName(settleTarget.toUid)}
+          toUpiId={group.members[settleTarget.toUid]?.upiId}
           suggestedAmount={settleTarget.amount}
           expensesOwed={getExpensesOwedTo(settleTarget.toUid)}
-          mode={settlementMode}
           onClose={() => setSettleTarget(null)}
         />
       )}
@@ -600,43 +622,42 @@ export default function GroupPage() {
             <GlassField label="Group name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Group name" />
             <GlassField label="Description" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Group description (optional)" />
 
+            {/* Settlement style toggle temporarily hidden — "direct" mode is
+                buggy (see NOTE in the balance calculation). Re-enable once the
+                per-expense picker nets amounts correctly.
             <div>
               <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1.5">
                 Settlement style
               </label>
               <div className="glass rounded-full p-1 text-sm font-medium flex">
-                <button
-                  type="button"
-                  onClick={() => setEditSettlementMode("simplified")}
-                  className={`flex-1 rounded-full py-2 transition tap-shrink ${
-                    editSettlementMode === "simplified"
-                      ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]"
-                      : "text-[var(--label-secondary)]"
-                  }`}
-                >
+                <button type="button" onClick={() => setEditSettlementMode("simplified")}
+                  className={`flex-1 rounded-full py-2 transition tap-shrink ${editSettlementMode === "simplified" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"}`}>
                   Simplified
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setEditSettlementMode("direct")}
-                  className={`flex-1 rounded-full py-2 transition tap-shrink ${
-                    editSettlementMode === "direct"
-                      ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]"
-                      : "text-[var(--label-secondary)]"
-                  }`}
-                >
+                <button type="button" onClick={() => setEditSettlementMode("direct")}
+                  className={`flex-1 rounded-full py-2 transition tap-shrink ${editSettlementMode === "direct" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"}`}>
                   Direct
                 </button>
               </div>
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-1.5">
-                {editSettlementMode === "simplified"
-                  ? "Debts are chained into the fewest payments — you may pay someone you didn't directly share an expense with."
-                  : "You settle each person based on the expenses you actually shared with them."}
-              </p>
             </div>
+            */}
 
             {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
             <GlassButton disabled={editBusy} className="w-full">{editBusy ? "Saving…" : "Save"}</GlassButton>
+
+            <div className="border-t border-[var(--border-subtle)] pt-3">
+              <button
+                type="button"
+                onClick={handleDeleteGroup}
+                disabled={editBusy}
+                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink disabled:opacity-50"
+              >
+                Delete Group
+              </button>
+              <p className="text-[12px] text-[var(--label-tertiary)] mt-1.5 text-center">
+                Permanently removes this group for everyone. This can&apos;t be undone.
+              </p>
+            </div>
           </form>
         </GlassModal>
       )}

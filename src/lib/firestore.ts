@@ -55,6 +55,13 @@ export async function updateGroupProfile(
   await updateDoc(doc(db, "groups", groupId), payload);
 }
 
+// Deletes the group document. Note: Firestore does not cascade, so the
+// expenses/settlements subcollections are orphaned (they become unreadable
+// once the group is gone, since rules check group membership on the parent).
+export async function deleteGroup(groupId: string): Promise<void> {
+  await deleteDoc(doc(db, "groups", groupId));
+}
+
 export async function joinGroupByCode(
   inviteCode: string,
   uid: string,

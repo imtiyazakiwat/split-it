@@ -29,7 +29,7 @@ service cloud.firestore {
         (isSignedIn()
           && request.resource.data.memberIds.size() == resource.data.memberIds.size() + 1
           && request.auth.uid in request.resource.data.memberIds);
-      allow delete: if false;
+      allow delete: if isSignedIn() && request.auth.uid == resource.data.createdBy;
 
       match /expenses/{expenseId} {
         allow read: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data);
