@@ -1,52 +1,49 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getMessaging } from "@/lib/firebase-admin";
 
 /**
  * POST /api/notify
  *
- * Sends a push notification via Firebase Cloud Messaging.
- * Requires the FCM server key configured in environment:
- *   FCM_SERVER_KEY —可从 Firebase 控制台 > Cloud Messaging > 服务器密钥获取
+ * Sends a push notification via Firebase Cloud Messaging HTTP v1 API
+ * using the Firebase Admin SDK (OAuth 2.0 / service account auth).
  *
- * Body: { token: string, title: string, body: string, link?: string, icon?: string }
+ * Server-side env vars required:
+ *   FIREBASE_CLIENT_EMAIL  — from Firebase Console > Service Accounts
+ *   FIREBASE_PRIVATE_KEY   — the private key from the same service account JSON
+ *
+ * Body: { token: string, title: string, body: string, link?: string }
  */
 export async function POST(req: NextRequest) {
   try {
-    const { token, title, body, link, icon } = await req.json();
-    if (!token || !title || !body) {
-      return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
-    }
+    const { token, title, body, link } = await req.json();
 
-    const serverKey = process.env.FCM_SERVER_KEY;
-    if (!serverKey) {
+    if (!token || !title || !body) {
       return NextResponse.json(
-        { error: "FCM_SERVER_KEY not configured. Set it in .env.local" },
-        { status: 501 }
+        { error: "Missing required fields: token, title, body" },
+        { status: 400 }
       );
     }
 
-    const fcmRes = await fetch("https://fcm.googleapis.com/fcm/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `key=${serverKey}`,
-      },
-      body: JSON.stringify({
-        to: token,
-        notification: { title, body, icon: icon || "/icon-192.png" },
-        data: { link: link || "" },
-      }),
-    });
+    const messaging = getMessaging();
 
-    if (!fcmRes.ok) {
-      const text = await fcmRes.text();
-      return NextResponse.json({ error: `FCM error: ${text}` }, { status: 502 });
+    const message: {
+      token: string;
+      notification: { title: string; body: string };
+      webpush?: { fcmOptions: { link: string } };
+    } = {
+      token,
+      notification: { title, body },
+    };
+
+    if (link) {
+      message.webpush = { fcmOptions: { link } };
     }
 
-    return NextResponse.json({ success: true });
+    const response = await messaging.send(message);
+
+    return NextResponse.json({ success: true, messageId: response });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Internal error" },
-      { status: 500 }
-    );
+    const message = err instanceof Error ? err.message : "Internal error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

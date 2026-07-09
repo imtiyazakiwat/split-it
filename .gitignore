@@ -35,6 +35,10 @@ yarn-error.log*
 !.env*.example
 env.txt
 
+# Firebase service account (DO NOT COMMIT)
+serviceAccountKey.json
+firebase-service-account.json
+
 # vercel
 .vercel
 
