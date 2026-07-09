@@ -12,6 +12,7 @@ import {
   updateExpense,
   deleteExpense,
   deleteGroup,
+  removeMember,
 } from "@/lib/firestore";
 import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
 import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
@@ -162,6 +163,24 @@ export default function GroupPage() {
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to delete group");
       setEditBusy(false);
+    }
+  }
+
+  async function handleRemoveMember(uid: string) {
+    if (!group) return;
+    const name = memberName(uid);
+    const net = balances.find((b) => b.uid === uid)?.netAmount ?? 0;
+    const warn =
+      Math.abs(net) > 0.01
+        ? `\n\nHeads up: ${name} still has an unsettled balance of ${formatCurrency(
+            Math.abs(net)
+          )}. Removing them drops it from the group's balances.`
+        : "";
+    if (!confirm(`Remove ${name} from "${group.name}"?${warn}`)) return;
+    try {
+      await removeMember(group.id, uid);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to remove member");
     }
   }
 
@@ -598,12 +617,20 @@ export default function GroupPage() {
                         </span>
                       </div>
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-[14px] text-[var(--label-primary)] truncate">
                         {memberName(uid)}{uid === group.createdBy && <span className="text-[11px] text-[var(--label-tertiary)] ml-1">(Admin)</span>}
                       </p>
                       <p className="text-[12px] text-[var(--label-tertiary)] truncate">{group.members[uid]?.email || ""}</p>
                     </div>
+                    {isAdmin && uid !== group.createdBy && (
+                      <button
+                        onClick={() => handleRemoveMember(uid)}
+                        className="text-[12px] font-medium text-[var(--danger)] shrink-0 tap-shrink px-2 py-1"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

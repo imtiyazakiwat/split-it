@@ -11,6 +11,8 @@ import {
   where,
   onSnapshot,
   arrayUnion,
+  arrayRemove,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
@@ -53,6 +55,15 @@ export async function updateGroupProfile(
   if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
   if (data.settlementMode !== undefined) payload.settlementMode = data.settlementMode;
   await updateDoc(doc(db, "groups", groupId), payload);
+}
+
+// Removes a member from the group (admin action). Their expenses/settlements
+// stay in history, but they lose access and drop off the member list.
+export async function removeMember(groupId: string, uid: string): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId), {
+    memberIds: arrayRemove(uid),
+    [`members.${uid}`]: deleteField(),
+  });
 }
 
 // Deletes the group document. Note: Firestore does not cascade, so the
