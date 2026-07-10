@@ -6,6 +6,7 @@ import PwaBootstrap from "@/components/PwaBootstrap";
 import NotificationSetup from "@/components/NotificationSetup";
 import SplashGate from "@/components/SplashGate";
 import { ToastProvider } from "@/components/ui/Toast";
+import PageTransition from "@/components/PageTransition";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -70,7 +71,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--background)]">
         <AuthProvider>
           <ToastProvider>
-            {children}
+            <PageTransition>{children}</PageTransition>
             <SplashGate />
             <PwaBootstrap />
             <NotificationSetup />

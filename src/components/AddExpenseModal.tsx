@@ -208,20 +208,32 @@ export default function AddExpenseModal({
                     key={uid}
                     type="button"
                     onClick={() => toggleSplit(uid)}
+                    aria-pressed={inSplit}
                     className={`flex items-center gap-1.5 rounded-full border pl-1.5 pr-2.5 py-1 tap-shrink ${
-                      inSplit ? "bg-[var(--surface)] border-[var(--border-subtle)]" : "bg-[var(--fill-soft)] border-[var(--border-subtle)] opacity-50"
+                      inSplit
+                        ? "bg-[var(--tint-accent)] border-[var(--brand)]"
+                        : "bg-[var(--surface)] border-[var(--border-subtle)]"
                     }`}
                   >
-                    {group.members[uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[uid].photoURL} alt="" className="w-6 h-6 rounded-full object-cover" />
-                    ) : (
-                      <span className="w-6 h-6 rounded-full bg-[var(--fill)] flex items-center justify-center text-[10px] font-medium text-[var(--text-secondary)]">
-                        {memberName(uid).charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <span className="text-[13px] font-medium text-[var(--text-primary)]">{memberName(uid)}</span>
-                    <span className="text-[var(--text-tertiary)] text-[15px] leading-none">{inSplit ? "×" : "+"}</span>
+                    <span className="relative shrink-0">
+                      {group.members[uid]?.photoURL ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={group.members[uid].photoURL} alt="" className="w-6 h-6 rounded-full object-cover" />
+                      ) : (
+                        <span className="w-6 h-6 rounded-full bg-[var(--fill)] flex items-center justify-center text-[10px] font-medium text-[var(--text-secondary)]">
+                          {memberName(uid).charAt(0).toUpperCase()}
+                        </span>
+                      )}
+                      {inSplit && (
+                        <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[var(--brand-solid)] border border-[var(--surface)] flex items-center justify-center">
+                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+                        </span>
+                      )}
+                    </span>
+                    <span className={`text-[13px] font-medium ${inSplit ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>
+                      {memberName(uid)}
+                    </span>
+                    {!inSplit && <span className="text-[var(--text-tertiary)] text-[15px] leading-none">+</span>}
                   </button>
                 );
               })}
