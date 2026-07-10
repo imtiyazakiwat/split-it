@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 
 type Tab = "groups" | "activity" | "profile";
 
-const INDIGO = "#4f46e5";
+const INDIGO = "var(--brand)";
 
 function GroupsIcon({ active }: { active: boolean }) {
   return (
@@ -60,19 +60,19 @@ export default function BottomNav({ active }: { active: Tab }) {
               key={id}
               onClick={() => router.push(href)}
               className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-[18px] tap-shrink ${
-                isActive ? "bg-indigo-50" : ""
+                isActive ? "bg-[var(--tint-accent)]" : ""
               }`}
             >
               <Icon active={isActive} />
               <span
                 className={`text-[11px] font-medium ${
-                  isActive ? "text-indigo-600" : "text-[var(--label-secondary)]"
+                  isActive ? "text-[var(--brand)]" : "text-[var(--label-secondary)]"
                 }`}
               >
                 {label}
               </span>
               <span
-                className={`h-1 w-1 rounded-full ${isActive ? "bg-indigo-600" : "bg-transparent"}`}
+                className={`h-1 w-1 rounded-full ${isActive ? "bg-[var(--brand)]" : "bg-transparent"}`}
               />
             </button>
           );

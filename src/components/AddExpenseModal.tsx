@@ -6,9 +6,11 @@ import { addExpense } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
+import { useToast } from "@/components/ui/Toast";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 
 function CategoryIcon({ id, active }: { id: string; active: boolean }) {
-  const stroke = active ? "#4f46e5" : "#64748b";
+  const stroke = active ? "var(--brand)" : "var(--text-secondary)";
   const common = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
   switch (id) {
     case "meal":
@@ -45,11 +47,13 @@ export default function AddExpenseModal({
   const [receiptFiles, setReceiptFiles] = useState<File[]>(prefillReceipt ? [prefillReceipt] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
   const eachPays = splitMembers.length > 0 ? parsedAmount / splitMembers.length : 0;
   const memberName = (uid: string) => (uid === currentUid ? "You" : group.members[uid]?.displayName || "User");
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.id === category)?.label || "Expense";
+  const categoryEmoji = EXPENSE_CATEGORIES.find((c) => c.id === category)?.emoji || "🧾";
 
   function toggleSplit(uid: string) {
     setSplitMembers((prev) => (prev.includes(uid) ? prev.filter((m) => m !== uid) : [...prev, uid]));
@@ -83,6 +87,7 @@ export default function AddExpenseModal({
         receiptUrls,
         category,
       });
+      showToast({ message: `${categoryEmoji} Expense added · ${formatCurrency(parsedAmount)}` });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add expense");
@@ -97,22 +102,22 @@ export default function AddExpenseModal({
         <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-36">
           {/* Header */}
           <div className="flex items-center justify-between pt-2">
-            <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+            <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
             <div className="text-center">
-              <p className="text-[18px] font-bold text-slate-800">Add Expense</p>
-              <p className="text-[13px] text-slate-400">{group.name}</p>
+              <p className="text-[18px] font-bold text-[var(--text-primary)]">Add Expense</p>
+              <p className="text-[13px] text-[var(--text-tertiary)]">{group.name}</p>
             </div>
             <div className="w-11 h-11" />
           </div>
 
           {/* Amount hero */}
           <div className="relative mt-5">
-            <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[52px] opacity-60 select-none pointer-events-none" aria-hidden>🏝️</span>
-            <p className="text-[15px] font-semibold text-indigo-600">How much was it?</p>
+            <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[52px] opacity-60 select-none pointer-events-none" aria-hidden>{categoryEmoji}</span>
+            <p className="text-[15px] font-semibold text-[var(--brand)]">How much was it?</p>
             <div className="flex items-center mt-1">
-              <span className="text-[46px] font-extrabold text-slate-800">₹</span>
+              <span className="text-[46px] font-extrabold text-[var(--text-primary)]">₹</span>
               <input
                 type="number"
                 inputMode="decimal"
@@ -121,17 +126,17 @@ export default function AddExpenseModal({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 placeholder="0"
-                className="w-full bg-transparent outline-none text-[46px] font-extrabold text-slate-800 placeholder:text-slate-300"
+                className="w-full bg-transparent outline-none text-[46px] font-extrabold text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
               />
             </div>
-            <span className="inline-flex items-center gap-1 mt-2 rounded-full bg-slate-100 px-3 py-1 text-[13px] font-semibold text-slate-500">
+            <span className="inline-flex items-center gap-1 mt-2 rounded-full bg-[var(--fill)] px-3 py-1 text-[13px] font-semibold text-[var(--text-secondary)]">
               INR
             </span>
           </div>
 
           {/* Category */}
-          <div className="mt-6 bg-white rounded-[22px] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.2)]">
-            <p className="text-[15px] font-semibold text-slate-700 mb-3">What was this for?</p>
+          <div className="mt-6 bg-[var(--surface)] rounded-[22px] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.2)]">
+            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">What was this for?</p>
             <div className="grid grid-cols-3 gap-2.5">
               {EXPENSE_CATEGORIES.map((c) => {
                 const active = category === c.id;
@@ -141,11 +146,11 @@ export default function AddExpenseModal({
                     type="button"
                     onClick={() => setCategory(c.id)}
                     className={`flex flex-col items-center gap-1.5 rounded-2xl py-3 border tap-shrink ${
-                      active ? "bg-indigo-50 border-indigo-200" : "bg-white border-slate-100"
+                      active ? "bg-[var(--tint-accent)] border-[var(--brand)]" : "bg-[var(--surface)] border-[var(--border-subtle)]"
                     }`}
                   >
                     <CategoryIcon id={c.id} active={active} />
-                    <span className={`text-[12px] font-medium ${active ? "text-indigo-600" : "text-slate-500"}`}>{c.label}</span>
+                    <span className={`text-[12px] font-medium ${active ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>{c.label}</span>
                   </button>
                 );
               })}
@@ -154,7 +159,7 @@ export default function AddExpenseModal({
 
           {/* Who paid */}
           <div className="mt-6">
-            <p className="text-[15px] font-semibold text-slate-700 mb-3">Who paid?</p>
+            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">Who paid?</p>
             <div className="flex gap-4 overflow-x-auto scroll-momentum -mx-5 px-5 pb-1">
               {group.memberIds.map((uid) => {
                 const active = paidBy === uid;
@@ -168,19 +173,19 @@ export default function AddExpenseModal({
                     <span className="relative">
                       {group.members[uid]?.photoURL ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={group.members[uid].photoURL} alt="" className={`w-14 h-14 rounded-full object-cover ${active ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`} />
+                        <img src={group.members[uid].photoURL} alt="" className={`w-14 h-14 rounded-full object-cover ${active ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-[var(--background)]" : ""}`} />
                       ) : (
-                        <span className={`w-14 h-14 rounded-full bg-slate-200 flex items-center justify-center text-[18px] font-semibold text-slate-500 ${active ? "ring-2 ring-indigo-500 ring-offset-2" : ""}`}>
+                        <span className={`w-14 h-14 rounded-full bg-[var(--fill)] flex items-center justify-center text-[18px] font-semibold text-[var(--text-secondary)] ${active ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-[var(--background)]" : ""}`}>
                           {memberName(uid).charAt(0).toUpperCase()}
                         </span>
                       )}
                       {active && (
-                        <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-indigo-600 border-2 border-[var(--background)] flex items-center justify-center">
+                        <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-[var(--brand-solid)] border-2 border-[var(--background)] flex items-center justify-center">
                           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
                         </span>
                       )}
                     </span>
-                    <span className={`text-[13px] font-medium truncate w-full text-center ${active ? "text-indigo-600" : "text-slate-600"}`}>
+                    <span className={`text-[13px] font-medium truncate w-full text-center ${active ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>
                       {memberName(uid)}
                     </span>
                   </button>
@@ -192,8 +197,8 @@ export default function AddExpenseModal({
           {/* Split between */}
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-[15px] font-semibold text-slate-700">Split between</p>
-              <span className="text-[14px] font-semibold text-indigo-600">Equal split</span>
+              <p className="text-[15px] font-semibold text-[var(--text-primary)]">Split between</p>
+              <span className="text-[14px] font-semibold text-[var(--brand)]">Equal split</span>
             </div>
             <div className="flex gap-2 flex-wrap mb-3">
               {group.memberIds.map((uid) => {
@@ -204,81 +209,87 @@ export default function AddExpenseModal({
                     type="button"
                     onClick={() => toggleSplit(uid)}
                     className={`flex items-center gap-1.5 rounded-full border pl-1.5 pr-2.5 py-1 tap-shrink ${
-                      inSplit ? "bg-white border-slate-200" : "bg-slate-50 border-slate-100 opacity-50"
+                      inSplit ? "bg-[var(--surface)] border-[var(--border-subtle)]" : "bg-[var(--fill-soft)] border-[var(--border-subtle)] opacity-50"
                     }`}
                   >
                     {group.members[uid]?.photoURL ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={group.members[uid].photoURL} alt="" className="w-6 h-6 rounded-full object-cover" />
                     ) : (
-                      <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-medium text-slate-500">
+                      <span className="w-6 h-6 rounded-full bg-[var(--fill)] flex items-center justify-center text-[10px] font-medium text-[var(--text-secondary)]">
                         {memberName(uid).charAt(0).toUpperCase()}
                       </span>
                     )}
-                    <span className="text-[13px] font-medium text-slate-700">{memberName(uid)}</span>
-                    <span className="text-slate-400 text-[15px] leading-none">{inSplit ? "×" : "+"}</span>
+                    <span className="text-[13px] font-medium text-[var(--text-primary)]">{memberName(uid)}</span>
+                    <span className="text-[var(--text-tertiary)] text-[15px] leading-none">{inSplit ? "×" : "+"}</span>
                   </button>
                 );
               })}
             </div>
-            <div className="flex items-center gap-3 rounded-[18px] bg-slate-50 p-3.5">
-              <span className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
+            <div className="flex items-center gap-3 rounded-[18px] bg-[var(--fill-soft)] p-3.5">
+              <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-slate-800">Split equally</p>
-                <p className="text-[13px] text-slate-400">{splitMembers.length} way split</p>
+                <p className="text-[15px] font-semibold text-[var(--text-primary)]">Split equally</p>
+                <p className="text-[13px] text-[var(--text-tertiary)]">{splitMembers.length} way split</p>
               </div>
               <div className="text-right">
-                <p className="text-[12px] text-slate-400">Each pays</p>
-                <p className="text-[16px] font-bold text-indigo-600">{formatCurrency(eachPays)}</p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
+                <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
               </div>
             </div>
           </div>
 
           {/* Add to (group, fixed) */}
           <div className="mt-6">
-            <p className="text-[15px] font-semibold text-slate-700 mb-3">Add to</p>
-            <div className="flex items-center gap-3 rounded-[18px] bg-white p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">Add to</p>
+            <div className="flex items-center gap-3 rounded-[18px] bg-[var(--surface)] p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
               {group.photoURL ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={group.photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
               ) : (
-                <span className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center text-[16px] font-bold text-indigo-600 shrink-0">
+                <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center text-[16px] font-bold text-[var(--brand)] shrink-0">
                   {group.name.charAt(0).toUpperCase()}
                 </span>
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-slate-800 truncate">{group.name}</p>
-                <p className="text-[13px] text-slate-400">{group.memberIds.length} members</p>
+                <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{group.name}</p>
+                <p className="text-[13px] text-[var(--text-tertiary)]">{group.memberIds.length} members</p>
               </div>
             </div>
           </div>
 
           {/* Note */}
           <div className="mt-6">
-            <p className="text-[15px] font-semibold text-slate-700 mb-2">Note (optional)</p>
+            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-2">Note (optional)</p>
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add a note (e.g. Lunch at the beach)"
-              className="w-full rounded-[16px] border border-slate-200 bg-white px-4 py-3 text-[15px] text-slate-700 placeholder:text-slate-400 outline-none focus:border-indigo-400"
+              className="w-full rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
             />
           </div>
 
           {/* Receipt */}
           <div className="mt-6">
-            <p className="text-[15px] font-semibold text-slate-700 mb-2">Receipt (optional)</p>
-            <label className="flex items-center gap-3 rounded-[16px] border border-dashed border-indigo-200 bg-indigo-50/40 px-4 py-3.5 cursor-pointer tap-shrink">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95L9.9 18.07a1.5 1.5 0 1 1-2.12-2.12l8.49-8.49" /></svg>
+            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-2">Receipt (optional)</p>
+            <label
+              role="button"
+              tabIndex={0}
+              aria-label="Add receipt image"
+              onKeyDown={activateFileInputOnKey}
+              className="flex items-center gap-3 rounded-[16px] border border-dashed border-[var(--brand)] bg-[var(--tint-accent)] px-4 py-3.5 cursor-pointer tap-shrink"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95L9.9 18.07a1.5 1.5 0 1 1-2.12-2.12l8.49-8.49" /></svg>
               <div className="flex-1">
-                <p className="text-[14px] font-semibold text-indigo-600">
+                <p className="text-[14px] font-semibold text-[var(--brand)]">
                   {receiptFiles.length > 0 ? `${receiptFiles.length} file(s) selected` : "Add receipt"}
                 </p>
-                <p className="text-[12px] text-slate-400">Upload image (Max 10MB)</p>
+                <p className="text-[12px] text-[var(--text-tertiary)]">Upload image (Max 10MB)</p>
               </div>
-              <span className="w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center shrink-0">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
+              <span className="w-10 h-10 rounded-xl bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
               </span>
               <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
             </label>
@@ -292,7 +303,7 @@ export default function AddExpenseModal({
           <button
             type="submit"
             disabled={busy}
-            className="w-full flex items-center justify-center gap-2 rounded-full bg-indigo-600 text-white py-4 text-[16px] font-semibold shadow-[0_12px_30px_-8px_rgba(79,70,229,0.6)] tap-shrink disabled:opacity-50"
+            className="w-full flex items-center justify-center gap-2 rounded-full bg-[var(--brand-solid)] text-white py-4 text-[16px] font-semibold shadow-[0_12px_30px_-8px_rgba(79,70,229,0.6)] tap-shrink disabled:opacity-50"
           >
             {busy ? "Saving…" : "Save Expense"}
           </button>

@@ -58,8 +58,8 @@ export default function GroupActivityFeeder({
           title: (
             <>
               <span className="font-semibold">{name(e.createdBy)}</span>
-              <span className="text-slate-400"> added </span>
-              <span className="font-semibold text-indigo-600">{e.description}</span>
+              <span className="text-[var(--text-tertiary)]"> added </span>
+              <span className="font-semibold text-[var(--brand)]">{e.description}</span>
             </>
           ),
           subtitle: `${formatCurrency(e.amount)} · split ${e.splits.length} ways`,
@@ -71,19 +71,19 @@ export default function GroupActivityFeeder({
         s.status === "approved" ? (
           <>
             <span className="font-semibold">{name(s.fromUid)}</span>
-            <span className="text-slate-400"> paid </span>
-            <span className="font-semibold text-green-600">{name(s.toUid)}</span>
+            <span className="text-[var(--text-tertiary)]"> paid </span>
+            <span className="font-semibold text-[var(--pos)]">{name(s.toUid)}</span>
           </>
         ) : s.status === "pending" ? (
           <>
             <span className="font-semibold">{name(s.fromUid)}</span>
-            <span className="text-slate-400"> requested from </span>
+            <span className="text-[var(--text-tertiary)]"> requested from </span>
             <span className="font-semibold">{name(s.toUid)}</span>
           </>
         ) : (
           <>
             <span className="font-semibold">{name(s.fromUid)}</span>
-            <span className="text-slate-400"> — request rejected</span>
+            <span className="text-[var(--text-tertiary)]"> — request rejected</span>
           </>
         );
       items.push({

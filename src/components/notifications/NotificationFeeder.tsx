@@ -60,7 +60,7 @@ export default function NotificationFeeder({
           title: (
             <>
               <span className="font-semibold">{name(s.fromUid)}</span>
-              <span className="text-slate-400"> says they paid you </span>
+              <span className="text-[var(--text-tertiary)]"> says they paid you </span>
               <span className="font-semibold">{formatCurrency(s.amount)}</span>
             </>
           ),
@@ -76,10 +76,10 @@ export default function NotificationFeeder({
           kind: "status",
           title: (
             <>
-              <span className="text-slate-400">Your payment to </span>
+              <span className="text-[var(--text-tertiary)]">Your payment to </span>
               <span className="font-semibold">{name(s.toUid)}</span>
-              <span className="text-slate-400"> was </span>
-              <span className={s.status === "approved" ? "font-semibold text-green-600" : "font-semibold text-red-500"}>
+              <span className="text-[var(--text-tertiary)]"> was </span>
+              <span className={s.status === "approved" ? "font-semibold text-[var(--pos)]" : "font-semibold text-[var(--neg)]"}>
                 {s.status}
               </span>
             </>
@@ -101,8 +101,8 @@ export default function NotificationFeeder({
           title: (
             <>
               <span className="font-semibold">{name(e.createdBy)}</span>
-              <span className="text-slate-400"> added </span>
-              <span className="font-semibold text-indigo-600">{e.description}</span>
+              <span className="text-[var(--text-tertiary)]"> added </span>
+              <span className="font-semibold text-[var(--brand)]">{e.description}</span>
             </>
           ),
           subtitle: `${formatCurrency(e.amount)} · ${group.name}`,

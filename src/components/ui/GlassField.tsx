@@ -11,7 +11,7 @@ export function GlassField({ label, className = "", ...props }: GlassFieldProps)
     <label className="block text-sm font-medium text-[var(--label-secondary)]">
       {label}
       <input
-        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] placeholder:text-[var(--label-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] transition ${className}`}
+        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] placeholder:text-[var(--label-tertiary)] transition ${className}`}
         {...props}
       />
     </label>
@@ -28,7 +28,7 @@ export function GlassSelect({ label, children, className = "", ...props }: Glass
     <label className="block text-sm font-medium text-[var(--label-secondary)]">
       {label}
       <select
-        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] transition ${className}`}
+        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] transition ${className}`}
         {...props}
       >
         {children}

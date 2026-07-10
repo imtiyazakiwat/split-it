@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { subscribeToExpenses, subscribeToSettlements } from "@/lib/firestore";
 import { computeBalances, formatCurrency } from "@/lib/balance";
 import { Group, Expense, Settlement } from "@/lib/types";
+import Skeleton from "@/components/ui/Skeleton";
 
 const THEMES = [
   { bg: "bg-indigo-100", ring: "ring-indigo-200" },
@@ -53,11 +54,22 @@ export default function GroupRow({
 }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [settlements, setSettlements] = useState<Settlement[]>([]);
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
+    let gotExp = false;
+    let gotSet = false;
     const unsubs = [
-      subscribeToExpenses(group.id, setExpenses),
-      subscribeToSettlements(group.id, setSettlements),
+      subscribeToExpenses(group.id, (e) => {
+        setExpenses(e);
+        gotExp = true;
+        if (gotSet) setLoaded(true);
+      }),
+      subscribeToSettlements(group.id, (s) => {
+        setSettlements(s);
+        gotSet = true;
+        if (gotExp) setLoaded(true);
+      }),
     ];
     return () => unsubs.forEach((u) => u());
   }, [group.id]);
@@ -90,7 +102,7 @@ export default function GroupRow({
   return (
     <button
       onClick={onOpen}
-      className="w-full text-left bg-white rounded-[22px] p-4 flex items-center gap-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_10px_28px_-16px_rgba(0,0,0,0.22)] tap-shrink"
+      className="w-full text-left bg-[var(--surface)] rounded-[22px] p-4 flex items-center gap-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_10px_28px_-16px_rgba(0,0,0,0.22)] tap-shrink"
     >
       {/* Group icon */}
       {group.photoURL ? (
@@ -110,28 +122,28 @@ export default function GroupRow({
 
       {/* Name + members */}
       <div className="min-w-0 flex-1">
-        <p className="text-[16px] font-semibold text-slate-800 truncate">{group.name}</p>
-        <p className="text-[13px] text-slate-400 mt-0.5">
+        <p className="text-[16px] font-semibold text-[var(--text-primary)] truncate">{group.name}</p>
+        <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
           {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
         </p>
         <div className="flex items-center mt-1.5">
           <div className="flex -space-x-2">
             {memberPhotos.map((url, i) => (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={i} src={url} alt="" className="w-6 h-6 rounded-full border-2 border-white object-cover" />
+              <img key={i} src={url} alt="" className="w-6 h-6 rounded-full border-2 border-[var(--surface)] object-cover" />
             ))}
             {memberPhotos.length === 0 &&
               group.memberIds.slice(0, 3).map((uid) => (
                 <span
                   key={uid}
-                  className="w-6 h-6 rounded-full border-2 border-white bg-slate-200 flex items-center justify-center text-[10px] font-medium text-slate-500"
+                  className="w-6 h-6 rounded-full border-2 border-[var(--surface)] bg-[var(--fill)] flex items-center justify-center text-[10px] font-medium text-[var(--text-secondary)]"
                 >
                   {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
                 </span>
               ))}
           </div>
           {extra > 0 && (
-            <span className="ml-1 h-6 min-w-6 px-1.5 rounded-full bg-slate-100 flex items-center justify-center text-[11px] font-medium text-slate-500">
+            <span className="ml-1 h-6 min-w-6 px-1.5 rounded-full bg-[var(--fill)] flex items-center justify-center text-[11px] font-medium text-[var(--text-secondary)]">
               +{extra}
             </span>
           )}
@@ -140,39 +152,51 @@ export default function GroupRow({
 
       {/* Right: amount + status */}
       <div className="flex items-center gap-2 shrink-0">
-        <div className="text-right">
-          {settled ? (
-            <p className="text-[13px] font-medium text-slate-400">Settled up</p>
-          ) : (
-            <>
-              <p className="text-[12px] text-slate-400">
-                {net > 0 ? "You will receive" : "You owe"}
-              </p>
-              <p className={`text-[16px] font-bold ${net > 0 ? "text-green-600" : "text-red-500"}`}>
-                {formatCurrency(Math.abs(net))}
-              </p>
-            </>
-          )}
-          <p className="flex items-center justify-end gap-1 text-[11px] text-slate-400 mt-1">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            {timeAgo(lastTs)}
-          </p>
-        </div>
-        {settled ? (
-          <span className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M20 6 9 17l-5-5" />
-            </svg>
-          </span>
+        {!loaded ? (
+          <>
+            <div className="text-right flex flex-col items-end gap-1.5">
+              <Skeleton className="h-3 w-14 rounded-md" />
+              <Skeleton className="h-4 w-12 rounded-md" />
+            </div>
+            <Skeleton className="w-9 h-9 rounded-full" />
+          </>
         ) : (
-          <span className="w-9 h-9 rounded-full bg-slate-50 flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m9 18 6-6-6-6" />
-            </svg>
-          </span>
+          <>
+            <div className="text-right">
+              {settled ? (
+                <p className="text-[13px] font-medium text-[var(--text-tertiary)]">Settled up</p>
+              ) : (
+                <>
+                  <p className="text-[12px] text-[var(--text-tertiary)]">
+                    {net > 0 ? "You will receive" : "You owe"}
+                  </p>
+                  <p className={`text-[16px] font-bold ${net > 0 ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>
+                    {formatCurrency(Math.abs(net))}
+                  </p>
+                </>
+              )}
+              <p className="flex items-center justify-end gap-1 text-[11px] text-[var(--text-tertiary)] mt-1">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="9" />
+                  <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                {timeAgo(lastTs)}
+              </p>
+            </div>
+            {settled ? (
+              <span className="w-9 h-9 rounded-full bg-[var(--tint-success)] text-[var(--pos)] flex items-center justify-center shrink-0">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 6 9 17l-5-5" />
+                </svg>
+              </span>
+            ) : (
+              <span className="w-9 h-9 rounded-full bg-[var(--fill-soft)] text-[var(--text-tertiary)] flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 18 6-6-6-6" />
+                </svg>
+              </span>
+            )}
+          </>
         )}
       </div>
     </button>

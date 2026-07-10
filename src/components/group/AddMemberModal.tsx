@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { searchUsers, addMemberToGroup, UserSearchResult } from "@/lib/firestore";
 import GlassModal from "@/components/ui/GlassModal";
+import { useToast } from "@/components/ui/Toast";
 
 export default function AddMemberModal({
   groupId,
@@ -18,6 +19,7 @@ export default function AddMemberModal({
   const [searching, setSearching] = useState(false);
   const [addingUid, setAddingUid] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const showToast = useToast();
 
   useEffect(() => {
     const t = term.trim();
@@ -55,6 +57,7 @@ export default function AddMemberModal({
         email: u.email,
         photoURL: u.photoURL,
       });
+      showToast({ message: `${u.displayName} added to the group` });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add member");
@@ -101,7 +104,7 @@ export default function AddMemberModal({
               <button
                 onClick={() => handleAdd(u)}
                 disabled={addingUid === u.uid}
-                className="rounded-full bg-indigo-600 text-white px-3.5 py-1.5 text-[13px] font-medium shrink-0 tap-shrink disabled:opacity-50"
+                className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium shrink-0 tap-shrink disabled:opacity-50"
               >
                 {addingUid === u.uid ? "Adding…" : "Add"}
               </button>

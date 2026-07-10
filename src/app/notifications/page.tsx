@@ -7,6 +7,7 @@ import { subscribeToUserGroups, updateSettlementStatus } from "@/lib/firestore";
 import { Group, Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import NotificationFeeder, { NotificationItem } from "@/components/notifications/NotificationFeeder";
+import { useToast } from "@/components/ui/Toast";
 
 function dateBucket(ts: number): string {
   const now = new Date();
@@ -26,23 +27,23 @@ function timeLabel(ts: number): string {
 function KindIcon({ kind }: { kind: NotificationItem["kind"] }) {
   if (kind === "request")
     return (
-      <span className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d97706" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <span className="w-10 h-10 rounded-full bg-[var(--tint-warning)] flex items-center justify-center shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
         </svg>
       </span>
     );
   if (kind === "status")
     return (
-      <span className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#16a34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" />
         </svg>
       </span>
     );
   return (
-    <span className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
         <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9 8h6M9 12h6" />
       </svg>
     </span>
@@ -52,6 +53,7 @@ function KindIcon({ kind }: { kind: NotificationItem["kind"] }) {
 export default function NotificationsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const showToast = useToast();
   const [groups, setGroups] = useState<Group[]>([]);
   const [itemsByGroup, setItemsByGroup] = useState<Record<string, NotificationItem[]>>({});
   const [seenAt] = useState<number>(() => {
@@ -91,9 +93,11 @@ export default function NotificationsPage() {
 
   function handleApprove(s: Settlement) {
     updateSettlementStatus(s.groupId, s.id, "approved");
+    showToast({ message: "Payment approved" });
   }
   function handleReject(s: Settlement) {
     updateSettlementStatus(s.groupId, s.id, "rejected");
+    showToast({ message: "Request declined" });
   }
 
   const rows = allItems.map((item, i) => {
@@ -113,53 +117,53 @@ export default function NotificationsPage() {
           <button
             onClick={() => router.push("/")}
             aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           </button>
-          <h1 className="text-[24px] font-extrabold text-slate-800">Notifications</h1>
+          <h1 className="text-[24px] font-extrabold text-[var(--text-primary)]">Notifications</h1>
         </div>
       </header>
 
       <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-10 scroll-momentum">
         {allItems.length === 0 ? (
           <div className="text-center py-24">
-            <div className="w-16 h-16 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-3">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <div className="w-16 h-16 rounded-full bg-[var(--tint-accent)] flex items-center justify-center mx-auto mb-3">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
               </svg>
             </div>
-            <p className="text-[16px] font-semibold text-slate-700">You&rsquo;re all caught up</p>
-            <p className="text-[13px] text-slate-400 mt-1">Payment requests and new expenses will show up here.</p>
+            <p className="text-[16px] font-semibold text-[var(--text-primary)]">You&rsquo;re all caught up</p>
+            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Payment requests and new expenses will show up here.</p>
           </div>
         ) : (
           <div className="space-y-4">
             {rows.map(({ item, bucket, showBucket, unread }) => (
               <div key={item.key}>
                 {showBucket && (
-                  <p className="text-[12px] font-semibold text-slate-400 mb-2 mt-2">{bucket}</p>
+                  <p className="text-[12px] font-semibold text-[var(--text-tertiary)] mb-2 mt-2">{bucket}</p>
                 )}
                 <div
                   onClick={() => router.push(`/groups/${item.groupId}`)}
                   className={`flex items-start gap-3 rounded-[18px] p-3.5 cursor-pointer tap-shrink ${
-                    unread ? "bg-indigo-50/60" : "bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                    unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
                   }`}
                 >
                   <KindIcon kind={item.kind} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-[15px] text-slate-800 leading-snug">{item.title}</p>
-                    <p className="text-[13px] text-slate-400 mt-0.5 truncate">{item.subtitle}</p>
+                    <p className="text-[15px] text-[var(--text-primary)] leading-snug">{item.title}</p>
+                    <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5 truncate">{item.subtitle}</p>
                     {item.kind === "request" && item.settlement && (
                       <div className="flex gap-2 mt-2">
                         <button
                           onClick={(ev) => { ev.stopPropagation(); handleApprove(item.settlement!); }}
-                          className="rounded-full bg-indigo-600 text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
+                          className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
                         >
                           Approve
                         </button>
                         <button
                           onClick={(ev) => { ev.stopPropagation(); handleReject(item.settlement!); }}
-                          className="rounded-full bg-slate-100 text-slate-600 px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
+                          className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
                         >
                           Reject
                         </button>
@@ -167,8 +171,8 @@ export default function NotificationsPage() {
                     )}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[12px] text-slate-400">{timeLabel(item.ts)}</span>
-                    {unread && <span className="w-2 h-2 rounded-full bg-indigo-500" />}
+                    <span className="text-[12px] text-[var(--text-tertiary)]">{timeLabel(item.ts)}</span>
+                    {unread && <span className="w-2 h-2 rounded-full bg-[var(--tint-accent)]0" />}
                   </div>
                 </div>
               </div>

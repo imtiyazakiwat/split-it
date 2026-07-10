@@ -9,6 +9,7 @@ import TopBar from "@/components/TopBar";
 import Card from "@/components/ui/Card";
 import { GlassSelect } from "@/components/ui/GlassField";
 import AddExpenseModal from "@/components/AddExpenseModal";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 
 export default function ShareReceiptPage() {
   const { user, loading } = useAuth();
@@ -55,7 +56,13 @@ export default function ShareReceiptPage() {
         </p>
 
         {!receiptFile && (
-          <label className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--label-tertiary)] cursor-pointer tap-shrink">
+          <label
+            role="button"
+            tabIndex={0}
+            aria-label="Select an image to attach"
+            onKeyDown={activateFileInputOnKey}
+            className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--label-tertiary)] cursor-pointer tap-shrink"
+          >
             No image detected. Tap to select one manually.
             <input
               type="file"

@@ -5,6 +5,7 @@ import { addSettlementRequest, updateSettlementStatus } from "@/lib/firestore";
 import { formatCurrency } from "@/lib/balance";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
+import { useToast } from "@/components/ui/Toast";
 
 interface Creditor {
   uid: string;
@@ -42,6 +43,7 @@ export default function ForwardModal({
   const [amount, setAmount] = useState(String(defaultAmount));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const showToast = useToast();
 
   function handleTargetChange(uid: string) {
     setTargetUid(uid);
@@ -76,6 +78,7 @@ export default function ForwardModal({
         note: `Forwarded from ${fromName}'s payment`,
         forwardedFromSettlementId: incomingId,
       });
+      showToast({ message: `Payment forwarded to ${target.name}` });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to forward payment");

@@ -21,6 +21,9 @@ import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField, GlassSelect } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 import AddExpenseModal from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
@@ -28,6 +31,7 @@ import AddMemberModal from "@/components/group/AddMemberModal";
 import ActivityDetailModal from "@/components/group/ActivityDetailModal";
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
+import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
 
 function timeAgoShort(ts: number): string {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -69,6 +73,16 @@ export default function GroupPage() {
   const [editError, setEditError] = useState("");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [showCopied, setShowCopied] = useState(false);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message?: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
+  // Expense ids hidden locally during the undo window (deferred-commit delete).
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
+  const showToast = useToast();
 
   useEffect(() => {
     if (!id) return;
@@ -85,18 +99,14 @@ export default function GroupPage() {
   const currentUser = user;
 
   if (!group) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)] text-sm">Loading group…</p>
-      </div>
-    );
+    return <GroupDetailSkeleton />;
   }
 
   const isAdmin = group.createdBy === currentUser.uid;
   const memberName = (uid: string) =>
     uid === currentUser.uid ? "You" : group?.members[uid]?.displayName || "Unknown";
 
-  const balanceExpenses = expenses.filter((e) => !e.editAction);
+  const balanceExpenses = expenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
   // per-expense picker showed gross expense amounts instead of the pairwise
@@ -140,6 +150,7 @@ export default function GroupPage() {
   function handleApproveSettlement(s: Settlement) {
     if (!group) return;
     updateSettlementStatus(group.id, s.id, "approved");
+    showToast({ message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}` });
     showLocalNotification(
       "Settlement approved",
       `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
@@ -150,28 +161,24 @@ export default function GroupPage() {
   function handleRejectSettlement(s: Settlement) {
     if (!group) return;
     updateSettlementStatus(group.id, s.id, "rejected");
+    showToast({ message: "Request declined" });
   }
 
-  async function handleDeleteGroup() {
+  function handleDeleteGroup() {
     if (!group) return;
-    if (
-      !confirm(
-        `Delete "${group.name}"? This removes the group and its balances for everyone in it. This can't be undone.`
-      )
-    )
-      return;
-    setEditBusy(true);
-    setEditError("");
-    try {
-      await deleteGroup(group.id);
-      router.push("/");
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to delete group");
-      setEditBusy(false);
-    }
+    setConfirmState({
+      title: "Delete group?",
+      message: `This removes “${group.name}” and its balances for everyone in it. This can't be undone.`,
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: async () => {
+        await deleteGroup(group.id);
+        router.push("/");
+      },
+    });
   }
 
-  async function handleRemoveMember(uid: string) {
+  function handleRemoveMember(uid: string) {
     if (!group) return;
     const name = memberName(uid);
     const net = balances.find((b) => b.uid === uid)?.netAmount ?? 0;
@@ -181,28 +188,32 @@ export default function GroupPage() {
             Math.abs(net)
           )}. Removing them drops it from the group's balances.`
         : "";
-    if (!confirm(`Remove ${name} from "${group.name}"?${warn}`)) return;
-    try {
-      await removeMember(group.id, uid);
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to remove member");
-    }
+    setConfirmState({
+      title: `Remove ${name}?`,
+      message: `Remove ${name} from “${group.name}”?${warn}`,
+      confirmLabel: "Remove",
+      destructive: true,
+      onConfirm: () => removeMember(group.id, uid),
+    });
   }
 
-  async function handleLeaveGroup() {
+  function handleLeaveGroup() {
     if (!group) return;
     const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
     const warn =
       Math.abs(net) > 0.01
         ? `\n\nYou still have an unsettled balance of ${formatCurrency(Math.abs(net))} here.`
         : "";
-    if (!confirm(`Leave "${group.name}"?${warn}`)) return;
-    try {
-      await removeMember(group.id, currentUser.uid);
-      router.push("/");
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to leave group");
-    }
+    setConfirmState({
+      title: `Leave “${group.name}”?`,
+      message: `You'll be removed from this group.${warn}`,
+      confirmLabel: "Leave",
+      destructive: true,
+      onConfirm: async () => {
+        await removeMember(group.id, currentUser.uid);
+        router.push("/");
+      },
+    });
   }
 
   function handleOpenEditGroup() {
@@ -244,6 +255,7 @@ export default function GroupPage() {
         photoURL,
         settlementMode: editSettlementMode,
       });
+      showToast({ message: "Group updated" });
       setShowEditGroup(false);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to update group");
@@ -274,14 +286,36 @@ export default function GroupPage() {
     setEditingExpense(expense);
   }
 
-  async function handleDeleteExpense(expense: Expense) {
-    if (!group || !confirm(`Delete "${expense.description}"? This will hide it from the group.`)) return;
-    await deleteExpense(group.id, expense.id, currentUser.uid);
-    showLocalNotification(
-      "Expense deleted",
-      `${expense.description} was deleted by admin`,
-      `/groups/${group.id}`
-    );
+  function handleDeleteExpense(expense: Expense) {
+    if (!group) return;
+    const gid = group.id;
+    const id = expense.id;
+    const deletedBy = currentUser.uid;
+    // Hide immediately; commit to Firestore only after the undo window.
+    setPendingDeleteIds((prev) => new Set(prev).add(id));
+    const timer = setTimeout(() => {
+      deleteExpense(gid, id, deletedBy);
+      showLocalNotification(
+        "Expense deleted",
+        `${expense.description} was deleted by admin`,
+        `/groups/${gid}`
+      );
+      // Leave the id in pendingDeleteIds: the incoming editAction:"deleted"
+      // will keep it hidden, so removing here would only risk a reappear flash.
+    }, 5000);
+    showToast({
+      message: `“${expense.description}” deleted`,
+      actionLabel: "Undo",
+      duration: 5000,
+      onAction: () => {
+        clearTimeout(timer);
+        setPendingDeleteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      },
+    });
   }
 
   async function handleSaveEditedExpense(e: React.FormEvent) {
@@ -299,6 +333,7 @@ export default function GroupPage() {
         amount: amt,
         paidBy,
       }, currentUser.uid);
+      showToast({ message: "Expense updated" });
       setEditingExpense(null);
     } catch (err) {
       setEditError(err instanceof Error ? err.message : "Failed to update expense");
@@ -307,7 +342,7 @@ export default function GroupPage() {
     }
   }
 
-  const activeExpenses = expenses.filter((e) => !e.editAction);
+  const activeExpenses = expenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
 
   // ── Derived stats for the header/summary cards ──
   const totalSpent = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -347,18 +382,18 @@ export default function GroupPage() {
           <button
             onClick={() => router.push("/")}
             aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#475569" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
           <button
             onClick={() => setShowGroupInfo(true)}
             aria-label="Group menu"
-            className="w-11 h-11 rounded-2xl bg-white shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
           >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#475569">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
               <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
             </svg>
           </button>
@@ -377,20 +412,20 @@ export default function GroupPage() {
           )}
           <div className="min-w-0 flex-1 pt-1">
             <div className="flex items-center gap-2">
-              <h1 className="text-[26px] font-extrabold text-slate-800 truncate">{group.name}</h1>
+              <h1 className="text-[26px] font-extrabold text-[var(--text-primary)] truncate">{group.name}</h1>
               {isAdmin && (
                 <button
                   onClick={handleOpenEditGroup}
                   aria-label="Edit group"
-                  className="w-7 h-7 rounded-full bg-white shadow-[0_1px_4px_rgba(0,0,0,0.12)] flex items-center justify-center shrink-0 tap-shrink"
+                  className="w-7 h-7 rounded-full bg-[var(--surface)] shadow-[0_1px_4px_rgba(0,0,0,0.12)] flex items-center justify-center shrink-0 tap-shrink"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#64748b" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
                   </svg>
                 </button>
               )}
             </div>
-            <p className="text-[14px] text-slate-400 mt-1">
+            <p className="text-[14px] text-[var(--text-tertiary)] mt-1">
               {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created {createdAgo}
             </p>
             <div className="flex items-center mt-2.5">
@@ -400,14 +435,14 @@ export default function GroupPage() {
                     // eslint-disable-next-line @next/next/no-img-element
                     <img key={uid} src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full border-2 border-[var(--background)] object-cover" />
                   ) : (
-                    <span key={uid} className="w-8 h-8 rounded-full border-2 border-[var(--background)] bg-slate-200 flex items-center justify-center text-[12px] font-medium text-slate-500">
+                    <span key={uid} className="w-8 h-8 rounded-full border-2 border-[var(--background)] bg-[var(--fill)] flex items-center justify-center text-[12px] font-medium text-[var(--text-secondary)]">
                       {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
                     </span>
                   )
                 )}
               </div>
               {group.memberIds.length > 3 && (
-                <span className="ml-1 h-8 min-w-8 px-2 rounded-full bg-indigo-50 flex items-center justify-center text-[12px] font-semibold text-indigo-600">
+                <span className="ml-1 h-8 min-w-8 px-2 rounded-full bg-[var(--tint-accent)] flex items-center justify-center text-[12px] font-semibold text-[var(--brand)]">
                   +{group.memberIds.length - 3}
                 </span>
               )}
@@ -415,42 +450,41 @@ export default function GroupPage() {
           </div>
         </div>
 
-        {/* Stats card */}
-        <div className="bg-white rounded-[22px] px-2 py-4 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.22)] flex divide-x divide-slate-100">
-          <div className="flex-1 px-3 min-w-0">
-            <p className="text-[12px] text-slate-400">Total spent</p>
-            <p className="text-[17px] font-bold text-indigo-600 mt-0.5 truncate">{formatCurrency(totalSpent)}</p>
+        {/* Stats card — 2×2 grid so each metric has room to breathe */}
+        <div className="bg-[var(--surface)] rounded-[22px] p-5 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.22)] grid grid-cols-2 gap-x-4 gap-y-5">
+          <div className="min-w-0">
+            <p className="text-[13px] text-[var(--text-tertiary)]">Total spent</p>
+            <p className="text-[22px] font-bold text-[var(--brand)] mt-1 truncate">{formatCurrency(totalSpent)}</p>
           </div>
-          <div className="flex-1 px-3 min-w-0">
-            <p className="text-[12px] text-slate-400">Expenses</p>
-            <p className="text-[17px] font-bold text-slate-800 mt-0.5">{expenseCount}</p>
-            <p className="text-[11px] text-slate-400">Total</p>
+          <div className="min-w-0">
+            <p className="text-[13px] text-[var(--text-tertiary)]">Expenses</p>
+            <p className="text-[22px] font-bold text-[var(--text-primary)] mt-1">{expenseCount}</p>
           </div>
-          <div className="flex-1 px-3 min-w-0">
-            <p className="text-[12px] text-slate-400">Settled</p>
-            <p className="text-[17px] font-bold text-green-600 mt-0.5">{settledPct}%</p>
-            <p className="text-[11px] text-slate-400">{settledCount} of {expenseCount}</p>
+          <div className="min-w-0">
+            <p className="text-[13px] text-[var(--text-tertiary)]">Settled</p>
+            <p className="text-[22px] font-bold text-[var(--pos)] mt-1">{settledPct}%</p>
+            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{settledCount} of {expenseCount}</p>
           </div>
-          <div className="flex-1 px-3 min-w-0">
-            <p className="text-[12px] text-slate-400">Last activity</p>
-            <p className="text-[15px] font-bold text-slate-800 mt-0.5 truncate">
+          <div className="min-w-0">
+            <p className="text-[13px] text-[var(--text-tertiary)]">Last activity</p>
+            <p className="text-[18px] font-bold text-[var(--text-primary)] mt-1 truncate">
               {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
             </p>
-            <p className="text-[11px] text-slate-400 truncate">{lastActivityItem?.label || "no activity"}</p>
+            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">{lastActivityItem?.label || "no activity"}</p>
           </div>
         </div>
 
         {/* You owe / you're owed hero */}
         {topDebt ? (
-          <div className="relative overflow-hidden rounded-[24px] p-5 bg-gradient-to-br from-rose-50 to-orange-50">
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>🏝️</span>
+          <div className="relative overflow-hidden rounded-[24px] p-5 bg-[var(--tint-danger-soft)]">
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💸</span>
             <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-slate-400">YOU OWE</p>
-              <p className="text-[22px] font-extrabold text-slate-800 mt-1">{memberName(topDebt.toUid)}</p>
-              <p className="text-[34px] font-extrabold text-red-500 leading-tight">{formatCurrency(topDebt.amount)}</p>
+              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU OWE</p>
+              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topDebt.toUid)}</p>
+              <p className="text-[34px] font-extrabold text-[var(--neg)] leading-tight">{formatCurrency(topDebt.amount)}</p>
               <button
                 onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
-                className="mt-3 inline-flex items-center gap-2 bg-red-500 text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
+                className="mt-3 inline-flex items-center gap-2 bg-[var(--tint-danger-soft)]0 text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
               >
                 Settle up now
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -460,27 +494,27 @@ export default function GroupPage() {
             </div>
           </div>
         ) : topCredit ? (
-          <div className="relative overflow-hidden rounded-[24px] p-5 bg-gradient-to-br from-emerald-50 to-teal-50">
+          <div className="relative overflow-hidden rounded-[24px] p-5 bg-[var(--tint-success-soft)]">
             <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💰</span>
             <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-slate-400">YOU&rsquo;LL RECEIVE</p>
-              <p className="text-[22px] font-extrabold text-slate-800 mt-1">{memberName(topCredit.fromUid)}</p>
-              <p className="text-[34px] font-extrabold text-green-600 leading-tight">{formatCurrency(topCredit.amount)}</p>
-              <p className="mt-2 text-[13px] text-slate-400">Waiting for {memberName(topCredit.fromUid)} to settle up.</p>
+              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU&rsquo;LL RECEIVE</p>
+              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topCredit.fromUid)}</p>
+              <p className="text-[34px] font-extrabold text-[var(--pos)] leading-tight">{formatCurrency(topCredit.amount)}</p>
+              <p className="mt-2 text-[13px] text-[var(--text-tertiary)]">Waiting for {memberName(topCredit.fromUid)} to settle up.</p>
             </div>
           </div>
         ) : (
-          <div className="rounded-[24px] p-6 bg-indigo-50/70 text-center">
-            <p className="text-[18px] font-bold text-slate-800">You&rsquo;re all settled up 🎉</p>
-            <p className="text-[13px] text-slate-400 mt-1">No outstanding balances in this group.</p>
+          <div className="rounded-[24px] p-6 bg-[var(--tint-accent)] text-center">
+            <p className="text-[18px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled up 🎉</p>
+            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">No outstanding balances in this group.</p>
           </div>
         )}
 
         {/* Balances */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-slate-800">Balances</h2>
-            <button onClick={() => setShowGroupInfo(true)} className="text-[14px] font-semibold text-indigo-600 tap-shrink">View all</button>
+            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Balances</h2>
+            <button onClick={() => setShowGroupInfo(true)} className="text-[14px] font-semibold text-[var(--brand)] tap-shrink">View all</button>
           </div>
           <div className="flex gap-3 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
             {memberBalances.map((b) => {
@@ -491,29 +525,29 @@ export default function GroupPage() {
                 <div
                   key={b.uid}
                   className={`shrink-0 w-[190px] rounded-[18px] p-3.5 ${
-                    isMe ? (neg ? "bg-rose-50" : "bg-emerald-50") : "bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                    isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
                     {isMe ? (
-                      <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold ${neg ? "bg-red-100 text-red-500" : "bg-green-100 text-green-600"}`}>You</span>
+                      <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold ${neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--tint-success)] text-[var(--pos)]"}`}>You</span>
                     ) : group.members[b.uid]?.photoURL ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={group.members[b.uid].photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
                     ) : (
-                      <span className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center shrink-0 text-[14px] font-medium text-slate-500">
+                      <span className="w-10 h-10 rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 text-[14px] font-medium text-[var(--text-secondary)]">
                         {(group.members[b.uid]?.displayName || "?").charAt(0).toUpperCase()}
                       </span>
                     )}
                     <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-slate-800 truncate">{isMe ? "You" : memberName(b.uid)}</p>
-                      <p className={`text-[15px] font-bold ${pos ? "text-green-600" : neg ? "text-red-500" : "text-slate-400"}`}>
+                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{isMe ? "You" : memberName(b.uid)}</p>
+                      <p className={`text-[15px] font-bold ${pos ? "text-[var(--pos)]" : neg ? "text-[var(--neg)]" : "text-[var(--text-tertiary)]"}`}>
                         {pos ? "+" : neg ? "-" : ""}{formatCurrency(Math.abs(b.netAmount))}
                       </p>
                     </div>
                   </div>
                   <span className={`inline-block mt-2 rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
-                    pos ? "bg-green-100 text-green-700" : neg ? "bg-red-100 text-red-600" : "bg-slate-100 text-slate-500"
+                    pos ? "bg-[var(--tint-success)] text-[var(--pos)]" : neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--fill)] text-[var(--text-secondary)]"
                   }`}>
                     {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
                   </span>
@@ -526,10 +560,10 @@ export default function GroupPage() {
         {/* Activity */}
         <section>
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-slate-800">Activity</h2>
+            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Activity</h2>
           </div>
           <ActivityTimeline
-            expenses={expenses}
+            expenses={expenses.filter((e) => !pendingDeleteIds.has(e.id))}
             settlements={settlements}
             memberName={memberName}
             currentUid={currentUser.uid}
@@ -553,12 +587,12 @@ export default function GroupPage() {
             onClick={() => setShowAddExpense(true)}
             className="pointer-events-auto flex flex-col items-center gap-1 tap-shrink"
           >
-            <span className="w-14 h-14 rounded-full bg-indigo-600 flex items-center justify-center shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)]">
+            <span className="w-14 h-14 rounded-full bg-[var(--brand-solid)] flex items-center justify-center shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)]">
               <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </span>
-            <span className="text-[12px] font-semibold text-indigo-600">Add Expense</span>
+            <span className="text-[12px] font-semibold text-[var(--brand)]">Add Expense</span>
           </button>
         </div>
       </div>
@@ -631,7 +665,7 @@ export default function GroupPage() {
                 {isAdmin && (
                   <button
                     onClick={() => { setShowGroupInfo(false); setShowAddMember(true); }}
-                    className="text-[13px] font-medium text-indigo-600 tap-shrink"
+                    className="text-[13px] font-medium text-[var(--brand)] tap-shrink"
                   >
                     + Add member
                   </button>
@@ -708,7 +742,13 @@ export default function GroupPage() {
         <GlassModal title="Edit Group" onClose={() => setShowEditGroup(false)}>
           <form onSubmit={handleSaveGroupProfile} className="space-y-4">
             <div className="flex justify-center">
-              <label className="relative cursor-pointer tap-shrink">
+              <label
+                role="button"
+                tabIndex={0}
+                aria-label="Change group photo"
+                onKeyDown={activateFileInputOnKey}
+                className="relative cursor-pointer tap-shrink rounded-full"
+              >
                 {editPhotoPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={editPhotoPreview} alt="" className="w-20 h-20 rounded-full object-cover border-2 border-[var(--border-subtle)]" />
@@ -782,6 +822,16 @@ export default function GroupPage() {
             </div>
           </form>
         </GlassModal>
+      )}
+      {confirmState && (
+        <ConfirmDialog
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+          destructive={confirmState.destructive}
+          onConfirm={confirmState.onConfirm}
+          onClose={() => setConfirmState(null)}
+        />
       )}
     </div>
   );

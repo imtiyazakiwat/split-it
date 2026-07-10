@@ -19,6 +19,7 @@ import TopBar from "@/components/TopBar";
 import Card from "@/components/ui/Card";
 import { GlassField } from "@/components/ui/GlassField";
 import GlassButton from "@/components/ui/GlassButton";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 
 export default function SettingsPage() {
   const { user, loading, signOut } = useAuth();
@@ -112,7 +113,13 @@ export default function SettingsPage() {
         <Card className="p-4">
           <form onSubmit={handleSaveProfile} className="space-y-4">
             <div className="flex flex-col items-center gap-3">
-              <label className="relative cursor-pointer tap-shrink">
+              <label
+                role="button"
+                tabIndex={0}
+                aria-label="Change profile photo"
+                onKeyDown={activateFileInputOnKey}
+                className="relative cursor-pointer tap-shrink rounded-full"
+              >
                 {photoPreview ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img

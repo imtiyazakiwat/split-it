@@ -9,6 +9,8 @@ import { UPI_APPS, isLikelyAndroid, UpiPaymentParams } from "@/lib/upi";
 import { UpiAppIcon } from "@/components/UpiAppIcon";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
+import { useToast } from "@/components/ui/Toast";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 
 interface ExpenseWithSelection {
   expense: Expense;
@@ -46,6 +48,7 @@ export default function SettleUpModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [paidExternally, setPaidExternally] = useState(false);
+  const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
   const androidLikely = isLikelyAndroid();
@@ -110,6 +113,7 @@ export default function SettleUpModal({
         receiptUrls,
         expenseIds: expenseIds.length > 0 ? expenseIds : undefined,
       });
+      showToast({ message: `Settlement request sent to ${toName}` });
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send settlement request");
@@ -229,7 +233,13 @@ export default function SettleUpModal({
           <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
             Payment screenshots (optional)
           </p>
-          <label className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink">
+          <label
+            role="button"
+            tabIndex={0}
+            aria-label="Add payment screenshots"
+            onKeyDown={activateFileInputOnKey}
+            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink"
+          >
             {receiptFiles.length > 0
               ? `${receiptFiles.length} file(s) selected — tap to add more`
               : paidExternally
