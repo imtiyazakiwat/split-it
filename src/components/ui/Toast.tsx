@@ -63,7 +63,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           aria-live="polite"
         >
           <div className="max-w-md mx-auto flex justify-center">
-            <div className="pointer-events-auto glass glass-strong rounded-full pl-4 pr-2 py-2 flex items-center gap-3 shadow-[0_8px_30px_-8px_rgba(0,0,0,0.3)] animate-modal-in">
+            <div className="pointer-events-auto glass glass-strong rounded-full pl-4 pr-2 py-2 flex items-center gap-3 shadow-[var(--shadow-float)] animate-modal-in">
               <span className="text-[14px] font-medium text-[var(--text-primary)]">
                 {toast.message}
               </span>

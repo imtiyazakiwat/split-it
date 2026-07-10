@@ -22,7 +22,7 @@ export default function HomeSkeleton() {
         <Skeleton className="h-8 w-40 mt-2 rounded-lg" />
 
         {/* Summary card */}
-        <div className="mt-4 bg-[var(--surface)] rounded-[28px] p-5">
+        <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-xl)] p-5">
           <Skeleton className="h-4 w-24 rounded-md" />
           <Skeleton className="h-10 w-44 mt-2 rounded-lg" />
           <div className="h-px bg-[var(--border-subtle)] my-4" />
@@ -50,7 +50,7 @@ export default function HomeSkeleton() {
         {/* Group rows */}
         <div className="mt-3 space-y-3">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="bg-[var(--surface)] rounded-[22px] p-4 flex items-center gap-3.5">
+            <div key={i} className="bg-[var(--surface)] rounded-[var(--radius-card)] p-4 flex items-center gap-3.5">
               <Skeleton className="w-14 h-14 rounded-full" />
               <div className="flex-1 min-w-0">
                 <Skeleton className="h-4 w-32 rounded-md" />

@@ -13,10 +13,12 @@ import {
   deleteExpense,
   deleteGroup,
   removeMember,
+  addExpense,
 } from "@/lib/firestore";
 import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
 import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
-import { uploadImage } from "@/lib/storage";
+import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
+import { categoryMeta } from "@/lib/categories";
 import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField, GlassSelect } from "@/components/ui/GlassField";
@@ -24,7 +26,7 @@ import GlassModal from "@/components/ui/GlassModal";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
-import AddExpenseModal from "@/components/AddExpenseModal";
+import AddExpenseModal, { NewExpenseInput } from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
 import AddMemberModal from "@/components/group/AddMemberModal";
@@ -82,6 +84,7 @@ export default function GroupPage() {
   } | null>(null);
   // Expense ids hidden locally during the undo window (deferred-commit delete).
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
+  const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
   const showToast = useToast();
 
   useEffect(() => {
@@ -106,7 +109,21 @@ export default function GroupPage() {
   const memberName = (uid: string) =>
     uid === currentUser.uid ? "You" : group?.members[uid]?.displayName || "Unknown";
 
-  const balanceExpenses = expenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
+  // Merge optimistic (pending) expenses with the live ones. An optimistic entry
+  // is hidden as soon as a matching real expense arrives (Firestore delivers our
+  // own write near-instantly via latency compensation), keyed by content — this
+  // avoids both a duplicate flash and a gap during reconciliation.
+  const realExpenseKeys = new Set(
+    expenses.map((e) => `${e.createdBy}|${e.amount}|${e.description}|${e.paidBy}`)
+  );
+  const mergedExpenses = [
+    ...optimisticExpenses.filter(
+      (o) => !realExpenseKeys.has(`${o.createdBy}|${o.amount}|${o.description}|${o.paidBy}`)
+    ),
+    ...expenses,
+  ];
+
+  const balanceExpenses = mergedExpenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
   // per-expense picker showed gross expense amounts instead of the pairwise
@@ -318,6 +335,50 @@ export default function GroupPage() {
     });
   }
 
+  // Optimistic add: show the expense immediately, persist in the background,
+  // and let the live listener reconcile (matching entries are de-duped below).
+  async function handleAddExpense(input: NewExpenseInput) {
+    if (!group) return;
+    const gid = group.id;
+    const uid = currentUser.uid;
+    const tempId = `tmp-${Date.now()}`;
+    const optimistic: Expense = {
+      id: tempId,
+      groupId: gid,
+      description: input.description,
+      amount: input.amount,
+      paidBy: input.paidBy,
+      splitType: "equal",
+      splits: input.splits,
+      receiptUrls: [],
+      createdBy: uid,
+      createdAt: Date.now(),
+      category: input.category,
+    };
+    setOptimisticExpenses((prev) => [...prev, optimistic]);
+    try {
+      let receiptUrls: string[] = [];
+      if (input.receiptFiles.length > 0) {
+        receiptUrls = await uploadMultipleReceipts(gid, input.receiptFiles);
+      }
+      await addExpense(gid, {
+        description: input.description,
+        amount: input.amount,
+        paidBy: input.paidBy,
+        splitType: "equal",
+        splits: input.splits,
+        createdBy: uid,
+        receiptUrls,
+        category: input.category,
+      });
+      showToast({ message: `${categoryMeta(input.category).emoji} Expense added · ${formatCurrency(input.amount)}` });
+    } catch {
+      showToast({ message: "Couldn't add expense — tap + to retry." });
+    } finally {
+      setOptimisticExpenses((prev) => prev.filter((x) => x.id !== tempId));
+    }
+  }
+
   async function handleSaveEditedExpense(e: React.FormEvent) {
     e.preventDefault();
     if (!group || !editingExpense) return;
@@ -342,7 +403,7 @@ export default function GroupPage() {
     }
   }
 
-  const activeExpenses = expenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
+  const activeExpenses = mergedExpenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
 
   // ── Derived stats for the header/summary cards ──
   const totalSpent = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
@@ -382,7 +443,7 @@ export default function GroupPage() {
           <button
             onClick={() => router.push("/")}
             aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="m15 18-6-6 6-6" />
@@ -391,7 +452,7 @@ export default function GroupPage() {
           <button
             onClick={() => setShowGroupInfo(true)}
             aria-label="Group menu"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
               <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
@@ -404,9 +465,9 @@ export default function GroupPage() {
         <div className="flex items-start gap-4">
           {group.photoURL ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={group.photoURL} alt="" className="w-[88px] h-[88px] rounded-[22px] object-cover shrink-0 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.3)]" />
+            <img src={group.photoURL} alt="" className="w-[88px] h-[88px] rounded-[var(--radius-card)] object-cover shrink-0 shadow-[var(--shadow-float)]" />
           ) : (
-            <div className="w-[88px] h-[88px] rounded-[22px] bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 shadow-[0_8px_24px_-8px_rgba(79,70,229,0.5)]">
+            <div className="w-[88px] h-[88px] rounded-[var(--radius-card)] bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 shadow-[0_8px_24px_-8px_rgba(79,70,229,0.5)]">
               <span className="text-[34px] font-bold text-white">{group.name.charAt(0).toUpperCase()}</span>
             </div>
           )}
@@ -417,7 +478,7 @@ export default function GroupPage() {
                 <button
                   onClick={handleOpenEditGroup}
                   aria-label="Edit group"
-                  className="w-7 h-7 rounded-full bg-[var(--surface)] shadow-[0_1px_4px_rgba(0,0,0,0.12)] flex items-center justify-center shrink-0 tap-shrink"
+                  className="w-7 h-7 rounded-full bg-[var(--surface)] shadow-[var(--shadow-sm)] flex items-center justify-center shrink-0 tap-shrink"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
@@ -451,7 +512,7 @@ export default function GroupPage() {
         </div>
 
         {/* Stats card — 2×2 grid so each metric has room to breathe */}
-        <div className="bg-[var(--surface)] rounded-[22px] p-5 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.22)] grid grid-cols-2 gap-x-4 gap-y-5">
+        <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)] grid grid-cols-2 gap-x-4 gap-y-5">
           <div className="min-w-0">
             <p className="text-[13px] text-[var(--text-tertiary)]">Total spent</p>
             <p className="text-[22px] font-bold text-[var(--brand)] mt-1 truncate">{formatCurrency(totalSpent)}</p>
@@ -476,7 +537,7 @@ export default function GroupPage() {
 
         {/* You owe / you're owed hero */}
         {topDebt ? (
-          <div className="relative overflow-hidden rounded-[24px] p-5 bg-[var(--tint-danger-soft)]">
+          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-danger-soft)]">
             <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💸</span>
             <div className="relative">
               <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU OWE</p>
@@ -494,7 +555,7 @@ export default function GroupPage() {
             </div>
           </div>
         ) : topCredit ? (
-          <div className="relative overflow-hidden rounded-[24px] p-5 bg-[var(--tint-success-soft)]">
+          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-success-soft)]">
             <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💰</span>
             <div className="relative">
               <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU&rsquo;LL RECEIVE</p>
@@ -504,7 +565,7 @@ export default function GroupPage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-[24px] p-6 bg-[var(--tint-accent)] text-center">
+          <div className="rounded-[var(--radius-card)] p-6 bg-[var(--tint-accent)] text-center">
             <p className="text-[18px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled up 🎉</p>
             <p className="text-[13px] text-[var(--text-tertiary)] mt-1">No outstanding balances in this group.</p>
           </div>
@@ -524,8 +585,8 @@ export default function GroupPage() {
               return (
                 <div
                   key={b.uid}
-                  className={`shrink-0 w-[190px] rounded-[18px] p-3.5 ${
-                    isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                  className={`shrink-0 w-[190px] rounded-[var(--radius-inner)] p-3.5 ${
+                    isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
                   }`}
                 >
                   <div className="flex items-center gap-2.5">
@@ -563,7 +624,7 @@ export default function GroupPage() {
             <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Activity</h2>
           </div>
           <ActivityTimeline
-            expenses={expenses.filter((e) => !pendingDeleteIds.has(e.id))}
+            expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
             settlements={settlements}
             memberName={memberName}
             currentUid={currentUser.uid}
@@ -600,7 +661,7 @@ export default function GroupPage() {
       <BottomNav active="groups" />
 
       {showAddExpense && (
-        <AddExpenseModal group={group} currentUid={currentUser.uid} onClose={() => setShowAddExpense(false)} />
+        <AddExpenseModal group={group} currentUid={currentUser.uid} onSubmit={handleAddExpense} onClose={() => setShowAddExpense(false)} />
       )}
 
       {settleTarget && (

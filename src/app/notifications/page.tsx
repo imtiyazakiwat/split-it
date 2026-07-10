@@ -117,7 +117,7 @@ export default function NotificationsPage() {
           <button
             onClick={() => router.push("/")}
             aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
           </button>
@@ -145,8 +145,8 @@ export default function NotificationsPage() {
                 )}
                 <div
                   onClick={() => router.push(`/groups/${item.groupId}`)}
-                  className={`flex items-start gap-3 rounded-[18px] p-3.5 cursor-pointer tap-shrink ${
-                    unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[0_1px_3px_rgba(0,0,0,0.04)]"
+                  className={`flex items-start gap-3 rounded-[var(--radius-inner)] p-3.5 cursor-pointer tap-shrink ${
+                    unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
                   }`}
                 >
                   <KindIcon kind={item.kind} />

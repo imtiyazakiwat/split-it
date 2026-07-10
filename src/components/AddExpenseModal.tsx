@@ -28,16 +28,29 @@ function CategoryIcon({ id, active }: { id: string; active: boolean }) {
   }
 }
 
+export interface NewExpenseInput {
+  description: string;
+  amount: number;
+  paidBy: string;
+  splits: { uid: string; amount: number }[];
+  category: string;
+  receiptFiles: File[];
+}
+
 export default function AddExpenseModal({
   group,
   currentUid,
   onClose,
   prefillReceipt,
+  onSubmit,
 }: {
   group: Group;
   currentUid: string;
   onClose: () => void;
   prefillReceipt?: File | null;
+  /** When provided, the parent persists the expense (enabling optimistic UI):
+   *  the modal builds the input, hands it off, and closes immediately. */
+  onSubmit?: (input: NewExpenseInput) => void;
 }) {
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("meal");
@@ -69,17 +82,34 @@ export default function AddExpenseModal({
       setError("Enter an amount and pick who's splitting.");
       return;
     }
-    setBusy(true);
     setError("");
+    const splits = splitEqually(parsedAmount, splitMembers);
+    const input: NewExpenseInput = {
+      description: note.trim() || categoryLabel,
+      amount: parsedAmount,
+      paidBy,
+      splits,
+      category,
+      receiptFiles,
+    };
+
+    // Optimistic path: parent persists + reconciles; close instantly.
+    if (onSubmit) {
+      onSubmit(input);
+      onClose();
+      return;
+    }
+
+    // Fallback path (e.g. share-receipt): persist here.
+    setBusy(true);
     try {
       let receiptUrls: string[] = [];
       if (receiptFiles.length > 0) {
         receiptUrls = await uploadMultipleReceipts(group.id, receiptFiles);
       }
-      const splits = splitEqually(parsedAmount, splitMembers);
       await addExpense(group.id, {
-        description: note.trim() || categoryLabel,
-        amount: parsedAmount,
+        description: input.description,
+        amount: input.amount,
         paidBy,
         splitType: "equal",
         splits,
@@ -102,7 +132,7 @@ export default function AddExpenseModal({
         <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-36">
           {/* Header */}
           <div className="flex items-center justify-between pt-2">
-            <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink">
+            <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
             <div className="text-center">
@@ -135,7 +165,7 @@ export default function AddExpenseModal({
           </div>
 
           {/* Category */}
-          <div className="mt-6 bg-[var(--surface)] rounded-[22px] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_16px_36px_-24px_rgba(0,0,0,0.2)]">
+          <div className="mt-6 bg-[var(--surface)] rounded-[var(--radius-card)] p-4 shadow-[var(--shadow-card)]">
             <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">What was this for?</p>
             <div className="grid grid-cols-3 gap-2.5">
               {EXPENSE_CATEGORIES.map((c) => {
@@ -238,7 +268,7 @@ export default function AddExpenseModal({
                 );
               })}
             </div>
-            <div className="flex items-center gap-3 rounded-[18px] bg-[var(--fill-soft)] p-3.5">
+            <div className="flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--fill-soft)] p-3.5">
               <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
               </span>
@@ -256,7 +286,7 @@ export default function AddExpenseModal({
           {/* Add to (group, fixed) */}
           <div className="mt-6">
             <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">Add to</p>
-            <div className="flex items-center gap-3 rounded-[18px] bg-[var(--surface)] p-3.5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+            <div className="flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--surface)] p-3.5 shadow-[var(--shadow-sm)]">
               {group.photoURL ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img src={group.photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
@@ -279,7 +309,7 @@ export default function AddExpenseModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add a note (e.g. Lunch at the beach)"
-              className="w-full rounded-[16px] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
+              className="w-full rounded-[var(--radius-inner)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
             />
           </div>
 
@@ -291,7 +321,7 @@ export default function AddExpenseModal({
               tabIndex={0}
               aria-label="Add receipt image"
               onKeyDown={activateFileInputOnKey}
-              className="flex items-center gap-3 rounded-[16px] border border-dashed border-[var(--brand)] bg-[var(--tint-accent)] px-4 py-3.5 cursor-pointer tap-shrink"
+              className="flex items-center gap-3 rounded-[var(--radius-inner)] border border-dashed border-[var(--brand)] bg-[var(--tint-accent)] px-4 py-3.5 cursor-pointer tap-shrink"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95L9.9 18.07a1.5 1.5 0 1 1-2.12-2.12l8.49-8.49" /></svg>
               <div className="flex-1">

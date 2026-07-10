@@ -52,14 +52,14 @@ export default function BottomNav({ active }: { active: Tab }) {
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 pointer-events-none">
-      <div className="pointer-events-auto max-w-md mx-auto glass-strong rounded-[26px] px-2 py-2 flex items-center shadow-[0_8px_30px_-8px_rgba(0,0,0,0.18)]">
+      <div className="pointer-events-auto max-w-md mx-auto glass-strong rounded-[var(--radius-xl)] px-2 py-2 flex items-center shadow-[var(--shadow-float)]">
         {items.map(({ id, label, href, Icon }) => {
           const isActive = id === active;
           return (
             <button
               key={id}
               onClick={() => router.push(href)}
-              className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-[18px] tap-shrink ${
+              className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-[var(--radius-inner)] tap-shrink ${
                 isActive ? "bg-[var(--tint-accent)]" : ""
               }`}
             >

@@ -102,7 +102,7 @@ export default function GroupRow({
   return (
     <button
       onClick={onOpen}
-      className="w-full text-left bg-[var(--surface)] rounded-[22px] p-4 flex items-center gap-3.5 shadow-[0_1px_2px_rgba(0,0,0,0.03),0_10px_28px_-16px_rgba(0,0,0,0.22)] tap-shrink"
+      className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-4 flex items-center gap-3.5 shadow-[var(--shadow-card)] tap-shrink"
     >
       {/* Group icon */}
       {group.photoURL ? (
@@ -190,7 +190,7 @@ export default function GroupRow({
                 </svg>
               </span>
             ) : (
-              <span className="w-9 h-9 rounded-full bg-[var(--fill-soft)] text-[var(--text-tertiary)] flex items-center justify-center shrink-0 shadow-[0_1px_3px_rgba(0,0,0,0.06)]">
+              <span className="w-9 h-9 rounded-full bg-[var(--fill-soft)] text-[var(--text-tertiary)] flex items-center justify-center shrink-0 shadow-[var(--shadow-sm)]">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="m9 18 6-6-6-6" />
                 </svg>

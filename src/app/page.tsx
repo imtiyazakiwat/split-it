@@ -159,7 +159,7 @@ export default function Home() {
             <button
               onClick={() => router.push("/notifications")}
               aria-label="Notifications"
-              className="w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+              className="w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
@@ -169,7 +169,7 @@ export default function Home() {
             <button
               onClick={() => router.push("/settings")}
               aria-label="Settings"
-              className="w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+              className="w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
             >
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
@@ -186,7 +186,7 @@ export default function Home() {
         </h1>
 
         {/* Summary chip */}
-        <div className="mt-3 inline-flex items-center gap-2 bg-[var(--surface)] rounded-full pl-3 pr-4 py-2 shadow-[0_1px_4px_rgba(0,0,0,0.05)] border border-[var(--border-subtle)]">
+        <div className="mt-3 inline-flex items-center gap-2 bg-[var(--surface)] rounded-full pl-3 pr-4 py-2 shadow-[var(--shadow-sm)] border border-[var(--border-subtle)]">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-[var(--brand)]">
             <path d="M12 2l1.9 5.8L20 9.7l-5 3.6 1.9 6L12 15.8 6.1 19.3 8 13.3l-5-3.6 6.1-1.9z" />
           </svg>
@@ -194,7 +194,7 @@ export default function Home() {
         </div>
 
         {/* Summary card — leads with the actionable balance (owe first) */}
-        <div className="mt-4 bg-[var(--surface)] rounded-[28px] p-5 shadow-[0_2px_8px_rgba(0,0,0,0.03),0_18px_40px_-24px_rgba(0,0,0,0.25)]">
+        <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-xl)] p-5 shadow-[var(--shadow-card)]">
           {/* Hero */}
           {balancesPending ? (
             <div>
@@ -277,7 +277,7 @@ export default function Home() {
           <button
             onClick={() => setSort((s) => (s === "recent" ? "name" : "recent"))}
             aria-label={`Sorted by ${sort === "recent" ? "most recent" : "name"}. Tap to switch.`}
-            className="flex items-center gap-1.5 bg-[var(--surface)] rounded-full px-3.5 py-2 text-[14px] font-medium text-[var(--text-secondary)] shadow-[0_1px_4px_rgba(0,0,0,0.05)] tap-shrink"
+            className="flex items-center gap-1.5 bg-[var(--surface)] rounded-full px-3.5 py-2 text-[14px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] tap-shrink"
           >
             {sort === "recent" ? "Recent" : "Name"}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -307,7 +307,7 @@ export default function Home() {
 
         {/* All-settled banner */}
         {settledCount > 0 && (
-          <div className="mt-4 flex items-center gap-3 bg-[var(--tint-accent)] rounded-[22px] p-4">
+          <div className="mt-4 flex items-center gap-3 bg-[var(--tint-accent)] rounded-[var(--radius-card)] p-4">
             <span className="w-10 h-10 rounded-full bg-[var(--surface)] text-[var(--brand)] flex items-center justify-center shrink-0 shadow-sm">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l1.9 5.8L20 9.7l-5 3.6 1.9 6L12 15.8 6.1 19.3 8 13.3l-5-3.6 6.1-1.9z" />
@@ -334,7 +334,7 @@ export default function Home() {
         <div className="max-w-md mx-auto px-4 flex justify-end">
           <div className="relative pointer-events-auto">
             {showAdd && (
-              <div className="absolute right-0 bottom-full mb-3 w-44 bg-[var(--surface)] rounded-2xl p-1.5 shadow-[0_10px_40px_-8px_rgba(0,0,0,0.28)] border border-[var(--border-subtle)] animate-modal-in">
+              <div className="absolute right-0 bottom-full mb-3 w-44 bg-[var(--surface)] rounded-2xl p-1.5 shadow-[var(--shadow-float)] border border-[var(--border-subtle)] animate-modal-in">
                 <button
                   onClick={() => { setShowAdd(false); setShowCreate(true); setError(""); }}
                   className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"

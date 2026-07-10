@@ -16,7 +16,7 @@ export default function GroupDetailSkeleton() {
       <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-40 space-y-5">
         {/* Hero */}
         <div className="flex items-start gap-4">
-          <Skeleton className="w-[88px] h-[88px] rounded-[22px]" />
+          <Skeleton className="w-[88px] h-[88px] rounded-[var(--radius-card)]" />
           <div className="flex-1 pt-1">
             <Skeleton className="h-7 w-40 rounded-lg" />
             <Skeleton className="h-3.5 w-32 mt-2 rounded-md" />
@@ -25,7 +25,7 @@ export default function GroupDetailSkeleton() {
         </div>
 
         {/* Stats card */}
-        <div className="bg-[var(--surface)] rounded-[22px] p-5 grid grid-cols-2 gap-x-4 gap-y-5">
+        <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 grid grid-cols-2 gap-x-4 gap-y-5">
           {[0, 1, 2, 3].map((i) => (
             <div key={i}>
               <Skeleton className="h-3.5 w-20 rounded-md" />
@@ -35,14 +35,14 @@ export default function GroupDetailSkeleton() {
         </div>
 
         {/* Balance hero */}
-        <Skeleton className="h-36 w-full rounded-[24px]" />
+        <Skeleton className="h-36 w-full rounded-[var(--radius-card)]" />
 
         {/* Balances */}
         <div>
           <Skeleton className="h-6 w-28 rounded-md mb-3" />
           <div className="flex gap-3">
-            <Skeleton className="h-20 w-[190px] rounded-[18px] shrink-0" />
-            <Skeleton className="h-20 w-[190px] rounded-[18px] shrink-0" />
+            <Skeleton className="h-20 w-[190px] rounded-[var(--radius-inner)] shrink-0" />
+            <Skeleton className="h-20 w-[190px] rounded-[var(--radius-inner)] shrink-0" />
           </div>
         </div>
 

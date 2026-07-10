@@ -72,7 +72,7 @@ export default function ActivityPage() {
           <button
             onClick={() => router.push("/settings")}
             aria-label="Settings"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[0_2px_10px_-2px_rgba(0,0,0,0.12)] flex items-center justify-center tap-shrink"
+            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="1.8">
               <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />

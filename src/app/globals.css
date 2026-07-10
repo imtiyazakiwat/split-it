@@ -68,6 +68,16 @@
 
   --pos: #16a34a;              /* was green-600 */
   --neg: #ef4444;              /* was red-500 */
+
+  /* Elevation — consolidated from ad-hoc shadow recipes */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.12);
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.03), 0 16px 36px -24px rgba(0, 0, 0, 0.22);
+  --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.2);
+
+  /* Card radii — consolidated (inner 18 / card 22 / xl 28 = --radius-xl) */
+  --radius-inner: 18px;
+  --radius-card: 22px;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -118,6 +128,12 @@
 
     --pos: #4ade80;
     --neg: #ff6b6b;
+
+    /* Elevation — deeper on dark so surfaces still read */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+    --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.5);
+    --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), 0 16px 36px -24px rgba(0, 0, 0, 0.6);
+    --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.6);
   }
 }
 
