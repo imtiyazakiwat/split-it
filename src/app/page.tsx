@@ -13,6 +13,7 @@ import { GlassField } from "@/components/ui/GlassField";
 import Sparkline from "@/components/home/Sparkline";
 import BottomNav from "@/components/home/BottomNav";
 import GroupRow from "@/components/home/GroupRow";
+import Logo from "@/components/Logo";
 
 function greeting(): string {
   const h = new Date().getHours();
@@ -131,7 +132,7 @@ export default function Home() {
       <main className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-40 scroll-momentum">
         {/* Header */}
         <div className="flex items-start justify-between pt-3">
-          <span className="text-[30px] font-black italic text-indigo-600 leading-none">S</span>
+          <Logo className="h-9 w-auto" />
           <div className="flex items-center gap-2.5">
             <button
               onClick={() => router.push("/notifications")}
