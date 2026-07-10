@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import PwaBootstrap from "@/components/PwaBootstrap";
 import NotificationSetup from "@/components/NotificationSetup";
+import SplashGate from "@/components/SplashGate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -68,6 +69,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--background)]">
         <AuthProvider>
           {children}
+          <SplashGate />
           <PwaBootstrap />
           <NotificationSetup />
         </AuthProvider>
