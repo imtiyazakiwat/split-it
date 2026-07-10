@@ -1,6 +1,11 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+} from "firebase/firestore";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -17,7 +22,23 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const isFirebaseConfigReady = !!firebaseConfig.apiKey;
 
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+
+// Enable an on-device (IndexedDB) cache so onSnapshot listeners return the
+// last-known data synchronously on reload — no flashing from empty/0 to real
+// values, plus offline support. Falls back to the default in-memory Firestore
+// on the server or if the cache can't be initialized (e.g. HMR re-init).
+function createDb() {
+  if (typeof window === "undefined") return getFirestore(app);
+  try {
+    return initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    });
+  } catch {
+    return getFirestore(app);
+  }
+}
+
+export const db = createDb();
 export const googleProvider = new GoogleAuthProvider();
 
 // Analytics only works in the browser (relies on window), and is optional —

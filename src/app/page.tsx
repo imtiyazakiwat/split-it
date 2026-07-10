@@ -1,11 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { createGroup, joinGroupByCode, subscribeToUserGroups } from "@/lib/firestore";
 import { formatCurrency } from "@/lib/balance";
 import { Group } from "@/lib/types";
+import { readHomeCache, writeHomeCache } from "@/lib/homeCache";
 import LoginScreen from "@/components/LoginScreen";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
@@ -42,6 +43,26 @@ export default function Home() {
     const unsub = subscribeToUserGroups(user.uid, setGroups);
     return unsub;
   }, [user]);
+
+  // Hydrate last-known groups/balances from cache on first load so the summary
+  // shows real numbers instantly (no empty-to-value flash on refresh).
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!user || hydratedRef.current) return;
+    hydratedRef.current = true;
+    const cached = readHomeCache(user.uid);
+    if (!cached) return;
+    queueMicrotask(() => {
+      if (cached.groups?.length) setGroups((g) => (g.length ? g : cached.groups));
+      if (cached.balances) setBalances((b) => (Object.keys(b).length ? b : cached.balances));
+    });
+  }, [user]);
+
+  // Persist current state so the next refresh can hydrate from it.
+  useEffect(() => {
+    if (!user || groups.length === 0) return;
+    writeHomeCache(user.uid, { groups, balances });
+  }, [user, groups, balances]);
 
   const handleBalance = useCallback((groupId: string, net: number) => {
     setBalances((prev) => (prev[groupId] === net ? prev : { ...prev, [groupId]: net }));
