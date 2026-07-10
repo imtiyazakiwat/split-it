@@ -5,8 +5,10 @@ import { useAuth } from "@/lib/auth-context";
 import SplashScreen from "@/components/SplashScreen";
 
 /**
- * Shows the animated splash on launch until auth has resolved and a minimum
- * display time has elapsed (so it doesn't flicker), then fades out and unmounts.
+ * Shows the animated splash on launch until auth resolves and a minimum
+ * display time elapses, then fades out and unmounts. Dismissal is timer-driven
+ * (not dependent on animationend) with a hard safety cap so it can never block
+ * the app.
  */
 export default function SplashGate() {
   const { loading } = useAuth();
@@ -14,22 +16,27 @@ export default function SplashGate() {
   const [gone, setGone] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => setMinElapsed(true), 1300);
-    return () => clearTimeout(t);
+    const min = setTimeout(() => setMinElapsed(true), 1200);
+    // Safety net: never let the splash trap the user, even if auth stalls.
+    const max = setTimeout(() => setGone(true), 6000);
+    return () => {
+      clearTimeout(min);
+      clearTimeout(max);
+    };
   }, []);
-
-  if (gone) return null;
 
   const done = !loading && minElapsed;
 
+  useEffect(() => {
+    if (!done) return;
+    const t = setTimeout(() => setGone(true), 400); // let the fade-out play
+    return () => clearTimeout(t);
+  }, [done]);
+
+  if (gone) return null;
+
   return (
-    <div
-      className={`fixed inset-0 z-[100] ${done ? "animate-splash-out" : ""}`}
-      onAnimationEnd={() => {
-        if (done) setGone(true);
-      }}
-      aria-hidden={done}
-    >
+    <div className={`fixed inset-0 z-[100] ${done ? "animate-splash-out" : ""}`} aria-hidden={done}>
       <SplashScreen />
     </div>
   );
