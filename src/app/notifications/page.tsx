@@ -172,7 +172,7 @@ export default function NotificationsPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <span className="text-[12px] text-[var(--text-tertiary)]">{timeLabel(item.ts)}</span>
-                    {unread && <span className="w-2 h-2 rounded-full bg-[var(--tint-accent)]0" />}
+                    {unread && <span className="w-2 h-2 rounded-full bg-[var(--brand-solid)]" />}
                   </div>
                 </div>
               </div>
