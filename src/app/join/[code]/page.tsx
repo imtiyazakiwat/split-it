@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getGroupByInviteCode, joinGroupByCode } from "@/lib/firestore";
-import LoginScreen from "@/components/LoginScreen";
 
 export default function JoinPage() {
   const { code } = useParams<{ code: string }>();
@@ -15,32 +14,44 @@ export default function JoinPage() {
   const [groupName, setGroupName] = useState("");
 
   useEffect(() => {
-    if (!code || loading) return;
-    if (!user) return;
-    setBusy(true);
-    setError("");
-    getGroupByInviteCode(code).then((group) => {
-      if (!group) {
-        setError("No group found with that invite code.");
-        setBusy(false);
-        return;
-      }
-      setGroupName(group.name);
-      if (group.memberIds.includes(user.uid)) {
-        router.replace(`/groups/${group.id}`);
-        return;
-      }
-      return joinGroupByCode(code, user.uid, {
-        displayName: user.displayName || user.email || "User",
-        email: user.email || "",
-        photoURL: user.photoURL || "",
-      }).then((id) => {
+    if (!code || loading || !user) return;
+    const currentUser = user;
+    let cancelled = false;
+
+    async function run() {
+      setBusy(true);
+      setError("");
+      try {
+        const group = await getGroupByInviteCode(code);
+        if (cancelled) return;
+        if (!group) {
+          setError("No group found with that invite code.");
+          return;
+        }
+        setGroupName(group.name);
+        if (group.memberIds.includes(currentUser.uid)) {
+          router.replace(`/groups/${group.id}`);
+          return;
+        }
+        const id = await joinGroupByCode(code, currentUser.uid, {
+          displayName: currentUser.displayName || currentUser.email || "User",
+          email: currentUser.email || "",
+          photoURL: currentUser.photoURL || "",
+        });
+        if (cancelled) return;
         if (id) router.replace(`/groups/${id}`);
         else setError("Failed to join group.");
-      });
-    }).catch(() => {
-      setError("Something went wrong.");
-    }).finally(() => setBusy(false));
+      } catch {
+        if (!cancelled) setError("Something went wrong.");
+      } finally {
+        if (!cancelled) setBusy(false);
+      }
+    }
+
+    run();
+    return () => {
+      cancelled = true;
+    };
   }, [code, user, loading, router]);
 
   if (loading) {
