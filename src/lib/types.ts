@@ -70,10 +70,30 @@ export interface Settlement {
   note?: string;
   receiptUrls: string[];
   expenseIds?: string[];
+  // Who raised this record. Needed because either side can create a
+  // settlement now (you can pay someone, or write off what someone owes you),
+  // and the *other* party is always the one who approves it. Legacy documents
+  // without this field are treated as created by `fromUid`.
+  createdBy?: string;
   // When set, this settlement was created by forwarding an incoming payment
   // (option b): it points to the settlement whose funds are being passed on.
   forwardedFromSettlementId?: string;
+  // ── Cross-group settlement ──
+  // "payment"  — real money moved (or is claimed to have moved).
+  // "offset"   — no money moved: a balance in this group was cancelled
+  //              against an opposing balance with the same person in another
+  //              group. Offsets are always created as a linked set.
+  kind?: SettlementKind;
+  // Links the legs of one cross-group action together. This is only a grouping
+  // hint, never a trust boundary: legs are matched on creator and counterparty
+  // as well, so a third party can't smuggle a record into someone else's set.
+  crossGroupId?: string;
+  // How many legs the set should contain, so a partially loaded (or partially
+  // written) set can be detected instead of being approved piecemeal.
+  crossGroupLegCount?: number;
 }
+
+export type SettlementKind = "payment" | "offset";
 
 export interface Balance {
   uid: string;

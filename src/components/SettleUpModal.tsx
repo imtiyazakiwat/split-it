@@ -1,11 +1,19 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Expense } from "@/lib/types";
-import { addSettlementRequest } from "@/lib/firestore";
+import { addSettlementRequest, resolveUpiId } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
-import { UPI_APPS, isLikelyAndroid, UpiPaymentParams } from "@/lib/upi";
+import {
+  UPI_APPS,
+  UpiApp,
+  UpiPaymentParams,
+  copyToClipboard,
+  isLikelyAndroid,
+  isValidUpiId,
+  launchUpi,
+} from "@/lib/upi";
 import { UpiAppIcon } from "@/components/UpiAppIcon";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
@@ -48,14 +56,36 @@ export default function SettleUpModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [paidExternally, setPaidExternally] = useState(false);
+  const [resolvedUpiId, setResolvedUpiId] = useState<string | undefined>(toUpiId);
+  const [upiChecked, setUpiChecked] = useState(false);
   const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
   const androidLikely = isLikelyAndroid();
 
-  const upiParams: UpiPaymentParams | null = toUpiId
+  /**
+   * The group document's copy of a member's UPI ID is a mirror that can be
+   * missing (it was never written before the profile-sync fix) or stale, which
+   * is why "Pay with UPI" never appeared even after the payee had saved an ID.
+   * Fall back to reading their user document directly.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    resolveUpiId(toUid, toUpiId).then((resolved) => {
+      if (cancelled) return;
+      setResolvedUpiId(resolved);
+      setUpiChecked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [toUid, toUpiId]);
+
+  const upiUsable = !!resolvedUpiId && isValidUpiId(resolvedUpiId);
+
+  const upiParams: UpiPaymentParams | null = resolvedUpiId
     ? {
-        payeeVpa: toUpiId,
+        payeeVpa: resolvedUpiId,
         payeeName: toName,
         amount: parsedAmount,
         note: note.trim() || "SplitIt settlement",
@@ -77,18 +107,30 @@ export default function SettleUpModal({
     setReceiptFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
-  function handlePayWithApp(buildUri: (p: UpiPaymentParams) => string) {
-    if (!upiParams || parsedAmount <= 0) return;
-    const uri = buildUri(upiParams);
-    // Launch the UPI app via a transient anchor rather than mutating
-    // window.location directly.
-    const anchor = document.createElement("a");
-    anchor.href = uri;
-    anchor.rel = "noopener";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
+  function handlePayWithApp(app: UpiApp) {
+    if (!upiParams) return;
+    if (parsedAmount <= 0) {
+      setError("Enter the amount you're paying first.");
+      return;
+    }
+    if (!upiUsable) {
+      setError(`${toName}'s UPI ID doesn't look valid, so no app can open it.`);
+      return;
+    }
+    // Handing off via `window.location` (see lib/upi) works in installed PWAs,
+    // where a synthesised anchor click on a non-http scheme is ignored.
+    if (!launchUpi(app, upiParams)) {
+      setError("Couldn't open a UPI app. Copy the UPI ID and pay manually.");
+      return;
+    }
+    setError("");
     setPaidExternally(true);
+  }
+
+  async function handleCopyUpi() {
+    if (!resolvedUpiId) return;
+    const ok = await copyToClipboard(resolvedUpiId);
+    showToast({ message: ok ? "UPI ID copied" : "Couldn't copy — long-press to select" });
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -109,6 +151,8 @@ export default function SettleUpModal({
         fromUid,
         toUid,
         amount: parsedAmount,
+        createdBy: fromUid,
+        kind: "payment",
         note: note.trim() || undefined,
         receiptUrls,
         expenseIds: expenseIds.length > 0 ? expenseIds : undefined,
@@ -182,7 +226,7 @@ export default function SettleUpModal({
           </div>
         )}
 
-        {toUpiId ? (
+        {upiUsable ? (
           <div>
             <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
               Pay with UPI
@@ -192,27 +236,50 @@ export default function SettleUpModal({
                 <button
                   key={app.id}
                   type="button"
-                  onClick={() => handlePayWithApp(app.buildUri)}
-                  disabled={parsedAmount <= 0}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink disabled:opacity-40"
+                  onClick={() => handlePayWithApp(app)}
+                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink"
                 >
                   <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
                   <span className="truncate">{app.label}</span>
                 </button>
               ))}
             </div>
-            {!androidLikely && (
+            <button
+              type="button"
+              onClick={handleCopyUpi}
+              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--label-secondary)] tap-shrink"
+            >
+              Copy UPI ID · {resolvedUpiId}
+            </button>
+            {!androidLikely ? (
               <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
-                UPI apps open automatically only on Android. On iOS, pay manually
-                using {toName}&rsquo;s UPI ID:{" "}
-                <span className="font-medium text-[var(--label-secondary)]">{toUpiId}</span>
+                UPI apps only open automatically on Android. Elsewhere, copy{" "}
+                {toName}&rsquo;s UPI ID above and pay from your bank app.
               </p>
+            ) : (
+              paidExternally && (
+                // The browser can't tell us whether the hand-off worked, so
+                // always offer the manual route once we've tried.
+                <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
+                  Nothing opened? Copy the UPI ID above and pay from your bank app.
+                </p>
+              )
             )}
+          </div>
+        ) : resolvedUpiId ? (
+          <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
+            <p className="text-[13px] text-[var(--label-secondary)]">
+              {toName}&rsquo;s saved UPI ID (
+              <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
+              handle@bank address, so UPI apps can&rsquo;t open it. Ask them to fix it in
+              Settings.
+            </p>
           </div>
         ) : (
           <p className="text-[13px] text-[var(--label-tertiary)]">
-            {toName} hasn&rsquo;t added a UPI ID, so pay them directly (cash, UPI,
-            etc.) and record it here.
+            {upiChecked
+              ? `${toName} hasn't added a UPI ID, so pay them directly (cash, UPI, etc.) and record it here.`
+              : "Checking for a UPI ID…"}
           </p>
         )}
 

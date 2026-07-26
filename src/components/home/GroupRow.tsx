@@ -1,9 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { subscribeToExpenses, subscribeToSettlements } from "@/lib/firestore";
-import { computeBalances, formatCurrency } from "@/lib/balance";
-import { Group, Expense, Settlement } from "@/lib/types";
+import { formatCurrency } from "@/lib/balance";
+import { Group } from "@/lib/types";
 import Skeleton from "@/components/ui/Skeleton";
 
 const THEMES = [
@@ -39,56 +37,28 @@ function timeAgo(ts: number): string {
   return `${Math.floor(d / 30)}mo ago`;
 }
 
+/**
+ * Purely presentational. Balances and activity timestamps are now computed
+ * once by the home page from the shared group-data cache instead of each row
+ * opening its own pair of Firestore listeners.
+ */
 export default function GroupRow({
   group,
-  currentUid,
   index,
-  onBalance,
+  net,
+  loaded,
+  lastActivityTs,
+  pendingCount = 0,
   onOpen,
 }: {
   group: Group;
-  currentUid: string;
   index: number;
-  onBalance: (groupId: string, net: number) => void;
+  net: number;
+  loaded: boolean;
+  lastActivityTs: number;
+  pendingCount?: number;
   onOpen: () => void;
 }) {
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let gotExp = false;
-    let gotSet = false;
-    const unsubs = [
-      subscribeToExpenses(group.id, (e) => {
-        setExpenses(e);
-        gotExp = true;
-        if (gotSet) setLoaded(true);
-      }),
-      subscribeToSettlements(group.id, (s) => {
-        setSettlements(s);
-        gotSet = true;
-        if (gotExp) setLoaded(true);
-      }),
-    ];
-    return () => unsubs.forEach((u) => u());
-  }, [group.id]);
-
-  const activeExpenses = expenses.filter((e) => !e.editAction);
-  const balances = computeBalances(group.memberIds, activeExpenses, settlements);
-  const net = balances.find((b) => b.uid === currentUid)?.netAmount ?? 0;
-
-  const lastTs = Math.max(
-    group.createdAt,
-    ...activeExpenses.map((e) => e.updatedAt || e.createdAt),
-    ...settlements.map((s) => s.updatedAt || s.createdAt)
-  );
-
-  useEffect(() => {
-    onBalance(group.id, net);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [group.id, net]);
-
   const theme = THEMES[index % THEMES.length];
   const emoji = emojiFor(group.name);
   const settled = Math.abs(net) < 0.01;
@@ -122,7 +92,14 @@ export default function GroupRow({
 
       {/* Name + members */}
       <div className="min-w-0 flex-1">
-        <p className="text-[16px] font-semibold text-[var(--text-primary)] truncate">{group.name}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-[16px] font-semibold text-[var(--text-primary)] truncate">{group.name}</p>
+          {pendingCount > 0 && (
+            <span className="shrink-0 rounded-full bg-[var(--tint-warning)] px-1.5 py-0.5 text-[10px] font-bold text-[var(--warning)]">
+              {pendingCount}
+            </span>
+          )}
+        </div>
         <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
           {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
         </p>
@@ -180,7 +157,7 @@ export default function GroupRow({
                   <circle cx="12" cy="12" r="9" />
                   <path d="M12 7v5l3 2" strokeLinecap="round" strokeLinejoin="round" />
                 </svg>
-                {timeAgo(lastTs)}
+                {timeAgo(lastActivityTs)}
               </p>
             </div>
             {settled ? (

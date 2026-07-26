@@ -1,13 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { subscribeToUserGroups, updateSettlementStatus } from "@/lib/firestore";
-import { Group, Settlement } from "@/lib/types";
+import { useGroupData } from "@/lib/group-data-context";
+import {
+  updateSettlementStatus,
+  updateCrossGroupSettlementStatus,
+} from "@/lib/firestore";
+import {
+  activeExpenses,
+  canRespondToSettlement,
+  formatCurrency,
+  settlementCreator,
+} from "@/lib/balance";
+import { findCrossGroupLegs } from "@/lib/global-balance";
+import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
-import NotificationFeeder, { NotificationItem } from "@/components/notifications/NotificationFeeder";
 import { useToast } from "@/components/ui/Toast";
+
+type NotificationKind = "request" | "status" | "expense";
+
+interface NotificationItem {
+  key: string;
+  ts: number;
+  groupId: string;
+  groupName: string;
+  kind: NotificationKind;
+  title: React.ReactNode;
+  subtitle: string;
+  settlement?: Settlement;
+  /** How many linked legs this one action will apply to. */
+  legCount?: number;
+}
 
 function dateBucket(ts: number): string {
   const now = new Date();
@@ -24,7 +49,7 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-function KindIcon({ kind }: { kind: NotificationItem["kind"] }) {
+function KindIcon({ kind }: { kind: NotificationKind }) {
   if (kind === "request")
     return (
       <span className="w-10 h-10 rounded-full bg-[var(--tint-warning)] flex items-center justify-center shrink-0">
@@ -54,27 +79,149 @@ export default function NotificationsPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const showToast = useToast();
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [itemsByGroup, setItemsByGroup] = useState<Record<string, NotificationItem[]>>({});
+  const { datasets } = useGroupData();
+  const [busyId, setBusyId] = useState<string | null>(null);
   const [seenAt] = useState<number>(() => {
     if (typeof window === "undefined") return 0;
     return Number(localStorage.getItem("splitit-notif-seen") || 0);
   });
+  const uid = user?.uid;
 
-  useEffect(() => {
-    if (!user) return;
-    return subscribeToUserGroups(user.uid, setGroups);
-  }, [user]);
+  const allItems = useMemo<NotificationItem[]>(() => {
+    if (!uid) return [];
+    const items: NotificationItem[] = [];
+    // A cross-group settlement arrives as several linked records; show it once.
+    const seenCrossGroupIds = new Set<string>();
 
-  const handleItems = useCallback((groupId: string, items: NotificationItem[]) => {
-    setItemsByGroup((prev) => ({ ...prev, [groupId]: items }));
-  }, []);
+    for (const { group, expenses, settlements } of datasets) {
+      const name = (target: string) =>
+        target === uid ? "You" : group.members?.[target]?.displayName || "Someone";
 
-  const groupIds = new Set(groups.map((g) => g.id));
-  const allItems = Object.entries(itemsByGroup)
-    .filter(([gid]) => groupIds.has(gid))
-    .flatMap(([, items]) => items)
-    .sort((a, b) => b.ts - a.ts);
+      for (const s of settlements) {
+        if (s.crossGroupId && canRespondToSettlement(s, uid)) {
+          if (seenCrossGroupIds.has(s.crossGroupId)) continue;
+          seenCrossGroupIds.add(s.crossGroupId);
+        }
+        // Either side can raise a settlement now (a payment you made, or a
+        // cross-group offset), so "who needs to act" is whoever didn't create
+        // it — not simply the payee.
+        if (canRespondToSettlement(s, uid)) {
+          const creator = settlementCreator(s);
+          const isOffset = s.kind === "offset";
+          // A set can mix an offset with a cash claim, and each leg only
+          // carries its own slice of the total — so the prompt is built from
+          // the whole set rather than from whichever leg surfaced first.
+          const set = findCrossGroupLegs(datasets, s, uid);
+          const isSet = set.legs.length > 1;
+          items.push({
+            key: `req-${group.id}-${s.id}`,
+            ts: s.updatedAt || s.createdAt,
+            groupId: group.id,
+            groupName: group.name,
+            kind: "request",
+            title: isSet ? (
+              <>
+                <span className="font-semibold">{name(creator)}</span>
+                {set.offsetAmount > 0.01 && (
+                  <>
+                    <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
+                    <span className="font-semibold">{formatCurrency(set.offsetAmount)}</span>
+                  </>
+                )}
+                {set.offsetAmount > 0.01 && set.cashAmount > 0.01 && (
+                  <span className="text-[var(--text-tertiary)]"> and</span>
+                )}
+                {set.cashAmount > 0.01 && (
+                  <>
+                    <span className="text-[var(--text-tertiary)]"> says they paid you </span>
+                    <span className="font-semibold">{formatCurrency(set.cashAmount)}</span>
+                  </>
+                )}
+                <span className="text-[var(--text-tertiary)]">
+                  {" "}
+                  across {set.legs.length} groups
+                </span>
+              </>
+            ) : isOffset ? (
+              <>
+                <span className="font-semibold">{name(creator)}</span>
+                <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+                <span className="text-[var(--text-tertiary)]"> in {group.name}</span>
+              </>
+            ) : s.fromUid === creator ? (
+              <>
+                <span className="font-semibold">{name(s.fromUid)}</span>
+                <span className="text-[var(--text-tertiary)]"> says they paid you </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">{name(creator)}</span>
+                <span className="text-[var(--text-tertiary)]"> recorded your payment of </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+              </>
+            ),
+            subtitle: isSet
+              ? `${set.legs.length} linked records · one approval applies to all`
+              : `${group.name}${s.note ? ` · ${s.note}` : ""}`,
+            settlement: s,
+            legCount: set.legs.length,
+          });
+        } else if (settlementCreator(s) === uid && s.status !== "pending") {
+          items.push({
+            key: `st-${group.id}-${s.id}`,
+            ts: s.updatedAt || s.createdAt,
+            groupId: group.id,
+            groupName: group.name,
+            kind: "status",
+            title: (
+              <>
+                <span className="text-[var(--text-tertiary)]">Your settlement with </span>
+                <span className="font-semibold">
+                  {name(s.fromUid === uid ? s.toUid : s.fromUid)}
+                </span>
+                <span className="text-[var(--text-tertiary)]"> was </span>
+                <span
+                  className={
+                    s.status === "approved"
+                      ? "font-semibold text-[var(--pos)]"
+                      : "font-semibold text-[var(--neg)]"
+                  }
+                >
+                  {s.status}
+                </span>
+              </>
+            ),
+            subtitle: `${formatCurrency(s.amount)} · ${group.name}`,
+          });
+        }
+      }
+
+      for (const e of activeExpenses(expenses)) {
+        if (e.createdBy === uid) continue;
+        items.push({
+          key: `exp-${group.id}-${e.id}`,
+          ts: e.updatedAt || e.createdAt,
+          groupId: group.id,
+          groupName: group.name,
+          kind: "expense",
+          title: (
+            <>
+              <span className="font-semibold">{name(e.createdBy)}</span>
+              <span className="text-[var(--text-tertiary)]">
+                {e.editAction === "edited" ? " updated " : " added "}
+              </span>
+              <span className="font-semibold text-[var(--brand)]">{e.description}</span>
+            </>
+          ),
+          subtitle: `${formatCurrency(e.amount)} · ${group.name}`,
+        });
+      }
+    }
+
+    return items.sort((a, b) => b.ts - a.ts);
+  }, [datasets, uid]);
 
   useEffect(() => {
     if (allItems.length === 0 || typeof window === "undefined") return;
@@ -91,13 +238,41 @@ export default function NotificationsPage() {
   }
   if (!user) return <LoginScreen />;
 
-  function handleApprove(s: Settlement) {
-    updateSettlementStatus(s.groupId, s.id, "approved");
-    showToast({ message: "Payment approved" });
-  }
-  function handleReject(s: Settlement) {
-    updateSettlementStatus(s.groupId, s.id, "rejected");
-    showToast({ message: "Request declined" });
+  async function respond(s: Settlement, status: "approved" | "rejected") {
+    setBusyId(s.id);
+    try {
+      const set = findCrossGroupLegs(datasets, s, uid!);
+      // Never apply half of a linked set: if a leg hasn't loaded (or was never
+      // written), the balances would end up inconsistent across groups.
+      if (!set.complete) {
+        showToast({
+          message: `Still loading ${set.expected - set.legs.length} linked record(s) — try again in a moment`,
+        });
+        return;
+      }
+      if (set.legs.length > 1) {
+        await updateCrossGroupSettlementStatus(
+          set.legs.map((l) => ({ groupId: l.groupId, settlementId: l.settlementId })),
+          status
+        );
+      } else {
+        await updateSettlementStatus(set.legs[0].groupId, set.legs[0].settlementId, status);
+      }
+      showToast({
+        message:
+          status === "approved"
+            ? set.legs.length > 1
+              ? `Applied across ${set.legs.length} groups`
+              : "Settlement approved"
+            : "Request declined",
+      });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update",
+      });
+    } finally {
+      setBusyId(null);
+    }
   }
 
   const rows = allItems.map((item, i) => {
@@ -108,10 +283,6 @@ export default function NotificationsPage() {
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      {groups.map((g) => (
-        <NotificationFeeder key={g.id} group={g} currentUid={user.uid} onItems={handleItems} />
-      ))}
-
       <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="flex items-center gap-3 pt-2">
           <button
@@ -156,14 +327,16 @@ export default function NotificationsPage() {
                     {item.kind === "request" && item.settlement && (
                       <div className="flex gap-2 mt-2">
                         <button
-                          onClick={(ev) => { ev.stopPropagation(); handleApprove(item.settlement!); }}
-                          className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
+                          disabled={busyId === item.settlement.id}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "approved"); }}
+                          className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
-                          Approve
+                          {item.legCount && item.legCount > 1 ? "Approve all" : "Approve"}
                         </button>
                         <button
-                          onClick={(ev) => { ev.stopPropagation(); handleReject(item.settlement!); }}
-                          className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink"
+                          disabled={busyId === item.settlement.id}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "rejected"); }}
+                          className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
                           Reject
                         </button>

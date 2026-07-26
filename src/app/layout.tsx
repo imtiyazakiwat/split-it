@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
+import { GroupDataProvider } from "@/lib/group-data-context";
 import PwaBootstrap from "@/components/PwaBootstrap";
 import NotificationSetup from "@/components/NotificationSetup";
 import SplashGate from "@/components/SplashGate";
@@ -70,12 +71,15 @@ export default function RootLayout({
       </head>
       <body className="min-h-full flex flex-col bg-[var(--background)]">
         <AuthProvider>
-          <ToastProvider>
-            <PageTransition>{children}</PageTransition>
-            <SplashGate />
-            <PwaBootstrap />
-            <NotificationSetup />
-          </ToastProvider>
+          {/* One shared set of Firestore listeners for every screen. */}
+          <GroupDataProvider>
+            <ToastProvider>
+              <PageTransition>{children}</PageTransition>
+              <SplashGate />
+              <PwaBootstrap />
+              <NotificationSetup />
+            </ToastProvider>
+          </GroupDataProvider>
         </AuthProvider>
       </body>
     </html>

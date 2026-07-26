@@ -75,6 +75,8 @@ export default function ForwardModal({
         fromUid: meUid,
         toUid: target.uid,
         amount: amt,
+        createdBy: meUid,
+        kind: "payment",
         note: `Forwarded from ${fromName}'s payment`,
         forwardedFromSettlementId: incomingId,
       });
