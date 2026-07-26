@@ -1,7 +1,7 @@
 "use client";
 
 import { Expense, Settlement } from "@/lib/types";
-import { formatCurrency } from "@/lib/balance";
+import { canRespondToSettlement, formatCurrency } from "@/lib/balance";
 
 type Item =
   | { type: "expense"; data: Expense; ts: number }
@@ -36,6 +36,15 @@ function CheckIcon() {
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="9" />
       <path d="m8.5 12 2.5 2.5 4.5-5" />
+    </svg>
+  );
+}
+
+/** Cross-group offset: balances cancelled out, no money moved. */
+function OffsetIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3" />
     </svg>
   );
 }
@@ -87,7 +96,14 @@ export default function ActivityTimeline({
   const rows = shown.map((item, i) => {
     const bucket = dateBucket(item.ts);
     const prevBucket = i > 0 ? dateBucket(shown[i - 1].ts) : null;
-    return { item, bucket, showBucket: bucket !== prevBucket };
+    return {
+      item,
+      bucket,
+      showBucket: bucket !== prevBucket,
+      // Stable per-record key: indexes made React reuse rows across updates,
+      // which is how stale text and mismatched action buttons showed up.
+      key: `${item.type}-${item.data.id}`,
+    };
   });
 
   return (
@@ -95,13 +111,14 @@ export default function ActivityTimeline({
       {/* connecting line */}
       <div className="absolute left-[18px] top-2 bottom-2 w-px bg-[var(--fill)]" aria-hidden />
       <div className="space-y-1">
-        {rows.map(({ item, bucket, showBucket }, i) => {
+        {rows.map(({ item, bucket, showBucket, key }) => {
           const isSettlement = item.type === "settlement";
           const s = isSettlement ? (item.data as Settlement) : null;
           const e = !isSettlement ? (item.data as Expense) : null;
+          const isOffset = s?.kind === "offset";
 
           return (
-            <div key={i}>
+            <div key={key}>
               {showBucket && (
                 <div className="relative z-[1] inline-block bg-[var(--background)] rounded-full px-2.5 py-0.5 my-1.5 ml-0.5">
                   <span className="text-[12px] font-medium text-[var(--text-secondary)]">{bucket}</span>
@@ -113,10 +130,14 @@ export default function ActivityTimeline({
               >
                 <span
                   className={`relative z-[1] w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                    isSettlement ? "bg-[var(--tint-success)]" : "bg-[var(--tint-accent-2)]"
+                    isOffset
+                      ? "bg-[var(--tint-accent-2)]"
+                      : isSettlement
+                      ? "bg-[var(--tint-success)]"
+                      : "bg-[var(--tint-accent-2)]"
                   }`}
                 >
-                  {isSettlement ? <CheckIcon /> : <ReceiptIcon />}
+                  {isOffset ? <OffsetIcon /> : isSettlement ? <CheckIcon /> : <ReceiptIcon />}
                 </span>
 
                 <div className="flex-1 min-w-0">
@@ -144,7 +165,9 @@ export default function ActivityTimeline({
                   {s && (
                     <>
                       <p className="text-[15px] text-[var(--text-primary)]">
-                        {s.status === "pending" ? (
+                        {isOffset ? (
+                          <><span className="text-[var(--text-tertiary)]">Cross-group offset · </span><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> and </span><span className="font-semibold">{memberName(s.toUid)}</span></>
+                        ) : s.status === "pending" ? (
                           <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> requested from </span><span className="font-semibold">{memberName(s.toUid)}</span></>
                         ) : s.status === "rejected" ? (
                           <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> — request rejected</span></>
@@ -153,7 +176,9 @@ export default function ActivityTimeline({
                         )}
                       </p>
                       <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                        {formatCurrency(s.amount)}{s.note ? ` · ${s.note}` : ""}
+                        {formatCurrency(s.amount)}
+                        {isOffset ? " · no money moved" : ""}
+                        {s.note ? ` · ${s.note}` : ""}
                       </p>
                       {s.receiptUrls.length > 0 && (
                         <div className="flex gap-2 mt-1">
@@ -162,10 +187,15 @@ export default function ActivityTimeline({
                           ))}
                         </div>
                       )}
-                      {s.status === "pending" && s.toUid === currentUid && (
+                      {/* Whoever didn't raise the record is the one who acts on
+                          it — that's the payee for a normal claim, and the other
+                          side for a cross-group offset. */}
+                      {canRespondToSettlement(s, currentUid) && (
                         <div className="flex gap-2 mt-1.5">
-                          <button onClick={(ev) => { ev.stopPropagation(); onApprove(s); }} className="rounded-full bg-[var(--brand-solid)] text-white px-3 py-1 text-[12px] font-medium tap-shrink">Approve</button>
-                          {canForward && (
+                          <button onClick={(ev) => { ev.stopPropagation(); onApprove(s); }} className="rounded-full bg-[var(--brand-solid)] text-white px-3 py-1 text-[12px] font-medium tap-shrink">
+                            {isOffset ? "Accept offset" : "Approve"}
+                          </button>
+                          {canForward && !isOffset && s.toUid === currentUid && (
                             <button onClick={(ev) => { ev.stopPropagation(); onForward(s); }} className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3 py-1 text-[12px] font-medium tap-shrink">Forward</button>
                           )}
                           <button onClick={(ev) => { ev.stopPropagation(); onReject(s); }} className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3 py-1 text-[12px] font-medium tap-shrink">Reject</button>

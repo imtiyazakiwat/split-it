@@ -4,12 +4,13 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import {
-  updateUpiId,
   updateUserProfile,
   saveFcmToken,
   removeFcmToken,
   getUserProfile,
 } from "@/lib/firestore";
+import { isValidUpiId } from "@/lib/upi";
+import LoginScreen from "@/components/LoginScreen";
 import { uploadImage } from "@/lib/storage";
 import {
   requestNotificationPermission,
@@ -35,17 +36,31 @@ export default function SettingsPage() {
 
   useEffect(() => {
     if (!user) return;
-    getUserProfile(user.uid).then((data) => {
-      if (data) {
-        setDisplayName(data.displayName || "");
-        setUpiId(data.upiId || "");
-        setPhotoPreview(data.photoURL || user.photoURL || "");
-        setNotificationsOn(!!data.fcmToken);
-      }
-    });
+    const fallbackName = user.displayName || "";
+    getUserProfile(user.uid)
+      .then((data) => {
+        setDisplayName(data?.displayName || fallbackName);
+        setUpiId(data?.upiId || "");
+        setPhotoPreview(data?.photoURL || user.photoURL || "");
+        setNotificationsOn(!!data?.fcmToken);
+      })
+      .catch(() => {
+        // Offline or blocked read: still let the user edit and save.
+        setDisplayName(fallbackName);
+        setPhotoPreview(user.photoURL || "");
+      });
   }, [user]);
 
-  if (loading || !user) return null;
+  if (loading) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <p className="text-[var(--label-tertiary)]">Loading…</p>
+      </div>
+    );
+  }
+  // Rendering `null` here left Android users staring at a blank screen whenever
+  // sign-in hadn't completed (which the popup-only flow made common).
+  if (!user) return <LoginScreen />;
 
   const currentUser = user;
 
@@ -60,6 +75,13 @@ export default function SettingsPage() {
 
   async function handleSaveProfile(e: React.FormEvent) {
     e.preventDefault();
+    const trimmedUpi = upiId.trim();
+    // Catching this here avoids saving an ID that no UPI app will ever accept,
+    // which used to surface much later as a silent failure at payment time.
+    if (trimmedUpi && !isValidUpiId(trimmedUpi)) {
+      setError("That UPI ID doesn't look right. It should look like yourname@bank.");
+      return;
+    }
     setBusy(true);
     setError("");
     setSaved(false);
@@ -68,14 +90,14 @@ export default function SettingsPage() {
       if (photoFile) {
         photoURL = await uploadImage(photoFile, "avatar");
       }
+      // One write, and it mirrors name/photo/UPI onto every group membership so
+      // the settle-up sheet can actually find the UPI ID.
       await updateUserProfile(currentUser.uid, {
         displayName: displayName.trim() || currentUser.displayName || "User",
+        email: (currentUser.email || "").toLowerCase(),
         photoURL,
+        upiId: trimmedUpi,
       });
-      const trimmedUpi = upiId.trim();
-      if (trimmedUpi) {
-        await updateUpiId(currentUser.uid, trimmedUpi);
-      }
       setPhotoFile(null);
       setSaved(true);
     } catch (err) {
@@ -153,12 +175,26 @@ export default function SettingsPage() {
               placeholder="Your name"
             />
 
-            <GlassField
-              label="UPI ID"
-              value={upiId}
-              onChange={(e) => setUpiId(e.target.value)}
-              placeholder="yourname@bank"
-            />
+            <div>
+              <GlassField
+                label="UPI ID"
+                value={upiId}
+                onChange={(e) => setUpiId(e.target.value)}
+                placeholder="yourname@bank"
+                inputMode="email"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+              <p className="text-[12px] text-[var(--label-tertiary)] mt-1">
+                Shared with your groups so they can pay you in one tap.
+                {upiId.trim() && !isValidUpiId(upiId.trim()) && (
+                  <span className="block text-[var(--danger)] mt-0.5">
+                    Expected format: yourname@bank
+                  </span>
+                )}
+              </p>
+            </div>
 
             {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
             {saved && <p className="text-sm text-[var(--success)]">Saved.</p>}

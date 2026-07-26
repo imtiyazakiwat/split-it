@@ -14,17 +14,42 @@ import {
   arrayUnion,
   arrayRemove,
   deleteField,
+  writeBatch,
   type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
-  Group, Expense, Settlement, SettlementStatus,
-  SplitType, ExpenseSplit, EditAction, SettlementMode,
+  Group, Expense, Settlement, SettlementStatus, SettlementKind,
+  SplitType, ExpenseSplit, SettlementMode, UserProfile,
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
+}
+
+/**
+ * Firestore rejects `undefined` field values outright, so every write path
+ * scrubs them first. Passing `receiptUrls: undefined` used to make editing an
+ * expense throw before it ever reached the server.
+ */
+function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined)
+  ) as Partial<T>;
+}
+
+/**
+ * Snapshot listeners fail silently by default: without an error callback a
+ * permission error or a dropped connection just leaves the UI showing an empty
+ * list forever, which is exactly how "Android isn't populating data" presents.
+ * Every subscription now reports errors so callers can surface them.
+ */
+function onSnapshotError(context: string, onError?: (err: Error) => void) {
+  return (err: Error) => {
+    console.error(`[firestore] ${context} listener failed:`, err);
+    onError?.(err);
+  };
 }
 
 // ── Groups ──────────────────────────────────────────────────
@@ -38,7 +63,7 @@ export async function createGroup(
   const groupRef = await addDoc(collection(db, "groups"), {
     name,
     memberIds: [creatorUid],
-    members: { [creatorUid]: creatorProfile },
+    members: { [creatorUid]: stripUndefined(creatorProfile) },
     createdBy: creatorUid,
     createdAt: Date.now(),
     inviteCode,
@@ -148,7 +173,7 @@ export async function joinGroupByCode(
   const groupDoc = snap.docs[0];
   await updateDoc(doc(db, "groups", groupDoc.id), {
     memberIds: arrayUnion(uid),
-    [`members.${uid}`]: profile,
+    [`members.${uid}`]: stripUndefined(profile),
   });
   return groupDoc.id;
 }
@@ -161,53 +186,68 @@ export async function getGroupByInviteCode(code: string): Promise<Group | null> 
   return { id: d.id, ...d.data() } as Group;
 }
 
+function toGroup(id: string, data: Record<string, unknown>): Group {
+  return {
+    id,
+    ...data,
+    description: (data.description as string) || "",
+    memberIds: (data.memberIds as string[]) || [],
+    members: (data.members as Group["members"]) || {},
+  } as Group;
+}
+
 export function subscribeToUserGroups(
   uid: string,
-  callback: (groups: Group[]) => void
+  callback: (groups: Group[]) => void,
+  onError?: (err: Error) => void
 ) {
   const q = query(collection(db, "groups"), where("memberIds", "array-contains", uid));
-  return onSnapshot(q, (snap) => {
-    const groups = snap.docs.map((d) => {
-      const data = d.data();
-      return { id: d.id, ...data, description: data.description || "" } as Group;
-    });
-    callback(groups);
-  });
+  return onSnapshot(
+    q,
+    (snap) => callback(snap.docs.map((d) => toGroup(d.id, d.data()))),
+    onSnapshotError("user groups", onError)
+  );
 }
 
 export function subscribeToGroup(
   groupId: string,
-  callback: (group: Group | null) => void
+  callback: (group: Group | null) => void,
+  onError?: (err: Error) => void
 ) {
-  return onSnapshot(doc(db, "groups", groupId), (snap) => {
-    if (!snap.exists()) { callback(null); return; }
-    const data = snap.data();
-    callback({ id: snap.id, ...data, description: data.description || "" } as Group);
-  });
+  return onSnapshot(
+    doc(db, "groups", groupId),
+    (snap) => callback(snap.exists() ? toGroup(snap.id, snap.data()) : null),
+    onSnapshotError(`group ${groupId}`, onError)
+  );
 }
 
 // ── Expenses ────────────────────────────────────────────────
 
 export function subscribeToExpenses(
   groupId: string,
-  callback: (expenses: Expense[]) => void
+  callback: (expenses: Expense[]) => void,
+  onError?: (err: Error) => void
 ) {
   const q = query(collection(db, "groups", groupId, "expenses"));
-  return onSnapshot(q, (snap) => {
-    const expenses = snap.docs
-      .map((d) => {
-        const data = d.data();
-        return { id: d.id, ...data, receiptUrls: data.receiptUrls || [] } as Expense;
-      })
-      .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
-    callback(expenses);
-  });
-}
-
-function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
-  return Object.fromEntries(
-    Object.entries(obj).filter(([, value]) => value !== undefined)
-  ) as Partial<T>;
+  return onSnapshot(
+    q,
+    (snap) => {
+      const expenses = snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id,
+            ...data,
+            groupId,
+            receiptUrls: data.receiptUrls || [],
+            splits: data.splits || [],
+          } as Expense;
+        })
+        .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+      callback(expenses);
+    },
+    onSnapshotError(`expenses of ${groupId}`, onError)
+  );
 }
 
 export async function addExpense(
@@ -258,9 +298,11 @@ export async function updateExpense(
   },
   editedBy?: string
 ): Promise<void> {
+  // Only send the fields that actually changed. Re-adding `receiptUrls` after
+  // stripping undefined values used to make every edit throw
+  // "Unsupported field value: undefined".
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
     ...stripUndefined(data),
-    receiptUrls: data.receiptUrls,
     updatedAt: Date.now(),
     editAction: "edited",
   });
@@ -313,53 +355,86 @@ export async function deleteExpense(
 
 export function subscribeToSettlements(
   groupId: string,
-  callback: (settlements: Settlement[]) => void
+  callback: (settlements: Settlement[]) => void,
+  onError?: (err: Error) => void
 ) {
   const q = query(collection(db, "groups", groupId, "settlements"));
-  return onSnapshot(q, (snap) => {
-    const settlements = snap.docs
-      .map((d) => {
-        const data = d.data();
-        return {
-          id: d.id, ...data,
-          receiptUrls: data.receiptUrls || [],
-          status: data.status || "approved",
-          updatedAt: data.updatedAt || data.createdAt,
-        } as Settlement;
-      })
-      .sort((a, b) => b.createdAt - a.createdAt);
-    callback(settlements);
-  });
+  return onSnapshot(
+    q,
+    (snap) => {
+      const settlements = snap.docs
+        .map((d) => {
+          const data = d.data();
+          return {
+            id: d.id, ...data,
+            groupId,
+            receiptUrls: data.receiptUrls || [],
+            status: data.status || "approved",
+            kind: (data.kind as SettlementKind) || "payment",
+            // Legacy records predate `createdBy`; the payer raised those.
+            createdBy: (data.createdBy as string) || (data.fromUid as string),
+            updatedAt: data.updatedAt || data.createdAt,
+          } as Settlement;
+        })
+        .sort((a, b) => b.createdAt - a.createdAt);
+      callback(settlements);
+    },
+    onSnapshotError(`settlements of ${groupId}`, onError)
+  );
+}
+
+export interface NewSettlement {
+  fromUid: string;
+  toUid: string;
+  amount: number;
+  /** Who is raising the record. The *other* party approves it. */
+  createdBy: string;
+  note?: string;
+  receiptUrls?: string[];
+  expenseIds?: string[];
+  forwardedFromSettlementId?: string;
+  kind?: SettlementKind;
+  crossGroupId?: string;
+  crossGroupLegCount?: number;
+}
+
+function settlementPayload(groupId: string, data: NewSettlement) {
+  return {
+    ...stripUndefined(data as unknown as Record<string, unknown>),
+    receiptUrls: data.receiptUrls || [],
+    expenseIds: data.expenseIds || [],
+    kind: data.kind || "payment",
+    groupId,
+    status: "pending" as SettlementStatus,
+    createdAt: Date.now(),
+  };
 }
 
 export async function addSettlementRequest(
   groupId: string,
-  data: {
-    fromUid: string;
-    toUid: string;
-    amount: number;
-    note?: string;
-    receiptUrls?: string[];
-    expenseIds?: string[];
-    forwardedFromSettlementId?: string;
-  }
+  data: NewSettlement
 ): Promise<string> {
-  const ref = await addDoc(collection(db, "groups", groupId, "settlements"), {
-    ...stripUndefined(data),
-    receiptUrls: data.receiptUrls || [],
-    expenseIds: data.expenseIds || [],
-    groupId,
-    status: "pending",
-    createdAt: Date.now(),
-  });
+  const ref = await addDoc(
+    collection(db, "groups", groupId, "settlements"),
+    settlementPayload(groupId, data)
+  );
 
+  // The person who did NOT raise the record is the one who has to act on it.
+  const approver = data.createdBy === data.fromUid ? data.toUid : data.fromUid;
   try {
     const groupSnap = await getDoc(doc(db, "groups", groupId));
     const group = groupSnap.data();
-    const fromName = (group?.members as Record<string, { displayName: string }>)?.[data.fromUid]?.displayName || "Someone";
-    notifyUsers([data.toUid], {
+    const creatorName =
+      (group?.members as Record<string, { displayName: string }>)?.[data.createdBy]
+        ?.displayName || "Someone";
+    notifyUsers([approver], {
       title: group?.name || "Settlement request",
-      body: `${fromName} requested ₹${data.amount} from you`,
+      body:
+        data.kind === "offset"
+          ? `${creatorName} wants to cancel out ₹${data.amount} across groups`
+          : data.createdBy === data.fromUid
+          ? `${creatorName} says they paid you ₹${data.amount}`
+          : `${creatorName} recorded a ₹${data.amount} payment from you`,
       link: `/groups/${groupId}`,
     });
   } catch {
@@ -369,18 +444,50 @@ export async function addSettlementRequest(
   return ref.id;
 }
 
+/**
+ * Creates several settlement legs as one atomic action. Used by the
+ * cross-group ("settle globally") flow so a person's balances in different
+ * groups can never end up half-updated.
+ */
+export async function addSettlementRequests(
+  legs: { groupId: string; data: NewSettlement }[]
+): Promise<void> {
+  if (legs.length === 0) return;
+  const batch = writeBatch(db);
+  legs.forEach(({ groupId, data }) => {
+    const ref = doc(collection(db, "groups", groupId, "settlements"));
+    batch.set(ref, settlementPayload(groupId, data));
+  });
+  await batch.commit();
+
+  // Notify once per counterparty rather than once per leg.
+  const first = legs[0].data;
+  const approver = first.createdBy === first.fromUid ? first.toUid : first.fromUid;
+  const total = legs.reduce((sum, l) => sum + l.data.amount, 0);
+  try {
+    notifyUsers([approver], {
+      title: "Cross-group settlement",
+      body: `A ₹${total.toFixed(2)} settlement across ${legs.length} group(s) needs your approval`,
+      link: `/notifications`,
+    });
+  } catch {
+    // best-effort
+  }
+}
+
 export async function updateSettlementStatus(
   groupId: string,
   settlementId: string,
   status: SettlementStatus
 ): Promise<void> {
-  let fromUid = "";
+  let creator = "";
   let amount = 0;
   try {
     const snap = await getDoc(doc(db, "groups", groupId, "settlements", settlementId));
     if (snap.exists()) {
-      fromUid = (snap.data().fromUid as string) || "";
-      amount = (snap.data().amount as number) || 0;
+      const data = snap.data();
+      creator = (data.createdBy as string) || (data.fromUid as string) || "";
+      amount = (data.amount as number) || 0;
     }
   } catch {
     // best-effort
@@ -391,11 +498,11 @@ export async function updateSettlementStatus(
     updatedAt: Date.now(),
   });
 
-  if (fromUid) {
+  if (creator) {
     try {
       const groupSnap = await getDoc(doc(db, "groups", groupId));
       const groupName = groupSnap.data()?.name || "Settlement";
-      notifyUsers([fromUid], {
+      notifyUsers([creator], {
         title: groupName,
         body: `Your settlement request of ₹${amount} was ${status}`,
         link: `/groups/${groupId}`,
@@ -406,45 +513,105 @@ export async function updateSettlementStatus(
   }
 }
 
+/** Approves/rejects every leg of a cross-group settlement together. */
+export async function updateCrossGroupSettlementStatus(
+  legs: { groupId: string; settlementId: string }[],
+  status: SettlementStatus
+): Promise<void> {
+  if (legs.length === 0) return;
+  const batch = writeBatch(db);
+  legs.forEach(({ groupId, settlementId }) => {
+    batch.update(doc(db, "groups", groupId, "settlements", settlementId), {
+      status,
+      updatedAt: Date.now(),
+    });
+  });
+  await batch.commit();
+}
+
 // ── User Profile ────────────────────────────────────────────
 
-export async function updateUserProfile(
-  uid: string,
-  data: { displayName?: string; photoURL?: string }
-): Promise<void> {
-  const payload: Record<string, string | undefined> = {};
-  if (data.displayName !== undefined) payload.displayName = data.displayName;
-  if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
-  await setDoc(doc(db, "users", uid), payload, { merge: true });
-  await syncProfileToGroups(uid, {
-    displayName: data.displayName || "",
-    email: "",
+export interface ProfileUpdate {
+  displayName?: string;
+  photoURL?: string;
+  /** UPI ID (VPA). Pass "" to clear it. */
+  upiId?: string;
+  email?: string;
+}
+
+/**
+ * Saves the user's profile and mirrors it onto every group they belong to.
+ *
+ * Two bugs lived here:
+ *  - the group sync was called with `email: ""`, which overwrote each group's
+ *    copy of the member's email with an empty string; and
+ *  - `upiId` was written only to `users/{uid}`, never to `members.{uid}`, so
+ *    the settle-up sheet (which reads the group copy) always concluded the
+ *    payee "hasn't added a UPI ID" and never offered the UPI buttons.
+ */
+export async function updateUserProfile(uid: string, data: ProfileUpdate): Promise<void> {
+  const payload = stripUndefined({
+    uid,
+    displayName: data.displayName,
     photoURL: data.photoURL,
+    upiId: data.upiId,
+    email: data.email,
   });
+  await setDoc(doc(db, "users", uid), payload, { merge: true });
+  await syncProfileToGroups(uid, data);
 }
 
 export async function updateUpiId(uid: string, upiId: string): Promise<void> {
-  await setDoc(doc(db, "users", uid), { upiId }, { merge: true });
+  await updateUserProfile(uid, { upiId });
 }
 
+/**
+ * Merges the given fields into `members.{uid}` of every group the user is in,
+ * using dotted field paths so untouched fields (email, photo, name) survive.
+ */
 export async function syncProfileToGroups(
   uid: string,
-  profile: { displayName: string; email: string; photoURL?: string; upiId?: string }
+  profile: ProfileUpdate
 ): Promise<void> {
+  const updates: Record<string, string> = {};
+  if (profile.displayName !== undefined) updates[`members.${uid}.displayName`] = profile.displayName;
+  if (profile.photoURL !== undefined) updates[`members.${uid}.photoURL`] = profile.photoURL;
+  if (profile.upiId !== undefined) updates[`members.${uid}.upiId`] = profile.upiId;
+  if (profile.email !== undefined) updates[`members.${uid}.email`] = profile.email;
+  if (Object.keys(updates).length === 0) return;
+
   const q = query(collection(db, "groups"), where("memberIds", "array-contains", uid));
   const snap = await getDocs(q);
-  await Promise.all(
-    snap.docs.map((groupDoc) =>
-      updateDoc(doc(db, "groups", groupDoc.id), {
-        [`members.${uid}`]: stripUndefined(profile),
-      })
-    )
+  const results = await Promise.allSettled(
+    snap.docs.map((groupDoc) => updateDoc(doc(db, "groups", groupDoc.id), updates))
   );
+  results.forEach((r) => {
+    if (r.status === "rejected") console.error("[firestore] profile sync failed:", r.reason);
+  });
 }
 
-export async function getUserProfile(uid: string) {
+export async function getUserProfile(uid: string): Promise<Partial<UserProfile> | null> {
   const snap = await getDoc(doc(db, "users", uid));
-  return snap.exists() ? snap.data() : null;
+  return snap.exists() ? (snap.data() as Partial<UserProfile>) : null;
+}
+
+/**
+ * Resolves a payee's UPI ID, preferring the group's copy but falling back to
+ * their `users/{uid}` document. The fallback matters for members who set their
+ * UPI ID before the group-sync fix landed, or who joined a group afterwards.
+ */
+export async function resolveUpiId(
+  uid: string,
+  groupCopy?: string
+): Promise<string | undefined> {
+  if (groupCopy && groupCopy.trim()) return groupCopy.trim();
+  try {
+    const profile = await getUserProfile(uid);
+    const upiId = profile?.upiId?.trim();
+    return upiId || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // ── FCM / Notifications ─────────────────────────────────────

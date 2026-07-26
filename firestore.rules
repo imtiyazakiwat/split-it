@@ -40,11 +40,40 @@ service cloud.firestore {
       }
 
       match /settlements/{settlementId} {
+        // Legacy documents predate these fields; fall back so old records stay
+        // readable and approvable.
+        function creatorUid() {
+          return resource.data.get('createdBy', resource.data.fromUid);
+        }
+        function currentStatus() {
+          return resource.data.get('status', 'approved');
+        }
+
         allow read: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data);
+
+        // Either party may raise a settlement: the payer claiming they paid, or
+        // the payee writing off what they're owed (which is what the
+        // cross-group offset flow needs). The creator is always recorded.
         allow create: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data)
-          && request.auth.uid == request.resource.data.fromUid;
+          && request.auth.uid == request.resource.data.createdBy
+          && (request.auth.uid == request.resource.data.fromUid
+              || request.auth.uid == request.resource.data.toUid)
+          && request.resource.data.fromUid != request.resource.data.toUid
+          && request.resource.data.status == 'pending'
+          && request.resource.data.amount is number
+          && request.resource.data.amount > 0;
+
+        // Only the *other* party can approve or decline, and only the status
+        // may change. This is what stops someone from unilaterally clearing a
+        // balance they created.
         allow update: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data)
-          && request.auth.uid == resource.data.toUid;
+          && request.auth.uid != creatorUid()
+          && (request.auth.uid == resource.data.fromUid
+              || request.auth.uid == resource.data.toUid)
+          && currentStatus() == 'pending'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'updatedAt'])
+          && request.resource.data.status in ['approved', 'rejected'];
+
         allow delete: if false;
       }
     }

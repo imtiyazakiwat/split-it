@@ -1,22 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { useSingleGroup, useGroupData } from "@/lib/group-data-context";
 import {
-  subscribeToGroup,
-  subscribeToExpenses,
-  subscribeToSettlements,
   updateGroupProfile,
   updateSettlementStatus,
+  updateCrossGroupSettlementStatus,
   updateExpense,
   deleteExpense,
   deleteGroup,
   removeMember,
   addExpense,
 } from "@/lib/firestore";
-import { Group, Expense, Settlement, SettlementMode } from "@/lib/types";
-import { computeBalances, simplifyDebts, formatCurrency } from "@/lib/balance";
+import { Expense, Settlement, SettlementMode } from "@/lib/types";
+import {
+  activeExpenses as onlyActive,
+  computeBalances,
+  computeSettlementProgress,
+  rescaleSplits,
+  simplifyDebts,
+  splitEqually,
+  formatCurrency,
+} from "@/lib/balance";
+import {
+  computeCounterpartyBalances,
+  findCrossGroupLegs,
+} from "@/lib/global-balance";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
 import { showLocalNotification } from "@/lib/notifications";
@@ -34,6 +45,8 @@ import ActivityDetailModal from "@/components/group/ActivityDetailModal";
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
+import LoginScreen from "@/components/LoginScreen";
+import GlobalSettleModal from "@/components/GlobalSettleModal";
 
 function timeAgoShort(ts: number): string {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -55,9 +68,10 @@ export default function GroupPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { user, loading } = useAuth();
-  const [group, setGroup] = useState<Group | null>(null);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [settlements, setSettlements] = useState<Settlement[]>([]);
+  // Reads from the one shared subscription set instead of opening three more
+  // listeners every time this screen mounts.
+  const { group, expenses, settlements, loading: groupLoading, notFound } = useSingleGroup(id);
+  const { datasets, allLoaded } = useGroupData();
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
@@ -74,6 +88,12 @@ export default function GroupPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  // Controlled fields for the edit-expense sheet. It used to read values back
+  // out of the DOM with getElementById, which silently fell back to the old
+  // values whenever the ids weren't found.
+  const [editExpDesc, setEditExpDesc] = useState("");
+  const [editExpAmount, setEditExpAmount] = useState("");
+  const [editExpPaidBy, setEditExpPaidBy] = useState("");
   const [showCopied, setShowCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     title: string;
@@ -85,29 +105,64 @@ export default function GroupPage() {
   // Expense ids hidden locally during the undo window (deferred-commit delete).
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
+  // Tracked by uid so the sheet follows live data rather than a snapshot.
+  const [globalSettleUid, setGlobalSettleUid] = useState<string | null>(null);
   const showToast = useToast();
 
-  useEffect(() => {
-    if (!id) return;
-    const unsubs = [
-      subscribeToGroup(id, setGroup),
-      subscribeToExpenses(id, setExpenses),
-      subscribeToSettlements(id, setSettlements),
-    ];
-    return () => unsubs.forEach((u) => u());
-  }, [id]);
+  // Cross-group position with each member, so this screen can point out
+  // balances that can only be cleared globally.
+  const counterparties = useMemo(
+    () => (user ? computeCounterpartyBalances(user.uid, datasets) : []),
+    [user, datasets]
+  );
 
-  if (loading || !user) return null;
+  if (loading) return <GroupDetailSkeleton />;
+  // Previously rendered `null`, i.e. a blank white screen, whenever auth hadn't
+  // resolved — the most visible symptom of the Android sign-in problem.
+  if (!user) return <LoginScreen />;
 
   const currentUser = user;
 
   if (!group) {
+    if (notFound) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
+          <p className="text-[17px] font-semibold text-[var(--text-primary)]">
+            This group isn&rsquo;t available
+          </p>
+          <p className="text-[14px] text-[var(--text-tertiary)] max-w-xs">
+            It may have been deleted, or you may no longer be a member.
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            className="mt-1 rounded-full bg-[var(--brand-solid)] text-white px-5 py-2.5 text-[15px] font-semibold tap-shrink"
+          >
+            Back to groups
+          </button>
+        </div>
+      );
+    }
+    return <GroupDetailSkeleton />;
+  }
+
+  // Hold the skeleton until the first expense/settlement snapshot lands, so the
+  // stats and balances never flash ₹0 before the real numbers arrive.
+  if (groupLoading && expenses.length === 0 && settlements.length === 0) {
     return <GroupDetailSkeleton />;
   }
 
   const isAdmin = group.createdBy === currentUser.uid;
   const memberName = (uid: string) =>
-    uid === currentUser.uid ? "You" : group?.members[uid]?.displayName || "Unknown";
+    uid === currentUser.uid
+      ? "You"
+      : group?.members[uid]?.displayName ||
+        // Someone who was removed can still appear in old expenses; naming them
+        // "Unknown" made it look like corrupt data.
+        (group?.memberIds.includes(uid) ? "Member" : "Former member");
+  // Cross-group figures are only trustworthy once every group has loaded.
+  const globalFor = (uid: string) =>
+    allLoaded ? counterparties.find((c) => c.uid === uid) : undefined;
+  const globalSettleTarget = globalSettleUid ? globalFor(globalSettleUid) ?? null : null;
 
   // Merge optimistic (pending) expenses with the live ones. An optimistic entry
   // is hidden as soon as a matching real expense arrives (Firestore delivers our
@@ -123,7 +178,10 @@ export default function GroupPage() {
     ...expenses,
   ];
 
-  const balanceExpenses = mergedExpenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
+  // Only deleted expenses leave the ledger. Filtering on any `editAction` (as
+  // before) dropped every *edited* expense from the balances, so amounts drifted
+  // apart from reality the moment anyone corrected an entry.
+  const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
   // per-expense picker showed gross expense amounts instead of the pairwise
@@ -156,29 +214,72 @@ export default function GroupPage() {
         (s.expenseIds || []).forEach((id) => settledExpenseIds.add(id));
       }
     });
-    return expenses.filter((e) => {
-      if (e.editAction) return false;
+    return onlyActive(expenses).filter((e) => {
       if (settledExpenseIds.has(e.id)) return false;
       const mySplit = e.splits.find((s) => s.uid === currentUser.uid);
       return e.paidBy === toUid && mySplit && mySplit.amount > 0;
     });
   }
 
-  function handleApproveSettlement(s: Settlement) {
-    if (!group) return;
-    updateSettlementStatus(group.id, s.id, "approved");
-    showToast({ message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}` });
-    showLocalNotification(
-      "Settlement approved",
-      `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
-      `/groups/${group.id}`
+  // A cross-group settlement is a set of linked records; responding has to
+  // cover every leg, or the offset would only be half-applied.
+  async function respondToSettlement(s: Settlement, status: "approved" | "rejected") {
+    if (!group) return 0;
+    const set = findCrossGroupLegs(
+      datasets,
+      { ...s, groupId: s.groupId || group.id },
+      currentUser.uid
     );
+    if (!set.complete) {
+      throw new Error(
+        `only ${set.legs.length} of ${set.expected} linked records are available yet`
+      );
+    }
+    if (set.legs.length > 1) {
+      await updateCrossGroupSettlementStatus(
+        set.legs.map((l) => ({ groupId: l.groupId, settlementId: l.settlementId })),
+        status
+      );
+    } else {
+      await updateSettlementStatus(set.legs[0].groupId, set.legs[0].settlementId, status);
+    }
+    return set.legs.length;
   }
 
-  function handleRejectSettlement(s: Settlement) {
+  // These writes were fire-and-forget: a rejected write (e.g. a rules failure)
+  // showed a success toast while the balance silently never changed.
+  async function handleApproveSettlement(s: Settlement) {
     if (!group) return;
-    updateSettlementStatus(group.id, s.id, "rejected");
-    showToast({ message: "Request declined" });
+    try {
+      const legCount = (await respondToSettlement(s, "approved")) || 1;
+      showToast({
+        message:
+          legCount > 1
+            ? `✓ Offset applied across ${legCount} groups`
+            : `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
+      });
+      showLocalNotification(
+        "Settlement approved",
+        `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
+        `/groups/${group.id}`
+      );
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve",
+      });
+    }
+  }
+
+  async function handleRejectSettlement(s: Settlement) {
+    if (!group) return;
+    try {
+      await respondToSettlement(s, "rejected");
+      showToast({ message: "Request declined" });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't decline: ${err.message}` : "Couldn't decline",
+      });
+    }
   }
 
   function handleDeleteGroup() {
@@ -301,6 +402,10 @@ export default function GroupPage() {
 
   function handleEditExpense(expense: Expense) {
     setEditingExpense(expense);
+    setEditExpDesc(expense.description);
+    setEditExpAmount(String(expense.amount));
+    setEditExpPaidBy(expense.paidBy);
+    setEditError("");
   }
 
   function handleDeleteExpense(expense: Expense) {
@@ -382,18 +487,44 @@ export default function GroupPage() {
   async function handleSaveEditedExpense(e: React.FormEvent) {
     e.preventDefault();
     if (!group || !editingExpense) return;
-    const desc = (document.getElementById("edit-desc") as HTMLInputElement)?.value || editingExpense.description;
-    const amt = parseFloat((document.getElementById("edit-amount") as HTMLInputElement)?.value || String(editingExpense.amount));
-    const paidBy = (document.getElementById("edit-paidby") as HTMLSelectElement)?.value || editingExpense.paidBy;
+    const desc = editExpDesc.trim();
+    const amt = parseFloat(editExpAmount);
+    const paidBy = editExpPaidBy || editingExpense.paidBy;
+
+    if (!desc) {
+      setEditError("Description is required.");
+      return;
+    }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      setEditError("Enter an amount greater than zero.");
+      return;
+    }
+
+    // Keep the splits consistent with the new total, otherwise the ledger stops
+    // adding up (the previous version changed the amount only).
+    const amountChanged = Math.abs(amt - editingExpense.amount) > 0.005;
+    const splitUids = editingExpense.splits.map((s) => s.uid);
+    if (amountChanged && splitUids.length === 0) {
+      // Guard against a malformed record: re-splitting nothing would credit the
+      // payer with the full amount and debit nobody.
+      setEditError("This expense has no split information, so its amount can't be changed.");
+      return;
+    }
+    const splits = !amountChanged
+      ? undefined
+      : editingExpense.splitType === "equal"
+      ? splitEqually(amt, splitUids)
+      : rescaleSplits(editingExpense.splits, amt);
 
     setEditBusy(true);
     setEditError("");
     try {
-      await updateExpense(group.id, editingExpense.id, {
-        description: desc.trim(),
-        amount: amt,
-        paidBy,
-      }, currentUser.uid);
+      await updateExpense(
+        group.id,
+        editingExpense.id,
+        { description: desc, amount: amt, paidBy, splits },
+        currentUser.uid
+      );
       showToast({ message: "Expense updated" });
       setEditingExpense(null);
     } catch (err) {
@@ -403,22 +534,27 @@ export default function GroupPage() {
     }
   }
 
-  const activeExpenses = mergedExpenses.filter((e) => !e.editAction && !pendingDeleteIds.has(e.id));
+  const visibleExpenses = balanceExpenses;
 
   // ── Derived stats for the header/summary cards ──
-  const totalSpent = activeExpenses.reduce((sum, e) => sum + e.amount, 0);
-  const expenseCount = activeExpenses.length;
+  const totalSpent = visibleExpenses.reduce((sum, e) => sum + e.amount, 0);
+  const expenseCount = visibleExpenses.length;
 
-  const settledExpenseIds = new Set<string>();
-  settlements
-    .filter((s) => s.status === "approved")
-    .forEach((s) => (s.expenseIds || []).forEach((eid) => settledExpenseIds.add(eid)));
-  const settledCount = activeExpenses.filter((e) => settledExpenseIds.has(e.id)).length;
-  const settledPct = expenseCount > 0 ? Math.round((settledCount / expenseCount) * 100) : 100;
+  // Settlement progress is measured in money, not in "expenses that happen to
+  // be tagged on a settlement". The old count relied on `expenseIds`, which is
+  // only written when the payer manually ticks items, so a fully paid-up group
+  // reported 0% settled while an empty group reported 100%.
+  const progress = computeSettlementProgress(group.memberIds, visibleExpenses, settlements);
 
   const lastActivityItem = [
-    ...activeExpenses.map((e) => ({ ts: e.updatedAt || e.createdAt, label: `${e.description} added` })),
-    ...settlements.map((s) => ({ ts: s.createdAt, label: "payment logged" })),
+    ...visibleExpenses.map((e) => ({
+      ts: e.updatedAt || e.createdAt,
+      label: `${e.description} ${e.editAction === "edited" ? "updated" : "added"}`,
+    })),
+    ...settlements.map((s) => ({
+      ts: s.updatedAt || s.createdAt,
+      label: s.kind === "offset" ? "balances offset" : "payment logged",
+    })),
   ].sort((a, b) => b.ts - a.ts)[0];
 
   // Largest single debt the current user owes (drives the "You owe" hero).
@@ -431,8 +567,12 @@ export default function GroupPage() {
   const topDebt = myDebts[0];
   const topCredit = myCredits[0];
 
-  // Per-member net balances for the balance chips (creditors first).
-  const memberBalances = [...balances].sort((a, b) => b.netAmount - a.netAmount);
+  // Per-member net balances for the balance chips (creditors first). Current
+  // members always show; people who have left only appear while they still
+  // carry a balance, so their share of the ledger stays visible.
+  const memberBalances = [...balances]
+    .filter((b) => group.memberIds.includes(b.uid) || Math.abs(b.netAmount) > 0.01)
+    .sort((a, b) => b.netAmount - a.netAmount);
 
   const createdAgo = createdAgoText(group.createdAt);
 
@@ -523,8 +663,14 @@ export default function GroupPage() {
           </div>
           <div className="min-w-0">
             <p className="text-[13px] text-[var(--text-tertiary)]">Settled</p>
-            <p className="text-[22px] font-bold text-[var(--pos)] mt-1">{settledPct}%</p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{settledCount} of {expenseCount}</p>
+            <p className="text-[22px] font-bold text-[var(--pos)] mt-1">{progress.pct}%</p>
+            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
+              {progress.isEmpty
+                ? "nothing to settle"
+                : progress.outstanding < 0.01
+                ? "everyone's square"
+                : `${formatCurrency(progress.outstanding)} still to move`}
+            </p>
           </div>
           <div className="min-w-0">
             <p className="text-[13px] text-[var(--text-tertiary)]">Last activity</p>
@@ -543,15 +689,33 @@ export default function GroupPage() {
               <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU OWE</p>
               <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topDebt.toUid)}</p>
               <p className="text-[34px] font-extrabold text-[var(--neg)] leading-tight">{formatCurrency(topDebt.amount)}</p>
-              <button
-                onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
-                className="mt-3 inline-flex items-center gap-2 bg-[var(--neg)] text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
-              >
-                Settle up now
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </button>
+              <div className="flex flex-wrap items-center gap-2 mt-3">
+                <button
+                  onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
+                  className="inline-flex items-center gap-2 bg-[var(--neg)] text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
+                >
+                  Settle up now
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </button>
+                {/* Only offered when this person's balance spans groups, since
+                    that's the case a single-group settlement can't resolve. */}
+                {(() => {
+                  const cross = globalFor(topDebt.toUid);
+                  if (!cross || (cross.groups.length < 2 && cross.offsetable < 0.01)) return null;
+                  return (
+                    <button
+                      onClick={() => setGlobalSettleUid(cross.uid)}
+                      className="inline-flex items-center gap-1.5 bg-[var(--surface)] text-[var(--brand)] rounded-full px-4 py-2.5 text-[14px] font-semibold shadow-[var(--shadow-sm)] tap-shrink"
+                    >
+                      {cross.offsetable > 0.01
+                        ? `Offset ${formatCurrency(cross.offsetable)} across groups`
+                        : "Settle across groups"}
+                    </button>
+                  );
+                })()}
+              </div>
             </div>
           </div>
         ) : topCredit ? (
@@ -607,11 +771,32 @@ export default function GroupPage() {
                       </p>
                     </div>
                   </div>
-                  <span className={`inline-block mt-2 rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
-                    pos ? "bg-[var(--tint-success)] text-[var(--pos)]" : neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--fill)] text-[var(--text-secondary)]"
-                  }`}>
-                    {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
-                  </span>
+                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
+                      pos ? "bg-[var(--tint-success)] text-[var(--pos)]" : neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--fill)] text-[var(--text-secondary)]"
+                    }`}>
+                      {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
+                    </span>
+                    {!isMe && !group.memberIds.includes(b.uid) && (
+                      <span className="inline-block rounded-full bg-[var(--fill)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)]">
+                        left group
+                      </span>
+                    )}
+                    {/* Shortcut into the cross-group flow for people you also
+                        share other groups with. */}
+                    {!isMe && (() => {
+                      const cross = globalFor(b.uid);
+                      if (!cross || (cross.groups.length < 2 && cross.offsetable < 0.01)) return null;
+                      return (
+                        <button
+                          onClick={() => setGlobalSettleUid(cross.uid)}
+                          className="inline-block rounded-full bg-[var(--tint-accent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand)] tap-shrink"
+                        >
+                          {cross.groups.length} groups
+                        </button>
+                      );
+                    })()}
+                  </div>
                 </div>
               );
             })}
@@ -674,6 +859,14 @@ export default function GroupPage() {
           suggestedAmount={settleTarget.amount}
           expensesOwed={getExpensesOwedTo(settleTarget.toUid)}
           onClose={() => setSettleTarget(null)}
+        />
+      )}
+
+      {globalSettleTarget && (
+        <GlobalSettleModal
+          meUid={currentUser.uid}
+          counterparty={globalSettleTarget}
+          onClose={() => setGlobalSettleUid(null)}
         />
       )}
 
@@ -869,13 +1062,33 @@ export default function GroupPage() {
       {editingExpense && (
         <GlassModal title="Edit Expense" onClose={() => setEditingExpense(null)}>
           <form onSubmit={handleSaveEditedExpense} className="space-y-4">
-            <GlassField label="Description" id="edit-desc" defaultValue={editingExpense.description} autoFocus />
-            <GlassField label="Amount" id="edit-amount" type="number" step="0.01" defaultValue={String(editingExpense.amount)} />
-            <GlassSelect label="Paid by" id="edit-paidby" defaultValue={editingExpense.paidBy}>
+            <GlassField
+              label="Description"
+              value={editExpDesc}
+              onChange={(ev) => setEditExpDesc(ev.target.value)}
+              autoFocus
+            />
+            <GlassField
+              label="Amount"
+              type="number"
+              step="0.01"
+              inputMode="decimal"
+              value={editExpAmount}
+              onChange={(ev) => setEditExpAmount(ev.target.value)}
+            />
+            <GlassSelect
+              label="Paid by"
+              value={editExpPaidBy}
+              onChange={(ev) => setEditExpPaidBy(ev.target.value)}
+            >
               {group.memberIds.map((uid) => (
                 <option key={uid} value={uid}>{memberName(uid)}</option>
               ))}
             </GlassSelect>
+            <p className="text-[12px] text-[var(--label-tertiary)]">
+              Changing the amount re-splits it across the same{" "}
+              {editingExpense.splits.length} {editingExpense.splits.length === 1 ? "person" : "people"}.
+            </p>
             {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
             <div className="flex gap-2">
               <GlassButton type="button" variant="ghost" onClick={() => setEditingExpense(null)} className="flex-1">Cancel</GlassButton>

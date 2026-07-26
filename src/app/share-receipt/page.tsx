@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { subscribeToUserGroups } from "@/lib/firestore";
-import { Group } from "@/lib/types";
+import { useGroupData } from "@/lib/group-data-context";
 import TopBar from "@/components/TopBar";
+import LoginScreen from "@/components/LoginScreen";
 import Card from "@/components/ui/Card";
 import { GlassSelect } from "@/components/ui/GlassField";
 import AddExpenseModal from "@/components/AddExpenseModal";
@@ -14,15 +14,9 @@ import { activateFileInputOnKey } from "@/lib/keyboard";
 export default function ShareReceiptPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const [groups, setGroups] = useState<Group[]>([]);
+  const { groups } = useGroupData();
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
-
-  useEffect(() => {
-    if (!user) return;
-    const unsub = subscribeToUserGroups(user.uid, setGroups);
-    return unsub;
-  }, [user]);
 
   useEffect(() => {
     if ("caches" in window) {
@@ -37,13 +31,14 @@ export default function ShareReceiptPage() {
     }
   }, []);
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <p className="text-[var(--label-tertiary)] text-sm">Loading…</p>
       </div>
     );
   }
+  if (!user) return <LoginScreen />;
 
   const group = groups.find((g) => g.id === selectedGroupId);
 
