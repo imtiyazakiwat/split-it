@@ -15,62 +15,32 @@
  *  - splits[] already holds final rupee amounts, even for equal/percentage.
  *  - All createdAt/updatedAt are epoch milliseconds.
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-
-// ── env loading ──────────────────────────────────────────────
-function loadEnv(file) {
-  let raw;
-  try {
-    raw = readFileSync(file, "utf8");
-  } catch {
-    return;
-  }
-  raw = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-  // Supports KEY=bare, KEY="quoted", KEY='quoted' and quoted values that span
-  // multiple lines (how a PEM private key is usually pasted into .env.local).
-  const re = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*("(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|[^\n]*)/gm;
-  let m;
-  while ((m = re.exec(raw)) !== null) {
-    const key = m[1];
-    let val = m[2];
-    if (val.startsWith('"') && val.endsWith('"') && val.length > 1) {
-      val = val.slice(1, -1);
-    } else if (val.startsWith("'") && val.endsWith("'") && val.length > 1) {
-      val = val.slice(1, -1);
-    } else {
-      val = val.trim().replace(/\s+#.*$/, "");
-    }
-    if (process.env[key] === undefined) process.env[key] = val;
-  }
-}
-loadEnv(".env.local");
-
-const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-
-if (!projectId) {
-  console.error("Missing NEXT_PUBLIC_FIREBASE_PROJECT_ID (checked .env.local and the environment).");
-  process.exit(1);
-}
-
-initializeApp(
-  clientEmail && privateKey
-    ? { credential: cert({ projectId, clientEmail, privateKey: privateKey.replace(/\\n/g, "\n") }) }
-    : { projectId }
-);
-const db = getFirestore();
+import { db, projectId, usingServiceAccount } from "./lib/admin.mjs";
 
 // ── csv helpers ──────────────────────────────────────────────
+// Spreadsheets evaluate a leading =, +, - or @ as a formula, so a member-supplied
+// description like `=HYPERLINK(...)` would execute on open. Prefixing with an
+// apostrophe makes Excel/Sheets/LibreOffice treat the cell as literal text.
+// Only string values are guarded: numeric columns are produced by this script,
+// never by users, and a negative amount must stay parseable as a number.
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 const esc = (v) => {
   if (v === null || v === undefined) return "";
-  const s = String(v);
+  let s = typeof v === "string" ? v : String(v);
+  if (typeof v === "string" && FORMULA_PREFIX.test(s)) s = `'${s}`;
   return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 };
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+const simplifiedDebtsOf = (group) =>
+  typeof group?.useSimplifiedDebts === "boolean"
+    ? group.useSimplifiedDebts
+    : group?.settlementMode === "simplified";
+// Rupee amounts arrive as floats, so `0.1 + 0.2 === 0.3` style drift would flag
+// perfectly good expenses. Half a paisa is well below anything worth reporting.
+const EPSILON = 0.005;
+const nearlyEqual = (a, b) => Math.abs((Number(a) || 0) - (Number(b) || 0)) < EPSILON;
 const iso = (ms) => (typeof ms === "number" && isFinite(ms) ? new Date(ms).toISOString() : "");
 const dateOnly = (ms) => (typeof ms === "number" && isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : "");
 
@@ -88,27 +58,37 @@ const outDir = process.argv[2] || "reports";
 mkdirSync(outDir, { recursive: true });
 
 console.log(`Project: ${projectId}`);
-console.log(`Auth:    ${clientEmail && privateKey ? "service account from .env.local" : "application default credentials"}`);
+console.log(`Auth:    ${usingServiceAccount ? "service account from .env.local" : "application default credentials"}`);
 console.log("Reading Firestore...");
 
-const [usersSnap, groupsSnap, expenseSnap, settlementSnap] = await Promise.all([
-  db.collection("users").get(),
-  db.collection("groups").get(),
-  db.collectionGroup("expenses").get(),
-  db.collectionGroup("settlements").get(),
-]);
+/**
+ * Streams a query document-by-document instead of materialising the whole
+ * QuerySnapshot. The aggregates below are still held in memory, but the raw
+ * snapshot (which is considerably larger) never is, so RSS stays flat as the
+ * expense/settlement collections grow.
+ */
+async function eachDoc(query, fn) {
+  let count = 0;
+  for await (const doc of query.stream()) {
+    fn(doc);
+    count++;
+  }
+  return count;
+}
 
 const users = new Map();
-usersSnap.docs.forEach((d) => users.set(d.id, d.data()));
+await eachDoc(db.collection("users"), (d) => users.set(d.id, d.data()));
 
 const groups = new Map();
-groupsSnap.docs.forEach((d) => groups.set(d.id, { id: d.id, ...d.data() }));
+await eachDoc(db.collection("groups"), (d) => groups.set(d.id, { id: d.id, ...d.data() }));
 
 // collectionGroup catches expenses/settlements orphaned by a deleted group doc.
 const groupIdOf = (doc) => doc.ref.parent.parent?.id || doc.get("groupId") || "";
 
 const expensesByGroup = new Map();
-for (const d of expenseSnap.docs) {
+let expenseDocCount = 0;
+await eachDoc(db.collectionGroup("expenses"), (d) => {
+  expenseDocCount++;
   const gid = groupIdOf(d);
   const data = d.data();
   const e = {
@@ -128,10 +108,10 @@ for (const d of expenseSnap.docs) {
   };
   if (!expensesByGroup.has(gid)) expensesByGroup.set(gid, []);
   expensesByGroup.get(gid).push(e);
-}
+});
 
 const settlementsByGroup = new Map();
-for (const d of settlementSnap.docs) {
+await eachDoc(db.collectionGroup("settlements"), (d) => {
   const gid = groupIdOf(d);
   const data = d.data();
   const s = {
@@ -151,7 +131,7 @@ for (const d of settlementSnap.docs) {
   };
   if (!settlementsByGroup.has(gid)) settlementsByGroup.set(gid, []);
   settlementsByGroup.get(gid).push(s);
-}
+});
 
 const allGroupIds = new Set([...groups.keys(), ...expensesByGroup.keys(), ...settlementsByGroup.keys()]);
 
@@ -247,7 +227,7 @@ for (const gid of [...allGroupIds].sort()) {
         participant_count: e.splits.length,
         expense_status: e.editAction || "active",
         counted_in_totals: deleted ? "no" : "yes",
-        splits_sum_matches_total: splitSum === round2(e.amount) ? "yes" : "no",
+        splits_sum_matches_total: nearlyEqual(splitSum, e.amount) ? "yes" : "no",
       });
     }
 
@@ -268,7 +248,7 @@ for (const gid of [...allGroupIds].sort()) {
       participants: participants.join(" | "),
       split_breakdown: e.splits.map((s) => `${nameOf(group, s.uid)}:${round2(s.amount)}`).join(" | "),
       splits_sum: splitSum,
-      splits_sum_matches_total: splitSum === round2(e.amount) ? "yes" : "no",
+      splits_sum_matches_total: nearlyEqual(splitSum, e.amount) ? "yes" : "no",
       expense_status: e.editAction || "active",
       counted_in_totals: e.editAction === "deleted" ? "no" : "yes",
       created_by_name: nameOf(group, e.createdBy),
@@ -306,14 +286,12 @@ for (const gid of [...allGroupIds].sort()) {
 
   // pairwise: one row per unordered pair that has any activity
   const uidList = [...uids].sort();
-  const seen = new Set();
-  for (const a of uidList) {
-    for (const b of uidList) {
-      if (a === b) continue;
-      const key = [a, b].sort().join("|");
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const [x, y] = key.split("|");
+  // uidList is sorted, so `j > i` yields each unordered pair exactly once and
+  // already in (x, y) order — no dedupe set or key round-tripping needed.
+  for (let i = 0; i < uidList.length; i++) {
+    for (let j = i + 1; j < uidList.length; j++) {
+      const x = uidList[i];
+      const y = uidList[j];
       const xy = owesGross[x]?.[y] || 0;
       const yx = owesGross[y]?.[x] || 0;
       const apXY = settledApproved[x]?.[y] || 0;
@@ -364,6 +342,8 @@ for (const gid of [...allGroupIds].sort()) {
     }
   }
 
+  const deletedCount = expenses.filter((e) => e.editAction === "deleted").length;
+
   // per-member rollup
   for (const uid of uidList) {
     const sumRow = (bag, dir) =>
@@ -409,7 +389,8 @@ for (const gid of [...allGroupIds].sort()) {
       position: net > 0.01 ? "is owed" : net < -0.01 ? "owes" : "settled",
       amount_abs: round2(Math.abs(net)),
       net_if_deleted_expenses_counted: netInclDeleted,
-      group_has_deleted_expenses: Math.abs(netInclDeleted - net) <= 0.01 ? "no" : "yes",
+      group_has_deleted_expenses: deletedCount > 0 ? "yes" : "no",
+      deleted_expenses_change_balance: Math.abs(netInclDeleted - net) <= 0.01 ? "no" : "yes",
     });
   }
 
@@ -426,13 +407,15 @@ for (const gid of [...allGroupIds].sort()) {
     group_id: gid,
     group_name: groupName,
     group_exists: group ? "yes" : "no (orphaned subcollection)",
-    settlement_mode: group?.settlementMode || "simplified",
+    // useSimplifiedDebts replaced the legacy settlementMode string; unmigrated
+    // documents still only carry the old field (see toGroup in src/lib/firestore.ts).
+    settlement_mode: simplifiedDebtsOf(group) ? "simplified" : "direct",
     created_at: iso(group?.createdAt),
     created_by_name: nameOf(group, group?.createdBy),
     current_member_count: (group?.memberIds || []).length,
     people_seen_in_data: uidList.length,
     expense_count_active: active.length,
-    expense_count_deleted: expenses.filter((e) => e.editAction === "deleted").length,
+    expense_count_deleted: deletedCount,
     expense_count_edited: expenses.filter((e) => e.editAction === "edited").length,
     total_spend: totalSpend,
     avg_expense: active.length ? round2(totalSpend / active.length) : 0,
@@ -490,7 +473,7 @@ writeCsv(outDir, "member_balances.csv", [
   "expenses_paid_count","total_paid_for_group","expenses_shared_count","total_own_share",
   "net_before_settlements","settlements_paid_approved","settlements_received_approved",
   "settlements_paid_pending","settlements_received_pending","net_balance","position","amount_abs",
-  "net_if_deleted_expenses_counted","group_has_deleted_expenses",
+  "net_if_deleted_expenses_counted","group_has_deleted_expenses","deleted_expenses_change_balance",
 ], memberRows);
 
 writeCsv(outDir, "group_summary.csv", [
@@ -507,7 +490,7 @@ const grandSettled = round2(groupRows.reduce((t, g) => t + g.total_settled_appro
 const grandOutstanding = round2(groupRows.reduce((t, g) => t + g.outstanding_amount, 0));
 
 console.log(`\nTotals across ${groupRows.length} group(s):`);
-console.log(`  active expenses   ${groupRows.reduce((t, g) => t + g.expense_count_active, 0)}  (${expenseRows.length} incl. deleted)`);
+console.log(`  active expenses   ${groupRows.reduce((t, g) => t + g.expense_count_active, 0)}  (${expenseDocCount} incl. deleted)`);
 console.log(`  split lines       ${splitRows.length}`);
 console.log(`  total spend       INR ${grandSpend}`);
 console.log(`  settled approved  INR ${grandSettled}`);
