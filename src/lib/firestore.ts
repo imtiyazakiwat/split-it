@@ -14,13 +14,12 @@ import {
   arrayUnion,
   arrayRemove,
   deleteField,
-  writeBatch,
   type QuerySnapshot,
 } from "firebase/firestore";
 import { db } from "./firebase";
 import {
   Group, Expense, Settlement, SettlementStatus, SettlementKind,
-  SplitType, ExpenseSplit, SettlementMode, UserProfile,
+  SplitType, ExpenseSplit, UserProfile,
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 
@@ -67,20 +66,19 @@ export async function createGroup(
     createdBy: creatorUid,
     createdAt: Date.now(),
     inviteCode,
-    settlementMode: "simplified",
   });
   return groupRef.id;
 }
 
 export async function updateGroupProfile(
   groupId: string,
-  data: { name?: string; description?: string; photoURL?: string; settlementMode?: SettlementMode }
+  data: { name?: string; description?: string; photoURL?: string; useSimplifiedDebts?: boolean }
 ): Promise<void> {
-  const payload: Record<string, string | undefined> = {};
+  const payload: Record<string, string | boolean | undefined> = {};
   if (data.name !== undefined) payload.name = data.name;
   if (data.description !== undefined) payload.description = data.description;
   if (data.photoURL !== undefined) payload.photoURL = data.photoURL;
-  if (data.settlementMode !== undefined) payload.settlementMode = data.settlementMode;
+  if (data.useSimplifiedDebts !== undefined) payload.useSimplifiedDebts = data.useSimplifiedDebts;
   await updateDoc(doc(db, "groups", groupId), payload);
 }
 
@@ -394,8 +392,6 @@ export interface NewSettlement {
   expenseIds?: string[];
   forwardedFromSettlementId?: string;
   kind?: SettlementKind;
-  crossGroupId?: string;
-  crossGroupLegCount?: number;
 }
 
 function settlementPayload(groupId: string, data: NewSettlement) {
@@ -430,9 +426,7 @@ export async function addSettlementRequest(
     notifyUsers([approver], {
       title: group?.name || "Settlement request",
       body:
-        data.kind === "offset"
-          ? `${creatorName} wants to cancel out ₹${data.amount} across groups`
-          : data.createdBy === data.fromUid
+        data.createdBy === data.fromUid
           ? `${creatorName} says they paid you ₹${data.amount}`
           : `${creatorName} recorded a ₹${data.amount} payment from you`,
       link: `/groups/${groupId}`,
@@ -444,36 +438,6 @@ export async function addSettlementRequest(
   return ref.id;
 }
 
-/**
- * Creates several settlement legs as one atomic action. Used by the
- * cross-group ("settle globally") flow so a person's balances in different
- * groups can never end up half-updated.
- */
-export async function addSettlementRequests(
-  legs: { groupId: string; data: NewSettlement }[]
-): Promise<void> {
-  if (legs.length === 0) return;
-  const batch = writeBatch(db);
-  legs.forEach(({ groupId, data }) => {
-    const ref = doc(collection(db, "groups", groupId, "settlements"));
-    batch.set(ref, settlementPayload(groupId, data));
-  });
-  await batch.commit();
-
-  // Notify once per counterparty rather than once per leg.
-  const first = legs[0].data;
-  const approver = first.createdBy === first.fromUid ? first.toUid : first.fromUid;
-  const total = legs.reduce((sum, l) => sum + l.data.amount, 0);
-  try {
-    notifyUsers([approver], {
-      title: "Cross-group settlement",
-      body: `A ₹${total.toFixed(2)} settlement across ${legs.length} group(s) needs your approval`,
-      link: `/notifications`,
-    });
-  } catch {
-    // best-effort
-  }
-}
 
 export async function updateSettlementStatus(
   groupId: string,
@@ -513,21 +477,6 @@ export async function updateSettlementStatus(
   }
 }
 
-/** Approves/rejects every leg of a cross-group settlement together. */
-export async function updateCrossGroupSettlementStatus(
-  legs: { groupId: string; settlementId: string }[],
-  status: SettlementStatus
-): Promise<void> {
-  if (legs.length === 0) return;
-  const batch = writeBatch(db);
-  legs.forEach(({ groupId, settlementId }) => {
-    batch.update(doc(db, "groups", groupId, "settlements", settlementId), {
-      status,
-      updatedAt: Date.now(),
-    });
-  });
-  await batch.commit();
-}
 
 // ── User Profile ────────────────────────────────────────────
 

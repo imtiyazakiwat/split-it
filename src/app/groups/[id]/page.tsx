@@ -1,38 +1,34 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
-import { useSingleGroup, useGroupData } from "@/lib/group-data-context";
+import { useSingleGroup } from "@/lib/group-data-context";
 import {
   updateGroupProfile,
   updateSettlementStatus,
-  updateCrossGroupSettlementStatus,
   updateExpense,
   deleteExpense,
   deleteGroup,
   removeMember,
   addExpense,
 } from "@/lib/firestore";
-import { Expense, Settlement, SettlementMode } from "@/lib/types";
+import { Expense, Settlement } from "@/lib/types";
 import {
   activeExpenses as onlyActive,
   computeBalances,
+  computeDirectDebts,
   computeSettlementProgress,
   rescaleSplits,
   simplifyDebts,
   splitEqually,
   formatCurrency,
 } from "@/lib/balance";
-import {
-  computeCounterpartyBalances,
-  findCrossGroupLegs,
-} from "@/lib/global-balance";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
 import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
-import { GlassField, GlassSelect } from "@/components/ui/GlassField";
+import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
@@ -42,11 +38,12 @@ import SettleUpModal from "@/components/SettleUpModal";
 import ForwardModal from "@/components/ForwardModal";
 import AddMemberModal from "@/components/group/AddMemberModal";
 import ActivityDetailModal from "@/components/group/ActivityDetailModal";
+import PersonStatementSheet from "@/components/group/PersonStatementSheet";
+import InviteQrSheet from "@/components/group/InviteQrSheet";
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
 import LoginScreen from "@/components/LoginScreen";
-import GlobalSettleModal from "@/components/GlobalSettleModal";
 
 function timeAgoShort(ts: number): string {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -71,7 +68,6 @@ export default function GroupPage() {
   // Reads from the one shared subscription set instead of opening three more
   // listeners every time this screen mounts.
   const { group, expenses, settlements, loading: groupLoading, notFound } = useSingleGroup(id);
-  const { datasets, allLoaded } = useGroupData();
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
@@ -79,10 +75,14 @@ export default function GroupPage() {
   const [showAddMember, setShowAddMember] = useState(false);
   const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
   const [detailSettlement, setDetailSettlement] = useState<Settlement | null>(null);
+  // Which member's pairwise statement is open. Held by uid so the sheet
+  // follows live data instead of a snapshot taken at tap time.
+  const [statementUid, setStatementUid] = useState<string | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
   const [showEditGroup, setShowEditGroup] = useState(false);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
-  const [editSettlementMode, setEditSettlementMode] = useState<SettlementMode>("simplified");
+  const [editUseSimplified, setEditUseSimplified] = useState(false);
   const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
   const [editPhotoPreview, setEditPhotoPreview] = useState("");
   const [editBusy, setEditBusy] = useState(false);
@@ -91,10 +91,6 @@ export default function GroupPage() {
   // Controlled fields for the edit-expense sheet. It used to read values back
   // out of the DOM with getElementById, which silently fell back to the old
   // values whenever the ids weren't found.
-  const [editExpDesc, setEditExpDesc] = useState("");
-  const [editExpAmount, setEditExpAmount] = useState("");
-  const [editExpPaidBy, setEditExpPaidBy] = useState("");
-  const [showCopied, setShowCopied] = useState(false);
   const [confirmState, setConfirmState] = useState<{
     title: string;
     message?: string;
@@ -105,16 +101,8 @@ export default function GroupPage() {
   // Expense ids hidden locally during the undo window (deferred-commit delete).
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
-  // Tracked by uid so the sheet follows live data rather than a snapshot.
-  const [globalSettleUid, setGlobalSettleUid] = useState<string | null>(null);
   const showToast = useToast();
 
-  // Cross-group position with each member, so this screen can point out
-  // balances that can only be cleared globally.
-  const counterparties = useMemo(
-    () => (user ? computeCounterpartyBalances(user.uid, datasets) : []),
-    [user, datasets]
-  );
 
   if (loading) return <GroupDetailSkeleton />;
   // Previously rendered `null`, i.e. a blank white screen, whenever auth hadn't
@@ -159,10 +147,6 @@ export default function GroupPage() {
         // Someone who was removed can still appear in old expenses; naming them
         // "Unknown" made it look like corrupt data.
         (group?.memberIds.includes(uid) ? "Member" : "Former member");
-  // Cross-group figures are only trustworthy once every group has loaded.
-  const globalFor = (uid: string) =>
-    allLoaded ? counterparties.find((c) => c.uid === uid) : undefined;
-  const globalSettleTarget = globalSettleUid ? globalFor(globalSettleUid) ?? null : null;
 
   // Merge optimistic (pending) expenses with the live ones. An optimistic entry
   // is hidden as soon as a matching real expense arrives (Firestore delivers our
@@ -183,13 +167,14 @@ export default function GroupPage() {
   // apart from reality the moment anyone corrected an entry.
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
-  // NOTE: "direct" (per-person) settlement mode is temporarily disabled — the
-  // per-expense picker showed gross expense amounts instead of the pairwise
-  // net, letting you overpay. Revisit later; for now always use simplified.
-  //   const transactions = settlementMode === "direct"
-  //     ? computeDirectDebts(group.memberIds, balanceExpenses, settlements)
-  //     : simplifyDebts(balances);
-  const transactions = simplifyDebts(balances);
+  // Direct pairwise debts by default: you only ever owe the people you
+  // actually shared expenses with, which is the figure people can check
+  // against their own memory. Simplification is opt-in per group because it
+  // routes debts through third parties — fewer transfers, but it can tell you
+  // to pay someone you never shared a bill with.
+  const transactions = group.useSimplifiedDebts
+    ? simplifyDebts(balances)
+    : computeDirectDebts(group.memberIds, balanceExpenses, settlements);
   // People the current user owes (used for the "forward payment" flow).
   const myCreditors = transactions
     .filter((t) => t.fromUid === currentUser.uid)
@@ -221,29 +206,9 @@ export default function GroupPage() {
     });
   }
 
-  // A cross-group settlement is a set of linked records; responding has to
-  // cover every leg, or the offset would only be half-applied.
   async function respondToSettlement(s: Settlement, status: "approved" | "rejected") {
-    if (!group) return 0;
-    const set = findCrossGroupLegs(
-      datasets,
-      { ...s, groupId: s.groupId || group.id },
-      currentUser.uid
-    );
-    if (!set.complete) {
-      throw new Error(
-        `only ${set.legs.length} of ${set.expected} linked records are available yet`
-      );
-    }
-    if (set.legs.length > 1) {
-      await updateCrossGroupSettlementStatus(
-        set.legs.map((l) => ({ groupId: l.groupId, settlementId: l.settlementId })),
-        status
-      );
-    } else {
-      await updateSettlementStatus(set.legs[0].groupId, set.legs[0].settlementId, status);
-    }
-    return set.legs.length;
+    if (!group) return;
+    await updateSettlementStatus(s.groupId || group.id, s.id, status);
   }
 
   // These writes were fire-and-forget: a rejected write (e.g. a rules failure)
@@ -251,12 +216,9 @@ export default function GroupPage() {
   async function handleApproveSettlement(s: Settlement) {
     if (!group) return;
     try {
-      const legCount = (await respondToSettlement(s, "approved")) || 1;
+      await respondToSettlement(s, "approved");
       showToast({
-        message:
-          legCount > 1
-            ? `✓ Offset applied across ${legCount} groups`
-            : `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
+        message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
       });
       showLocalNotification(
         "Settlement approved",
@@ -338,7 +300,7 @@ export default function GroupPage() {
     if (!group) return;
     setEditName(group.name);
     setEditDesc(group.description || "");
-    setEditSettlementMode(group.settlementMode || "simplified");
+    setEditUseSimplified(group.useSimplifiedDebts === true);
     setEditPhotoPreview(group.photoURL || "");
     setEditPhotoFile(null);
     setShowEditGroup(true);
@@ -371,7 +333,7 @@ export default function GroupPage() {
         name: editName.trim(),
         description: editDesc.trim() || undefined,
         photoURL,
-        settlementMode: editSettlementMode,
+        useSimplifiedDebts: editUseSimplified,
       });
       showToast({ message: "Group updated" });
       setShowEditGroup(false);
@@ -382,30 +344,9 @@ export default function GroupPage() {
     }
   }
 
-  async function handleCopyInviteLink() {
-    if (!group) return;
-    const link = `${window.location.origin}/join/${group.inviteCode}`;
-    try {
-      await navigator.clipboard.writeText(link);
-    } catch {
-      // fallback
-      const ta = document.createElement("textarea");
-      ta.value = link;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      ta.remove();
-    }
-    setShowCopied(true);
-    setTimeout(() => setShowCopied(false), 2000);
-  }
 
   function handleEditExpense(expense: Expense) {
     setEditingExpense(expense);
-    setEditExpDesc(expense.description);
-    setEditExpAmount(String(expense.amount));
-    setEditExpPaidBy(expense.paidBy);
-    setEditError("");
   }
 
   function handleDeleteExpense(expense: Expense) {
@@ -484,53 +425,45 @@ export default function GroupPage() {
     }
   }
 
-  async function handleSaveEditedExpense(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSaveEditedExpense(input: NewExpenseInput) {
     if (!group || !editingExpense) return;
-    const desc = editExpDesc.trim();
-    const amt = parseFloat(editExpAmount);
-    const paidBy = editExpPaidBy || editingExpense.paidBy;
-
-    if (!desc) {
-      setEditError("Description is required.");
-      return;
-    }
-    if (!Number.isFinite(amt) || amt <= 0) {
-      setEditError("Enter an amount greater than zero.");
-      return;
-    }
-
-    // Keep the splits consistent with the new total, otherwise the ledger stops
-    // adding up (the previous version changed the amount only).
-    const amountChanged = Math.abs(amt - editingExpense.amount) > 0.005;
-    const splitUids = editingExpense.splits.map((s) => s.uid);
-    if (amountChanged && splitUids.length === 0) {
-      // Guard against a malformed record: re-splitting nothing would credit the
-      // payer with the full amount and debit nobody.
-      setEditError("This expense has no split information, so its amount can't be changed.");
-      return;
-    }
-    const splits = !amountChanged
-      ? undefined
-      : editingExpense.splitType === "equal"
-      ? splitEqually(amt, splitUids)
-      : rescaleSplits(editingExpense.splits, amt);
-
-    setEditBusy(true);
-    setEditError("");
+    const original = editingExpense;
+    const gid = group.id;
+    const sameMembers =
+      original.splits.length === input.splitMemberIds.length &&
+      original.splits.every((s) => input.splitMemberIds.includes(s.uid));
+    // Preserve an uneven split's shape: only fall back to an equal split when
+    // the people involved actually changed. Rescaling keeps each person's
+    // proportion of a legacy exact/percentage expense intact.
+    const splits =
+      sameMembers && original.splitType !== "equal"
+        ? rescaleSplits(original.splits, input.amount)
+        : splitEqually(input.amount, input.splitMemberIds);
+    setEditingExpense(null);
     try {
+      let receiptUrls: string[] | undefined;
+      if (input.receiptFiles.length > 0) {
+        const uploaded = await uploadMultipleReceipts(gid, input.receiptFiles);
+        receiptUrls = [...(original.receiptUrls || []), ...uploaded];
+      }
       await updateExpense(
-        group.id,
-        editingExpense.id,
-        { description: desc, amount: amt, paidBy, splits },
+        gid,
+        original.id,
+        {
+          description: input.description,
+          amount: input.amount,
+          paidBy: input.paidBy,
+          category: input.category,
+          splits,
+          receiptUrls,
+        },
         currentUser.uid
       );
       showToast({ message: "Expense updated" });
-      setEditingExpense(null);
     } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to update expense");
-    } finally {
-      setEditBusy(false);
+      showToast({
+        message: err instanceof Error ? `Couldn't save: ${err.message}` : "Couldn't save the changes",
+      });
     }
   }
 
@@ -600,7 +533,7 @@ export default function GroupPage() {
           </button>
         </div>
       </header>
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-40 scroll-momentum space-y-5">
+      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum space-y-5">
         {/* Group hero */}
         <div className="flex items-start gap-4">
           {group.photoURL ? (
@@ -699,22 +632,6 @@ export default function GroupPage() {
                     <path d="M5 12h14M13 6l6 6-6 6" />
                   </svg>
                 </button>
-                {/* Only offered when this person's balance spans groups, since
-                    that's the case a single-group settlement can't resolve. */}
-                {(() => {
-                  const cross = globalFor(topDebt.toUid);
-                  if (!cross || (cross.groups.length < 2 && cross.offsetable < 0.01)) return null;
-                  return (
-                    <button
-                      onClick={() => setGlobalSettleUid(cross.uid)}
-                      className="inline-flex items-center gap-1.5 bg-[var(--surface)] text-[var(--brand)] rounded-full px-4 py-2.5 text-[14px] font-semibold shadow-[var(--shadow-sm)] tap-shrink"
-                    >
-                      {cross.offsetable > 0.01
-                        ? `Offset ${formatCurrency(cross.offsetable)} across groups`
-                        : "Settle across groups"}
-                    </button>
-                  );
-                })()}
               </div>
             </div>
           </div>
@@ -747,9 +664,16 @@ export default function GroupPage() {
               const pos = b.netAmount > 0.01;
               const neg = b.netAmount < -0.01;
               return (
-                <div
+                <button
                   key={b.uid}
-                  className={`shrink-0 w-[190px] rounded-[var(--radius-inner)] p-3.5 ${
+                  type="button"
+                  // Your own card has no pairwise statement to show.
+                  disabled={isMe}
+                  onClick={() => setStatementUid(b.uid)}
+                  aria-label={isMe ? undefined : `View your statement with ${memberName(b.uid)}`}
+                  className={`shrink-0 w-[190px] text-left rounded-[var(--radius-inner)] p-3.5 ${
+                    isMe ? "" : "tap-shrink"
+                  } ${
                     isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
                   }`}
                 >
@@ -782,22 +706,16 @@ export default function GroupPage() {
                         left group
                       </span>
                     )}
-                    {/* Shortcut into the cross-group flow for people you also
-                        share other groups with. */}
-                    {!isMe && (() => {
-                      const cross = globalFor(b.uid);
-                      if (!cross || (cross.groups.length < 2 && cross.offsetable < 0.01)) return null;
-                      return (
-                        <button
-                          onClick={() => setGlobalSettleUid(cross.uid)}
-                          className="inline-block rounded-full bg-[var(--tint-accent)] px-2 py-0.5 text-[11px] font-semibold text-[var(--brand)] tap-shrink"
-                        >
-                          {cross.groups.length} groups
-                        </button>
-                      );
-                    })()}
+                    {!isMe && (
+                      <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[var(--brand)]">
+                        Statement
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                      </span>
+                    )}
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -827,18 +745,19 @@ export default function GroupPage() {
       </main>
 
       {/* Floating Add Expense */}
-      <div className="fixed z-30 inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] pointer-events-none">
+      <div className="fixed z-30 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
         <div className="max-w-md mx-auto px-4 flex justify-end">
+          {/* Compact pill rather than a stacked circle + caption: the taller
+              stacked form sat well clear of the tab bar and read as floating
+              in the middle of the list. */}
           <button
             onClick={() => setShowAddExpense(true)}
-            className="pointer-events-auto flex flex-col items-center gap-1 tap-shrink"
+            className="pointer-events-auto flex items-center gap-2 bg-[var(--brand-solid)] text-white rounded-full pl-4 pr-5 py-3.5 shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)] tap-shrink"
           >
-            <span className="w-14 h-14 rounded-full bg-[var(--brand-solid)] flex items-center justify-center shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)]">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </span>
-            <span className="text-[12px] font-semibold text-[var(--brand)]">Add Expense</span>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            <span className="text-[16px] font-semibold">Add expense</span>
           </button>
         </div>
       </div>
@@ -862,14 +781,25 @@ export default function GroupPage() {
         />
       )}
 
-      {globalSettleTarget && (
-        <GlobalSettleModal
-          meUid={currentUser.uid}
-          counterparty={globalSettleTarget}
-          onClose={() => setGlobalSettleUid(null)}
+
+      {showInvite && (
+        <InviteQrSheet
+          groupName={group.name}
+          inviteCode={group.inviteCode}
+          onClose={() => setShowInvite(false)}
         />
       )}
-
+      {statementUid && (
+        <PersonStatementSheet
+          group={group}
+          meUid={currentUser.uid}
+          otherUid={statementUid}
+          expenses={balanceExpenses}
+          settlements={settlements}
+          onClose={() => setStatementUid(null)}
+          onSettle={handleOpenSettle}
+        />
+      )}
       {forwardTarget && (
         <ForwardModal
           groupId={group.id}
@@ -903,8 +833,8 @@ export default function GroupPage() {
             </div>
 
             <div className="flex gap-2">
-              <GlassButton size="sm" variant="glass" onClick={handleCopyInviteLink} className="flex-1">
-                {showCopied ? "Copied!" : "Share Invite Link"}
+              <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); setShowInvite(true); }} className="flex-1">
+                Invite people
               </GlassButton>
               {isAdmin && (
                 <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); handleOpenEditGroup(); }} className="flex-1">
@@ -1018,25 +948,27 @@ export default function GroupPage() {
             <GlassField label="Group name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Group name" />
             <GlassField label="Description" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Group description (optional)" />
 
-            {/* Settlement style toggle temporarily hidden — "direct" mode is
-                buggy (see NOTE in the balance calculation). Re-enable once the
-                per-expense picker nets amounts correctly.
-            <div>
-              <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1.5">
-                Settlement style
+            <div className="rounded-[var(--radius-inner)] border border-[var(--border-subtle)] p-3.5">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={editUseSimplified}
+                  onChange={(e) => setEditUseSimplified(e.target.checked)}
+                  className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-solid)]"
+                />
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-semibold text-[var(--label-primary)]">
+                    Combine payments
+                  </span>
+                  <span className="block text-[13px] text-[var(--label-secondary)] mt-0.5">
+                    Off: you settle directly with each person you shared expenses
+                    with. On: the app reshuffles who pays whom so there are fewer
+                    transfers — which can ask you to pay someone you never shared
+                    a bill with.
+                  </span>
+                </span>
               </label>
-              <div className="glass rounded-full p-1 text-sm font-medium flex">
-                <button type="button" onClick={() => setEditSettlementMode("simplified")}
-                  className={`flex-1 rounded-full py-2 transition tap-shrink ${editSettlementMode === "simplified" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"}`}>
-                  Simplified
-                </button>
-                <button type="button" onClick={() => setEditSettlementMode("direct")}
-                  className={`flex-1 rounded-full py-2 transition tap-shrink ${editSettlementMode === "direct" ? "bg-[var(--surface)] shadow-sm text-[var(--label-primary)]" : "text-[var(--label-secondary)]"}`}>
-                  Direct
-                </button>
-              </div>
             </div>
-            */}
 
             {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
             <GlassButton disabled={editBusy} className="w-full">{editBusy ? "Saving…" : "Save"}</GlassButton>
@@ -1060,42 +992,13 @@ export default function GroupPage() {
 
       {/* Edit Expense Modal */}
       {editingExpense && (
-        <GlassModal title="Edit Expense" onClose={() => setEditingExpense(null)}>
-          <form onSubmit={handleSaveEditedExpense} className="space-y-4">
-            <GlassField
-              label="Description"
-              value={editExpDesc}
-              onChange={(ev) => setEditExpDesc(ev.target.value)}
-              autoFocus
-            />
-            <GlassField
-              label="Amount"
-              type="number"
-              step="0.01"
-              inputMode="decimal"
-              value={editExpAmount}
-              onChange={(ev) => setEditExpAmount(ev.target.value)}
-            />
-            <GlassSelect
-              label="Paid by"
-              value={editExpPaidBy}
-              onChange={(ev) => setEditExpPaidBy(ev.target.value)}
-            >
-              {group.memberIds.map((uid) => (
-                <option key={uid} value={uid}>{memberName(uid)}</option>
-              ))}
-            </GlassSelect>
-            <p className="text-[12px] text-[var(--label-tertiary)]">
-              Changing the amount re-splits it across the same{" "}
-              {editingExpense.splits.length} {editingExpense.splits.length === 1 ? "person" : "people"}.
-            </p>
-            {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
-            <div className="flex gap-2">
-              <GlassButton type="button" variant="ghost" onClick={() => setEditingExpense(null)} className="flex-1">Cancel</GlassButton>
-              <GlassButton disabled={editBusy} className="flex-1">{editBusy ? "Saving…" : "Save Changes"}</GlassButton>
-            </div>
-          </form>
-        </GlassModal>
+        <AddExpenseModal
+          group={group}
+          currentUid={currentUser.uid}
+          expense={editingExpense}
+          onSubmit={handleSaveEditedExpense}
+          onClose={() => setEditingExpense(null)}
+        />
       )}
       {confirmState && (
         <ConfirmDialog

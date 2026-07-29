@@ -12,35 +12,38 @@ import { getMessaging } from "@/lib/firebase-admin";
  *   FIREBASE_PRIVATE_KEY   — the private key from the same service account JSON
  *
  * Body: { token: string, title: string, body: string, link?: string }
+ *
+ * The message is sent DATA-ONLY, deliberately. Including a `notification` block
+ * makes FCM render the push itself while *also* invoking the service worker's
+ * onBackgroundMessage handler, which renders it a second time — every push
+ * arrived twice whenever the app was backgrounded. With data only, the service
+ * worker is the single renderer, and it can control the icon, the click target
+ * and the dedupe tag. See public/firebase-messaging-sw.js.
  */
 export async function POST(req: NextRequest) {
   try {
     const { token, title, body, link } = await req.json();
-
     if (!token || !title || !body) {
       return NextResponse.json(
         { error: "Missing required fields: token, title, body" },
         { status: 400 }
       );
     }
-
     const messaging = getMessaging();
-
-    const message: {
-      token: string;
-      notification: { title: string; body: string };
-      webpush?: { fcmOptions: { link: string } };
-    } = {
-      token,
-      notification: { title, body },
+    // FCM data payloads carry strings only.
+    const data: Record<string, string> = {
+      title: String(title),
+      body: String(body),
+      // Identical messages collapse into one instead of stacking; different
+      // ones keep their own slot.
+      tag: `${String(title)}|${String(body)}`.slice(0, 96),
     };
-
-    if (link) {
-      message.webpush = { fcmOptions: { link } };
-    }
-
-    const response = await messaging.send(message);
-
+    if (link) data.link = String(link);
+    const response = await messaging.send({
+      token,
+      data,
+      webpush: { headers: { Urgency: "high" } },
+    });
     return NextResponse.json({ success: true, messageId: response });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";

@@ -14,8 +14,6 @@ export interface GroupMember {
   upiId?: string;
 }
 
-export type SettlementMode = "simplified" | "direct";
-
 export interface Group {
   id: string;
   name: string;
@@ -26,9 +24,11 @@ export interface Group {
   createdBy: string;
   createdAt: number;
   inviteCode: string;
-  // "simplified" (default): debts are auto-chained into the fewest payments.
-  // "direct": you settle each person based on the expenses you actually shared.
-  settlementMode?: SettlementMode;
+  // Off by default: everyone settles directly with the people they actually
+  // shared expenses with. When on, debts are chained through third parties to
+  // reduce the number of payments — fewer transfers, but you can be asked to
+  // pay someone you never shared a bill with.
+  useSimplifiedDebts?: boolean;
 }
 
 export type SplitType = "equal" | "exact" | "percentage";

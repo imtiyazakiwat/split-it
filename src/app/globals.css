@@ -40,6 +40,11 @@
   --radius-md: 14px;
   --radius-lg: 20px;
   --radius-xl: 28px;
+
+  /* Height of the floating tab bar, excluding the safe-area inset it adds
+     underneath. Floating buttons and page bottom padding both derive their
+     offset from this so the two can never drift apart. */
+  --nav-h: 5.25rem;
   --radius-pill: 999px;
 
   /* ── Canonical semantic scale (used by content screens).
@@ -204,6 +209,23 @@ textarea:focus-visible,
   background: var(--glass-bg-strong);
   backdrop-filter: blur(28px) saturate(var(--glass-saturate));
   -webkit-backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+}
+
+/* ==========================================================================
+   Sheet — the surface for modals and bottom sheets.
+
+   Deliberately OPAQUE, unlike .glass. Sheets carry the densest text in the app
+   (amounts, member names, ledger rows), and a translucent panel let whatever
+   was underneath show through and wreck the contrast. Glass stays for chrome
+   that floats over content it doesn't need to be read against: top bar, tab
+   bar, FAB.
+   ========================================================================== */
+.sheet {
+  background: var(--surface-elevated);
+  border: 0.5px solid var(--border-subtle);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 -16px 44px -20px rgba(0, 0, 0, 0.35);
 }
 
 /* Fallback for browsers without backdrop-filter support */

@@ -16,9 +16,18 @@ export function activeExpenses(expenses: Expense[]): Expense[] {
   return expenses.filter(isActiveExpense);
 }
 
-/** Approved settlements are the only ones that move money. */
+/**
+ * Approved settlements are the only ones that move money.
+ *
+ * A missing `status` counts as approved: records written before the approval
+ * flow existed have no status field, and the app has always treated them as
+ * settled. `subscribeToSettlements` already applies this default on read, but
+ * relying on that meant this function quietly disagreed with the same
+ * calculation run against raw documents (a script, an export, a Cloud
+ * Function). Defaulting here too keeps one answer everywhere.
+ */
 export function approvedSettlements(settlements: Settlement[]): Settlement[] {
-  return settlements.filter((s) => s.status === "approved");
+  return settlements.filter((s) => (s.status || "approved") === "approved");
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;

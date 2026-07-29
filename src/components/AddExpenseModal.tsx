@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Group } from "@/lib/types";
+import { Expense, Group } from "@/lib/types";
 import { addExpense } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { splitEqually, formatCurrency } from "@/lib/balance";
@@ -32,7 +32,12 @@ export interface NewExpenseInput {
   description: string;
   amount: number;
   paidBy: string;
+  /** Equal split across `splitMemberIds`, precomputed for the add path. */
   splits: { uid: string; amount: number }[];
+  /** Who the expense is split between. Editing needs this so the caller can
+   *  decide how to re-split rather than being handed an equal split it may
+   *  not want (a legacy exact/percentage expense should keep its shape). */
+  splitMemberIds: string[];
   category: string;
   receiptFiles: File[];
 }
@@ -43,6 +48,7 @@ export default function AddExpenseModal({
   onClose,
   prefillReceipt,
   onSubmit,
+  expense,
 }: {
   group: Group;
   currentUid: string;
@@ -51,12 +57,18 @@ export default function AddExpenseModal({
   /** When provided, the parent persists the expense (enabling optimistic UI):
    *  the modal builds the input, hands it off, and closes immediately. */
   onSubmit?: (input: NewExpenseInput) => void;
+  /** Editing an existing expense reuses this whole screen rather than a
+   *  cut-down form, so adding and editing look and behave the same. */
+  expense?: Expense | null;
 }) {
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("meal");
-  const [paidBy, setPaidBy] = useState(currentUid);
-  const [splitMembers, setSplitMembers] = useState<string[]>(group.memberIds);
-  const [note, setNote] = useState("");
+  const isEdit = !!expense;
+  const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
+  const [category, setCategory] = useState(expense?.category || "meal");
+  const [paidBy, setPaidBy] = useState(expense?.paidBy || currentUid);
+  const [splitMembers, setSplitMembers] = useState<string[]>(
+    expense ? expense.splits.map((s) => s.uid) : group.memberIds
+  );
+  const [note, setNote] = useState(expense?.description || "");
   const [receiptFiles, setReceiptFiles] = useState<File[]>(prefillReceipt ? [prefillReceipt] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -89,6 +101,7 @@ export default function AddExpenseModal({
       amount: parsedAmount,
       paidBy,
       splits,
+      splitMemberIds: splitMembers,
       category,
       receiptFiles,
     };
@@ -136,7 +149,7 @@ export default function AddExpenseModal({
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
             <div className="text-center">
-              <p className="text-[18px] font-bold text-[var(--text-primary)]">Add Expense</p>
+              <p className="text-[18px] font-bold text-[var(--text-primary)]">{isEdit ? "Edit Expense" : "Add Expense"}</p>
               <p className="text-[13px] text-[var(--text-tertiary)]">{group.name}</p>
             </div>
             <div className="w-11 h-11" />
@@ -347,7 +360,7 @@ export default function AddExpenseModal({
             disabled={busy}
             className="w-full flex items-center justify-center gap-2 rounded-full bg-[var(--brand-solid)] text-white py-4 text-[16px] font-semibold shadow-[0_12px_30px_-8px_rgba(79,70,229,0.6)] tap-shrink disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Save Expense"}
+            {busy ? "Saving…" : isEdit ? "Save changes" : "Save Expense"}
           </button>
         </div>
       </form>
