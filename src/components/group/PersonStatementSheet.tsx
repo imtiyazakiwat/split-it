@@ -49,6 +49,11 @@ export default function PersonStatementSheet({
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
   const iOwe = stmt.net < -0.01;
   const settled = Math.abs(stmt.net) < 0.01;
+  // With simplified debts on, the group's payment plan chains balances through
+  // third parties, so this pairwise figure is history between the two of you —
+  // not an amount to pay. Offering "Settle X" here would contradict the plan on
+  // the group screen, so the action is withheld and we point at the plan instead.
+  const simplified = group.useSimplifiedDebts === true;
 
   return (
     <GlassModal title={otherName} onClose={onClose}>
@@ -157,8 +162,14 @@ export default function PersonStatementSheet({
           )}
         </div>
 
+        {simplified && !settled && (
+          <p className="text-[12px] text-[var(--text-tertiary)] text-center">
+            This group uses simplified debts, so the amounts above are your shared
+            history. Use the group&rsquo;s settle-up plan to see who to pay.
+          </p>
+        )}
         <div className="flex gap-2">
-          {iOwe && (
+          {iOwe && !simplified && (
             <button
               type="button"
               onClick={() => {

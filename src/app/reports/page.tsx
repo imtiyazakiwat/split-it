@@ -94,7 +94,14 @@ function ReportsInner() {
   const showToast = useToast();
   const personParam = params.get("person");
   const groupParam = params.get("group");
-  const [scope, setScope] = useState<string>(groupParam || ALL);
+  // Switching person keeps this component mounted, so a scope left over from the
+  // previous person would carry across: if that group isn't shared with the new
+  // person the statement renders empty, and when they share fewer than two groups
+  // the chip row is hidden, leaving no way to clear it. Tagging the choice with
+  // the person it was made for lets it expire by derivation.
+  const [pickedScope, setPickedScope] = useState<{ person: string | null; value: string } | null>(null);
+  const scope = pickedScope?.person === personParam ? pickedScope.value : groupParam || ALL;
+  const setScope = (value: string) => setPickedScope({ person: personParam, value });
 
   const uid = user?.uid;
   const counterparties = useMemo(
@@ -168,7 +175,12 @@ function ReportsInner() {
   const person = counterparties.find((c) => c.uid === personParam);
   const otherName = person?.displayName || "This person";
   const sharedGroups = groups.filter((g) => g.memberIds?.includes(personParam) && g.memberIds?.includes(meUid));
-  const scopedGroups = scope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === scope);
+  // Second guard, for the render that happens before the reset effect commits:
+  // a scope this person doesn't share falls back to showing every shared group.
+  const effectiveScope =
+    scope === ALL || sharedGroups.some((g) => g.id === scope) ? scope : ALL;
+  const scopedGroups =
+    effectiveScope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === effectiveScope);
 
   const expenses: Expense[] = [];
   const settlements: Settlement[] = [];
@@ -183,7 +195,7 @@ function ReportsInner() {
   async function handleDownload() {
     const rows: (string | number)[][] = [
       ["Statement between", user?.displayName || "You", "and", otherName],
-      ["Scope", scope === ALL ? "All shared groups" : scopedGroups[0]?.name || ""],
+      ["Scope", effectiveScope === ALL ? "All shared groups" : scopedGroups[0]?.name || ""],
       [],
       ["Date", "Details", "What happened", "You gave", "You got", "Balance after", "Who owes"],
     ];
@@ -254,7 +266,7 @@ function ReportsInner() {
                 key={opt.id}
                 onClick={() => setScope(opt.id)}
                 className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
-                  scope === opt.id
+                  effectiveScope === opt.id
                     ? "bg-[var(--brand-solid)] text-white"
                     : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
                 }`}

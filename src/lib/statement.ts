@@ -23,8 +23,16 @@ export interface StatementRow {
   kind: StatementRowKind;
   /** Plain-words description of the event, e.g. "Lunch" or "You paid Ganesh". */
   label: string;
-  /** Secondary line: the full amount and how the share was worked out. */
-  detail: string;
+  /**
+   * Supporting numbers for the secondary line, unformatted on purpose: currency
+   * formatting belongs to the renderer (formatCurrency), not to this model. Only
+   * set on expense rows.
+   */
+  expenseTotal?: number;
+  /** The share this row is about — mine when they paid, theirs when I paid. */
+  shareAmount?: number;
+  /** Free-text note the payer attached. Only set on payment rows. */
+  note?: string;
   /** Change to the pair's balance. Positive: they owe me more. */
   delta: number;
   /** Running balance after this row. Positive: they owe me. */
@@ -91,7 +99,8 @@ export function buildPairStatement(
         ts: e.createdAt,
         kind: "expense-they-paid",
         label: e.description || "Expense",
-        detail: `Total ${e.amount} · your share ${round2(myShare)}`,
+        expenseTotal: round2(e.amount),
+        shareAmount: round2(myShare),
         delta: -round2(myShare),
         balance: 0,
         informationalOnly: false,
@@ -105,7 +114,8 @@ export function buildPairStatement(
         ts: e.createdAt,
         kind: "expense-i-paid",
         label: e.description || "Expense",
-        detail: `Total ${e.amount} · their share ${round2(theirShare)}`,
+        expenseTotal: round2(e.amount),
+        shareAmount: round2(theirShare),
         delta: round2(theirShare),
         balance: 0,
         informationalOnly: false,
@@ -136,7 +146,7 @@ export function buildPairStatement(
       ts: s.createdAt,
       kind: iSent ? "payment-i-sent" : "payment-they-sent",
       label: iSent ? "You paid them" : "They paid you",
-      detail: s.note || (status === "approved" ? "Payment settled" : `Payment ${status}`),
+      note: s.note || undefined,
       // A payment I make reduces what I owe, i.e. moves the balance towards
       // them owing me. Only approved payments move it at all.
       delta: approved ? (iSent ? round2(s.amount) : -round2(s.amount)) : 0,

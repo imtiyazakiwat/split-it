@@ -29,6 +29,14 @@ export interface Group {
   // reduce the number of payments — fewer transfers, but you can be asked to
   // pay someone you never shared a bill with.
   useSimplifiedDebts?: boolean;
+  /**
+   * @deprecated Superseded by `useSimplifiedDebts`. Groups created before the
+   * rename still carry `settlementMode: "simplified" | "direct"` on the stored
+   * document, and dropping it outright silently flipped those groups back to
+   * direct settlement — changing who owes whom. `toGroup()` maps it onto
+   * `useSimplifiedDebts` at read time; nothing writes it any more.
+   */
+  settlementMode?: "simplified" | "direct";
 }
 
 export type SplitType = "equal" | "exact" | "percentage";

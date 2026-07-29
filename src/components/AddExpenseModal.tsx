@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Expense, Group } from "@/lib/types";
 import { addExpense } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
-import { splitEqually, formatCurrency } from "@/lib/balance";
+import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
@@ -76,6 +76,20 @@ export default function AddExpenseModal({
 
   const parsedAmount = parseFloat(amount) || 0;
   const eachPays = splitMembers.length > 0 ? parsedAmount / splitMembers.length : 0;
+
+  // A legacy exact/percentage expense keeps its shape on edit: the parent
+  // rescales the original amounts instead of re-splitting evenly, and that only
+  // happens while the same people are involved. The panel below has to describe
+  // whichever of the two is actually going to be saved — it used to always say
+  // "Split equally", which was wrong for every uneven expense.
+  const originalSplits = expense?.splits ?? [];
+  const sameMembers =
+    originalSplits.length === splitMembers.length &&
+    originalSplits.every((s) => splitMembers.includes(s.uid));
+  const keepsCustomSplit = isEdit && expense!.splitType !== "equal" && sameMembers;
+  const previewSplits = keepsCustomSplit
+    ? rescaleSplits(originalSplits, parsedAmount)
+    : splitEqually(parsedAmount, splitMembers);
   const memberName = (uid: string) => (uid === currentUid ? "You" : group.members[uid]?.displayName || "User");
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.id === category)?.label || "Expense";
   const categoryEmoji = EXPENSE_CATEGORIES.find((c) => c.id === category)?.emoji || "🧾";
@@ -286,14 +300,34 @@ export default function AddExpenseModal({
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-[var(--text-primary)]">Split equally</p>
-                <p className="text-[13px] text-[var(--text-tertiary)]">{splitMembers.length} way split</p>
+                <p className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  {keepsCustomSplit ? "Custom split kept" : "Split equally"}
+                </p>
+                <p className="text-[13px] text-[var(--text-tertiary)]">
+                  {keepsCustomSplit
+                    ? "Each person keeps their original share of the total"
+                    : `${splitMembers.length} way split`}
+                </p>
               </div>
-              <div className="text-right">
-                <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
-                <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
-              </div>
+              {!keepsCustomSplit && (
+                <div className="text-right">
+                  <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
+                  <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
+                </div>
+              )}
             </div>
+            {keepsCustomSplit && (
+              <ul className="mt-2 rounded-[var(--radius-inner)] bg-[var(--fill-soft)] divide-y divide-[var(--border-subtle)]">
+                {previewSplits.map((s) => (
+                  <li key={s.uid} className="flex items-center justify-between px-3.5 py-2.5">
+                    <span className="text-[14px] text-[var(--text-secondary)] truncate">{memberName(s.uid)}</span>
+                    <span className="text-[14px] font-semibold text-[var(--text-primary)]">
+                      {formatCurrency(s.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Add to (group, fixed) */}

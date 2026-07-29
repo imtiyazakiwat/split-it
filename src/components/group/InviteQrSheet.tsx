@@ -27,8 +27,19 @@ export default function InviteQrSheet({
   inviteCode: string;
   onClose: () => void;
 }) {
-  const [dataUrl, setDataUrl] = useState("");
-  const [failed, setFailed] = useState(false);
+  // The result is tagged with the code that produced it, so a rotated invite
+  // code invalidates the previous QR by derivation rather than by clearing state
+  // in the effect. Clearing it there would leave the old code's QR (or a stale
+  // failure message) on screen for a render, and would show the wrong code
+  // entirely if generation for the new one failed.
+  const [result, setResult] = useState<{
+    code: string;
+    dataUrl?: string;
+    failed?: boolean;
+  } | null>(null);
+  const current = result?.code === inviteCode ? result : null;
+  const dataUrl = current?.dataUrl ?? "";
+  const failed = current?.failed ?? false;
   const [copied, setCopied] = useState<"link" | "code" | null>(null);
   const showToast = useToast();
 
@@ -42,10 +53,10 @@ export default function InviteQrSheet({
       color: { dark: "#000000", light: "#ffffff" },
     })
       .then((png) => {
-        if (!cancelled) setDataUrl(png);
+        if (!cancelled) setResult({ code: inviteCode, dataUrl: png });
       })
       .catch(() => {
-        if (!cancelled) setFailed(true);
+        if (!cancelled) setResult({ code: inviteCode, failed: true });
       });
     return () => {
       cancelled = true;
