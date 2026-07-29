@@ -13,9 +13,12 @@ export default function NotificationSetup() {
 
     const unsubMessage = onForegroundMessage((payload) => {
       if (payload.title && "Notification" in window && Notification.permission === "granted") {
+        // Tagging means the same message can't appear twice, whichever path
+        // renders it (this handler, or the service worker mid-transition).
         new Notification(payload.title, {
           body: payload.body,
           icon: "/icon-192.png",
+          tag: payload.tag,
         });
       }
     });

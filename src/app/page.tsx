@@ -19,7 +19,6 @@ import BottomNav from "@/components/home/BottomNav";
 import GroupRow from "@/components/home/GroupRow";
 import HomeSkeleton from "@/components/home/HomeSkeleton";
 import Skeleton from "@/components/ui/Skeleton";
-import GlobalSettleModal from "@/components/GlobalSettleModal";
 import { useToast } from "@/components/ui/Toast";
 import Logo from "@/components/Logo";
 
@@ -43,9 +42,6 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
-  // Stored by uid, not as a snapshot of the object, so the open sheet keeps
-  // following live data instead of acting on figures frozen at tap time.
-  const [settleTargetUid, setSettleTargetUid] = useState<string | null>(null);
   const showToast = useToast();
   const uid = user?.uid;
 
@@ -148,15 +144,7 @@ export default function Home() {
   // Show skeletons rather than a misleading ₹0 while data is still arriving.
   const balancesPending = groups.length > 0 && !allLoaded;
 
-  // People whose balances span more than one group, or that cancel out across
-  // groups — the cases per-group settling can't resolve on its own.
-  const crossGroupPeople = counterparties.filter(
-    (c) => c.groups.length > 1 || c.offsetable > 0.01
-  );
-  const peopleToShow = counterparties.filter((c) => Math.abs(c.net) > 0.01 || c.offsetable > 0.01);
-  const settleTarget = settleTargetUid
-    ? counterparties.find((c) => c.uid === settleTargetUid) ?? null
-    : null;
+  const peopleToShow = counterparties.filter((c) => Math.abs(c.net) > 0.01);
 
   const filtered = groups.filter((g) =>
     g.name.toLowerCase().includes(query.trim().toLowerCase())
@@ -291,19 +279,15 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Balances by person — the only place cross-group debts can be settled */}
+        {/* Balances by person, netted across groups. Read-only: settling always
+            happens inside a group. */}
         {peopleToShow.length > 0 && (
           <section className="mt-6">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-[20px] font-bold text-[var(--text-primary)]">By person</h2>
-              {crossGroupPeople.length > 0 && (
-                <span className="rounded-full bg-[var(--tint-accent)] px-2.5 py-0.5 text-[11px] font-semibold text-[var(--brand)]">
-                  {crossGroupPeople.length} across groups
-                </span>
-              )}
             </div>
             <p className="text-[13px] text-[var(--text-tertiary)] mb-3">
-              Balances netted across every group you share. Tap to settle in one go.
+              Balances netted across every group you share. Tap for the full statement.
             </p>
             <div className="space-y-2.5">
               {peopleToShow.map((person) => {
@@ -311,9 +295,9 @@ export default function Home() {
                 return (
                   <button
                     key={person.uid}
-                    onClick={() => setSettleTargetUid(person.uid)}
-                    // Settling across groups needs every group's data in hand,
-                    // otherwise the plan could be built from a partial ledger.
+                    onClick={() => router.push(`/reports?person=${person.uid}`)}
+                    // Cross-group figures are only meaningful once every group
+                    // has loaded, so don't invite a tap into a partial ledger.
                     disabled={!allLoaded}
                     className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-3.5 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink disabled:opacity-60"
                   >
@@ -334,11 +318,6 @@ export default function Home() {
                           ? person.groups.map((g) => g.groupName).join(" · ")
                           : `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}`}
                       </p>
-                      {person.offsetable > 0.01 && (
-                        <span className="inline-block mt-1 rounded-full bg-[var(--tint-accent)] px-2 py-0.5 text-[11px] font-medium text-[var(--brand)]">
-                          {formatCurrency(person.offsetable)} cancels out
-                        </span>
-                      )}
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[11px] text-[var(--text-tertiary)]">
@@ -439,7 +418,7 @@ export default function Home() {
       )}
 
       {/* Floating Add — pinned bottom-right, clearing the tab bar */}
-      <div className="fixed z-40 inset-x-0 bottom-[calc(6rem+env(safe-area-inset-bottom))] pointer-events-none">
+      <div className="fixed z-40 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
         <div className="max-w-md mx-auto px-4 flex justify-end">
           <div className="relative pointer-events-auto">
             {showAdd && (
@@ -473,13 +452,6 @@ export default function Home() {
 
       <BottomNav active="groups" />
 
-      {settleTarget && (
-        <GlobalSettleModal
-          meUid={currentUser.uid}
-          counterparty={settleTarget}
-          onClose={() => setSettleTargetUid(null)}
-        />
-      )}
 
       {showCreate && (
         <GlassModal title="New Group" onClose={() => setShowCreate(false)}>

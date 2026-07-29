@@ -45,3 +45,7 @@ firebase-service-account.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# exported CSV reports (contain member emails / UPI ids)
+/reports/
+/reports/*.csv

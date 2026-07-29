@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Group } from "@/lib/types";
+import { Expense, Group } from "@/lib/types";
 import { addExpense } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
-import { splitEqually, formatCurrency } from "@/lib/balance";
+import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
@@ -32,7 +32,12 @@ export interface NewExpenseInput {
   description: string;
   amount: number;
   paidBy: string;
+  /** Equal split across `splitMemberIds`, precomputed for the add path. */
   splits: { uid: string; amount: number }[];
+  /** Who the expense is split between. Editing needs this so the caller can
+   *  decide how to re-split rather than being handed an equal split it may
+   *  not want (a legacy exact/percentage expense should keep its shape). */
+  splitMemberIds: string[];
   category: string;
   receiptFiles: File[];
 }
@@ -43,6 +48,7 @@ export default function AddExpenseModal({
   onClose,
   prefillReceipt,
   onSubmit,
+  expense,
 }: {
   group: Group;
   currentUid: string;
@@ -51,12 +57,18 @@ export default function AddExpenseModal({
   /** When provided, the parent persists the expense (enabling optimistic UI):
    *  the modal builds the input, hands it off, and closes immediately. */
   onSubmit?: (input: NewExpenseInput) => void;
+  /** Editing an existing expense reuses this whole screen rather than a
+   *  cut-down form, so adding and editing look and behave the same. */
+  expense?: Expense | null;
 }) {
-  const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState("meal");
-  const [paidBy, setPaidBy] = useState(currentUid);
-  const [splitMembers, setSplitMembers] = useState<string[]>(group.memberIds);
-  const [note, setNote] = useState("");
+  const isEdit = !!expense;
+  const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
+  const [category, setCategory] = useState(expense?.category || "meal");
+  const [paidBy, setPaidBy] = useState(expense?.paidBy || currentUid);
+  const [splitMembers, setSplitMembers] = useState<string[]>(
+    expense ? expense.splits.map((s) => s.uid) : group.memberIds
+  );
+  const [note, setNote] = useState(expense?.description || "");
   const [receiptFiles, setReceiptFiles] = useState<File[]>(prefillReceipt ? [prefillReceipt] : []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -64,6 +76,20 @@ export default function AddExpenseModal({
 
   const parsedAmount = parseFloat(amount) || 0;
   const eachPays = splitMembers.length > 0 ? parsedAmount / splitMembers.length : 0;
+
+  // A legacy exact/percentage expense keeps its shape on edit: the parent
+  // rescales the original amounts instead of re-splitting evenly, and that only
+  // happens while the same people are involved. The panel below has to describe
+  // whichever of the two is actually going to be saved — it used to always say
+  // "Split equally", which was wrong for every uneven expense.
+  const originalSplits = expense?.splits ?? [];
+  const sameMembers =
+    originalSplits.length === splitMembers.length &&
+    originalSplits.every((s) => splitMembers.includes(s.uid));
+  const keepsCustomSplit = isEdit && expense!.splitType !== "equal" && sameMembers;
+  const previewSplits = keepsCustomSplit
+    ? rescaleSplits(originalSplits, parsedAmount)
+    : splitEqually(parsedAmount, splitMembers);
   const memberName = (uid: string) => (uid === currentUid ? "You" : group.members[uid]?.displayName || "User");
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.id === category)?.label || "Expense";
   const categoryEmoji = EXPENSE_CATEGORIES.find((c) => c.id === category)?.emoji || "🧾";
@@ -89,6 +115,7 @@ export default function AddExpenseModal({
       amount: parsedAmount,
       paidBy,
       splits,
+      splitMemberIds: splitMembers,
       category,
       receiptFiles,
     };
@@ -136,7 +163,7 @@ export default function AddExpenseModal({
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
             </button>
             <div className="text-center">
-              <p className="text-[18px] font-bold text-[var(--text-primary)]">Add Expense</p>
+              <p className="text-[18px] font-bold text-[var(--text-primary)]">{isEdit ? "Edit Expense" : "Add Expense"}</p>
               <p className="text-[13px] text-[var(--text-tertiary)]">{group.name}</p>
             </div>
             <div className="w-11 h-11" />
@@ -273,14 +300,34 @@ export default function AddExpenseModal({
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-[var(--text-primary)]">Split equally</p>
-                <p className="text-[13px] text-[var(--text-tertiary)]">{splitMembers.length} way split</p>
+                <p className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  {keepsCustomSplit ? "Custom split kept" : "Split equally"}
+                </p>
+                <p className="text-[13px] text-[var(--text-tertiary)]">
+                  {keepsCustomSplit
+                    ? "Each person keeps their original share of the total"
+                    : `${splitMembers.length} way split`}
+                </p>
               </div>
-              <div className="text-right">
-                <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
-                <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
-              </div>
+              {!keepsCustomSplit && (
+                <div className="text-right">
+                  <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
+                  <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
+                </div>
+              )}
             </div>
+            {keepsCustomSplit && (
+              <ul className="mt-2 rounded-[var(--radius-inner)] bg-[var(--fill-soft)] divide-y divide-[var(--border-subtle)]">
+                {previewSplits.map((s) => (
+                  <li key={s.uid} className="flex items-center justify-between px-3.5 py-2.5">
+                    <span className="text-[14px] text-[var(--text-secondary)] truncate">{memberName(s.uid)}</span>
+                    <span className="text-[14px] font-semibold text-[var(--text-primary)]">
+                      {formatCurrency(s.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           {/* Add to (group, fixed) */}
@@ -347,7 +394,7 @@ export default function AddExpenseModal({
             disabled={busy}
             className="w-full flex items-center justify-center gap-2 rounded-full bg-[var(--brand-solid)] text-white py-4 text-[16px] font-semibold shadow-[0_12px_30px_-8px_rgba(79,70,229,0.6)] tap-shrink disabled:opacity-50"
           >
-            {busy ? "Saving…" : "Save Expense"}
+            {busy ? "Saving…" : isEdit ? "Save changes" : "Save Expense"}
           </button>
         </div>
       </form>

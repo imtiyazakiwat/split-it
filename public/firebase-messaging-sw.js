@@ -20,18 +20,26 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
+// The server sends data-only messages on purpose: a payload carrying a
+// `notification` block is rendered by FCM itself *and* delivered here, which
+// showed every push twice. This handler is the only renderer, so it owns the
+// icon, the tag and the click target.
+//
+// `payload.notification` is still read first so a stale client that receives an
+// older-style message keeps working.
 messaging.onBackgroundMessage((payload) => {
   const notification = payload.notification || {};
   const data = payload.data || {};
+  const title = notification.title || data.title || "split it";
   const options = {
     body: notification.body || data.body || "",
-    data,
+    icon: notification.icon || "/icon-192.png",
+    badge: "/favicon-32.png",
+    data: data,
   };
-  if (notification.icon) options.icon = notification.icon;
-  self.registration.showNotification(
-    notification.title || data.title || "SplitIt",
-    options
-  );
+  // Repeats of the same message replace each other instead of stacking up.
+  if (data.tag) options.tag = data.tag;
+  self.registration.showNotification(title, options);
 });
 
 self.addEventListener("notificationclick", (event) => {

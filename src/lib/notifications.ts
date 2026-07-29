@@ -79,7 +79,7 @@ export async function getFcmToken(): Promise<string | null> {
 }
 
 export function onForegroundMessage(
-  callback: (payload: { title?: string; body?: string; link?: string }) => void
+  callback: (payload: { title?: string; body?: string; link?: string; tag?: string }) => void
 ): (() => void) | undefined {
   try {
     const messaging = getMessaging(app);
@@ -89,6 +89,7 @@ export function onForegroundMessage(
         title: data.title || payload.notification?.title,
         body: data.body || payload.notification?.body,
         link: data.link,
+        tag: data.tag,
       });
     });
     return unsub;

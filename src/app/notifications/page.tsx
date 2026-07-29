@@ -6,7 +6,6 @@ import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import {
   updateSettlementStatus,
-  updateCrossGroupSettlementStatus,
 } from "@/lib/firestore";
 import {
   activeExpenses,
@@ -14,7 +13,6 @@ import {
   formatCurrency,
   settlementCreator,
 } from "@/lib/balance";
-import { findCrossGroupLegs } from "@/lib/global-balance";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
@@ -30,8 +28,6 @@ interface NotificationItem {
   title: React.ReactNode;
   subtitle: string;
   settlement?: Settlement;
-  /** How many linked legs this one action will apply to. */
-  legCount?: number;
 }
 
 function dateBucket(ts: number): string {
@@ -90,59 +86,25 @@ export default function NotificationsPage() {
   const allItems = useMemo<NotificationItem[]>(() => {
     if (!uid) return [];
     const items: NotificationItem[] = [];
-    // A cross-group settlement arrives as several linked records; show it once.
-    const seenCrossGroupIds = new Set<string>();
 
     for (const { group, expenses, settlements } of datasets) {
       const name = (target: string) =>
         target === uid ? "You" : group.members?.[target]?.displayName || "Someone";
 
       for (const s of settlements) {
-        if (s.crossGroupId && canRespondToSettlement(s, uid)) {
-          if (seenCrossGroupIds.has(s.crossGroupId)) continue;
-          seenCrossGroupIds.add(s.crossGroupId);
-        }
-        // Either side can raise a settlement now (a payment you made, or a
-        // cross-group offset), so "who needs to act" is whoever didn't create
-        // it — not simply the payee.
+        // Either side can raise a settlement: a payment you say you made, or
+        // a payment someone recorded against you. Whoever did NOT create it is
+        // the one who has to act.
         if (canRespondToSettlement(s, uid)) {
           const creator = settlementCreator(s);
           const isOffset = s.kind === "offset";
-          // A set can mix an offset with a cash claim, and each leg only
-          // carries its own slice of the total — so the prompt is built from
-          // the whole set rather than from whichever leg surfaced first.
-          const set = findCrossGroupLegs(datasets, s, uid);
-          const isSet = set.legs.length > 1;
           items.push({
             key: `req-${group.id}-${s.id}`,
             ts: s.updatedAt || s.createdAt,
             groupId: group.id,
             groupName: group.name,
             kind: "request",
-            title: isSet ? (
-              <>
-                <span className="font-semibold">{name(creator)}</span>
-                {set.offsetAmount > 0.01 && (
-                  <>
-                    <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
-                    <span className="font-semibold">{formatCurrency(set.offsetAmount)}</span>
-                  </>
-                )}
-                {set.offsetAmount > 0.01 && set.cashAmount > 0.01 && (
-                  <span className="text-[var(--text-tertiary)]"> and</span>
-                )}
-                {set.cashAmount > 0.01 && (
-                  <>
-                    <span className="text-[var(--text-tertiary)]"> says they paid you </span>
-                    <span className="font-semibold">{formatCurrency(set.cashAmount)}</span>
-                  </>
-                )}
-                <span className="text-[var(--text-tertiary)]">
-                  {" "}
-                  across {set.legs.length} groups
-                </span>
-              </>
-            ) : isOffset ? (
+            title: isOffset ? (
               <>
                 <span className="font-semibold">{name(creator)}</span>
                 <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
@@ -162,11 +124,8 @@ export default function NotificationsPage() {
                 <span className="font-semibold">{formatCurrency(s.amount)}</span>
               </>
             ),
-            subtitle: isSet
-              ? `${set.legs.length} linked records · one approval applies to all`
-              : `${group.name}${s.note ? ` · ${s.note}` : ""}`,
+            subtitle: `${group.name}${s.note ? ` · ${s.note}` : ""}`,
             settlement: s,
-            legCount: set.legs.length,
           });
         } else if (settlementCreator(s) === uid && s.status !== "pending") {
           items.push({
@@ -238,32 +197,22 @@ export default function NotificationsPage() {
   }
   if (!user) return <LoginScreen />;
 
-  async function respond(s: Settlement, status: "approved" | "rejected") {
+  // groupId comes from the notification item, which was built from the group
+  // whose subcollection the settlement was actually read out of. `s.groupId` is
+  // a denormalized copy on the document, so a stale or wrong value there would
+  // send the write to the wrong group's path.
+  async function respond(
+    s: Settlement,
+    groupId: string,
+    status: "approved" | "rejected"
+  ) {
     setBusyId(s.id);
     try {
-      const set = findCrossGroupLegs(datasets, s, uid!);
-      // Never apply half of a linked set: if a leg hasn't loaded (or was never
-      // written), the balances would end up inconsistent across groups.
-      if (!set.complete) {
-        showToast({
-          message: `Still loading ${set.expected - set.legs.length} linked record(s) — try again in a moment`,
-        });
-        return;
-      }
-      if (set.legs.length > 1) {
-        await updateCrossGroupSettlementStatus(
-          set.legs.map((l) => ({ groupId: l.groupId, settlementId: l.settlementId })),
-          status
-        );
-      } else {
-        await updateSettlementStatus(set.legs[0].groupId, set.legs[0].settlementId, status);
-      }
+      await updateSettlementStatus(groupId, s.id, status);
       showToast({
         message:
           status === "approved"
-            ? set.legs.length > 1
-              ? `Applied across ${set.legs.length} groups`
-              : "Settlement approved"
+            ? "Settlement approved"
             : "Request declined",
       });
     } catch (err) {
@@ -328,14 +277,14 @@ export default function NotificationsPage() {
                       <div className="flex gap-2 mt-2">
                         <button
                           disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "approved"); }}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "approved"); }}
                           className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
-                          {item.legCount && item.legCount > 1 ? "Approve all" : "Approve"}
+                          Approve
                         </button>
                         <button
                           disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "rejected"); }}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "rejected"); }}
                           className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
                           Reject

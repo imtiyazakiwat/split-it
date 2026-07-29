@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 
-type Tab = "groups" | "activity" | "profile";
+type Tab = "groups" | "activity" | "reports" | "profile";
 
 const INDIGO = "var(--brand)";
 
@@ -30,6 +30,14 @@ function ActivityIcon({ active }: { active: boolean }) {
   );
 }
 
+function ReportsIcon({ active }: { active: boolean }) {
+  const stroke = active ? "var(--brand)" : "var(--label-secondary)";
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 4h16v16H4zM8 4v16M8 9h12M8 14h12" />
+    </svg>
+  );
+}
 function ProfileIcon({ active }: { active: boolean }) {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
@@ -47,6 +55,7 @@ export default function BottomNav({ active }: { active: Tab }) {
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
     { id: "activity", label: "Activity", href: "/activity", Icon: ActivityIcon },
+    { id: "reports", label: "Statements", href: "/reports", Icon: ReportsIcon },
     { id: "profile", label: "Settings", href: "/settings", Icon: ProfileIcon },
   ];
 
