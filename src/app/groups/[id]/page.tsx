@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useSingleGroup } from "@/lib/group-data-context";
 import {
@@ -24,12 +24,14 @@ import {
   splitEqually,
   formatCurrency,
 } from "@/lib/balance";
+import { groupItemLink } from "@/lib/statement";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
 import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
+import CollapsibleFab from "@/components/ui/CollapsibleFab";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
@@ -61,7 +63,7 @@ function createdAgoText(createdAt: number): string {
   return `${days} days ago`;
 }
 
-export default function GroupPage() {
+function GroupPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { user, loading } = useAuth();
@@ -73,8 +75,13 @@ export default function GroupPage() {
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
   const [showGroupInfo, setShowGroupInfo] = useState(false);
   const [showAddMember, setShowAddMember] = useState(false);
-  const [detailExpense, setDetailExpense] = useState<Expense | null>(null);
-  const [detailSettlement, setDetailSettlement] = useState<Settlement | null>(null);
+  // Which detail sheet is open lives in the URL, not in state: a
+  // notification can then point straight at one item, and closing the sheet
+  // is just a navigation. `?expense=` / `?settlement=` carry the id.
+  const searchParams = useSearchParams();
+  const openExpenseId = searchParams.get("expense");
+  const openSettlementId = searchParams.get("settlement");
+  const missingDeepLinkRef = useRef<string | null>(null);
   // Which member's pairwise statement is open. Held by uid so the sheet
   // follows live data instead of a snapshot taken at tap time.
   const [statementUid, setStatementUid] = useState<string | null>(null);
@@ -99,6 +106,22 @@ export default function GroupPage() {
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
   const showToast = useToast();
+
+  // A notification can outlive the thing it points at — the expense gets
+  // deleted, or the settlement belongs to a group you have since left. Say so
+  // once instead of opening an empty sheet or silently ignoring the link.
+  useEffect(() => {
+    const target = openExpenseId || openSettlementId;
+    if (!target || groupLoading) return;
+    if (missingDeepLinkRef.current === target) return;
+    const found = openExpenseId
+      ? expenses.some((e) => e.id === openExpenseId)
+      : settlements.some((s) => s.id === openSettlementId);
+    if (!found) {
+      missingDeepLinkRef.current = target;
+      showToast({ message: "That item isn\u2019t here any more." });
+    }
+  }, [openExpenseId, openSettlementId, expenses, settlements, groupLoading, showToast]);
 
 
   if (loading) return <GroupDetailSkeleton />;
@@ -162,6 +185,18 @@ export default function GroupPage() {
   // Only deleted expenses leave the ledger. Filtering on any `editAction` (as
   // before) dropped every *edited* expense from the balances, so amounts drifted
   // apart from reality the moment anyone corrected an entry.
+  const detailExpense = openExpenseId
+    ? mergedExpenses.find((e) => e.id === openExpenseId) ?? null
+    : null;
+  const detailSettlement = openSettlementId
+    ? settlements.find((s) => s.id === openSettlementId) ?? null
+    : null;
+  const closeDetail = () => router.replace(`/groups/${group.id}`, { scroll: false });
+  const openExpense = (e: Expense) =>
+    router.push(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
+  const openSettlement = (s: Settlement) =>
+    router.push(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
+
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   // Direct pairwise debts by default: you only ever owe the people you
@@ -740,8 +775,8 @@ export default function GroupPage() {
             onReject={handleRejectSettlement}
             onForward={(s) => setForwardTarget(s)}
             canForward={myCreditors.length > 0}
-            onOpenExpense={setDetailExpense}
-            onOpenSettlement={setDetailSettlement}
+            onOpenExpense={openExpense}
+            onOpenSettlement={openSettlement}
           />
         </section>
       </main>
@@ -749,18 +784,7 @@ export default function GroupPage() {
       {/* Floating Add Expense */}
       <div className="fixed z-30 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
         <div className="max-w-md mx-auto px-4 flex justify-end">
-          {/* Compact pill rather than a stacked circle + caption: the taller
-              stacked form sat well clear of the tab bar and read as floating
-              in the middle of the list. */}
-          <button
-            onClick={() => setShowAddExpense(true)}
-            className="pointer-events-auto flex items-center gap-2 bg-[var(--brand-solid)] text-white rounded-full pl-4 pr-5 py-3.5 shadow-[0_12px_28px_-6px_rgba(79,70,229,0.6)] tap-shrink"
-          >
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-            <span className="text-[16px] font-semibold">Add expense</span>
-          </button>
+          <CollapsibleFab label="Add expense" onClick={() => setShowAddExpense(true)} />
         </div>
       </div>
 
@@ -919,7 +943,7 @@ export default function GroupPage() {
           isAdmin={isAdmin}
           onEditExpense={handleEditExpense}
           onDeleteExpense={handleDeleteExpense}
-          onClose={() => { setDetailExpense(null); setDetailSettlement(null); }}
+          onClose={closeDetail}
         />
       )}
 
@@ -1013,5 +1037,19 @@ export default function GroupPage() {
         />
       )}
     </div>
+  );
+}
+
+/**
+ * `useSearchParams` makes everything below it client-rendered, so the tree is
+ * wrapped in a Suspense boundary as the Next docs recommend. The fallback is the
+ * same skeleton the page shows while its data loads, so a deep link doesn't
+ * flash something different on the way in.
+ */
+export default function GroupPage() {
+  return (
+    <Suspense fallback={<GroupDetailSkeleton />}>
+      <GroupPageInner />
+    </Suspense>
   );
 }

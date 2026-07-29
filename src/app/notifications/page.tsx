@@ -13,6 +13,7 @@ import {
   formatCurrency,
   settlementCreator,
 } from "@/lib/balance";
+import { groupItemLink } from "@/lib/statement";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
@@ -28,6 +29,8 @@ interface NotificationItem {
   title: React.ReactNode;
   subtitle: string;
   settlement?: Settlement;
+  /** The expense this notification is about, when it is about one. */
+  expenseId?: string;
 }
 
 function dateBucket(ts: number): string {
@@ -165,6 +168,7 @@ export default function NotificationsPage() {
           groupId: group.id,
           groupName: group.name,
           kind: "expense",
+          expenseId: e.id,
           title: (
             <>
               <span className="font-semibold">{name(e.createdBy)}</span>
@@ -264,7 +268,18 @@ export default function NotificationsPage() {
                   <p className="text-[12px] font-semibold text-[var(--text-tertiary)] mb-2 mt-2">{bucket}</p>
                 )}
                 <div
-                  onClick={() => router.push(`/groups/${item.groupId}`)}
+                  onClick={() =>
+                    router.push(
+                      groupItemLink(
+                        item.groupId,
+                        item.expenseId
+                          ? { kind: "expense", id: item.expenseId }
+                          : item.settlement
+                          ? { kind: "settlement", id: item.settlement.id }
+                          : undefined
+                      )
+                    )
+                  }
                   className={`flex items-start gap-3 rounded-[var(--radius-inner)] p-3.5 cursor-pointer tap-shrink ${
                     unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
                   }`}
