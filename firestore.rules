@@ -25,11 +25,35 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.auth.uid == request.resource.data.createdBy
         && request.auth.uid in request.resource.data.memberIds;
-      // Members: unchanged behaviour, except that the group's identity fields
-      // can no longer be rewritten by an update.
-      allow update: if (isGroupMember(resource.data)
+      // Fields only the group's admin (its creator) may change. The UI already
+      // hides Edit Group and member removal from everyone else, but the rules
+      // let any member rename the group, swap its photo, rotate the invite code,
+      // drop other members, or flip useSimplifiedDebts — which silently changes
+      // how much every member is asked to pay.
+      function adminOnlyKeys() {
+        return ['name', 'description', 'photoURL', 'useSimplifiedDebts', 'inviteCode', 'memberIds'];
+      }
+      function touchesAdminOnlyFields() {
+        return request.resource.data.diff(resource.data).affectedKeys()
+                 .hasAny(adminOnlyKeys());
+      }
+      // A member may edit their own entry in `members`, and nothing else in it.
+      function membersEditIsSelfOnly() {
+        return request.resource.data.get('members', {})
+                 .diff(resource.data.get('members', {}))
+                 .affectedKeys().hasOnly([request.auth.uid]);
+      }
+
+      allow update: if (isGroupAdmin(groupId)
           && request.resource.data.createdBy == resource.data.createdBy
           && request.resource.data.createdAt == resource.data.createdAt)
+        // Members keep self-service writes only: their own profile entry in
+        // `members` plus any field not on the admin-only list.
+        || (isGroupMember(resource.data)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt
+          && !touchesAdminOnlyFields()
+          && membersEditIsSelfOnly())
         // A non-member adding themselves via an invite link. Previously this
         // branch checked only that the member list grew by one and included the
         // caller, so the same write could rename the group, replace its photo,

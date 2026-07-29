@@ -42,8 +42,6 @@ export default function Home() {
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
-  // Stored by uid, not as a snapshot of the object, so the open sheet keeps
-  // following live data instead of acting on figures frozen at tap time.
   const showToast = useToast();
   const uid = user?.uid;
 

@@ -48,4 +48,4 @@ next-env.d.ts
 
 # exported CSV reports (contain member emails / UPI ids)
 /reports/
-*.csv
+/reports/*.csv

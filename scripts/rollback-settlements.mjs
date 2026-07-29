@@ -15,85 +15,85 @@
  *                      delete to all clients; only the Admin SDK can do this.
  *                      Not reversible except from the backup file.
  */
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { initializeApp, cert } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
-
-function loadEnv(file) {
-  let raw;
-  try { raw = readFileSync(file, "utf8"); } catch { return; }
-  raw = raw.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n");
-  const re = /^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*=[ \t]*("(?:[^"\\]|\\[\s\S])*"|'(?:[^'\\]|\\[\s\S])*'|[^\n]*)/gm;
-  let m;
-  while ((m = re.exec(raw)) !== null) {
-    let v = m[2];
-    if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-    else v = v.trim().replace(/\s+#.*$/, "");
-    if (process.env[m[1]] === undefined) process.env[m[1]] = v;
-  }
-}
-loadEnv(".env.local");
+import { writeFileSync, mkdirSync } from "node:fs";
+import { db, projectId } from "./lib/admin.mjs";
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
-const modeIdx = args.indexOf("--mode");
-const mode = modeIdx !== -1 ? args[modeIdx + 1] : "reject";
-const ids = args.filter((a, i) => !a.startsWith("--") && args[i - 1] !== "--mode");
+// Options that take a value, so their value is not mistaken for a settlement id.
+const VALUE_FLAGS = new Set(["--mode", "--group"]);
+const valueOf = (flag) => {
+  const i = args.indexOf(flag);
+  return i !== -1 ? args[i + 1] : undefined;
+};
+const mode = valueOf("--mode") ?? "reject";
+const groupId = valueOf("--group");
+const ids = args.filter((a, i) => !a.startsWith("--") && !VALUE_FLAGS.has(args[i - 1]));
 
 if (!ids.length) { console.error("Pass at least one settlement id."); process.exit(1); }
 if (!["reject", "delete"].includes(mode)) { console.error(`Unknown --mode ${mode}`); process.exit(1); }
-
-const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-const privateKey = process.env.FIREBASE_PRIVATE_KEY;
-initializeApp(
-  clientEmail && privateKey
-    ? { credential: cert({ projectId, clientEmail, privateKey: privateKey.replace(/\\n/g, "\n") }) }
-    : { projectId }
-);
-const db = getFirestore();
+if (groupId !== undefined && !groupId) { console.error("--group needs a group id."); process.exit(1); }
 
 console.log(`Project : ${projectId}`);
 console.log(`Mode    : ${mode}`);
+console.log(`Scope   : ${groupId ? `group ${groupId}` : "all groups"}`);
 console.log(`Writing : ${apply ? "YES (--apply given)" : "no, dry run"}\n`);
 
-// find each settlement wherever it lives
-const snap = await db.collectionGroup("settlements").get();
+// Find each settlement wherever it lives. With --group we read that group's own
+// subcollection, which avoids scanning every settlement in the project.
+const query = groupId
+  ? db.collection("groups").doc(groupId).collection("settlements")
+  : db.collectionGroup("settlements");
+const snap = await query.get();
 const found = new Map();
 for (const d of snap.docs) if (ids.includes(d.id)) found.set(d.id, d);
 
 const missing = ids.filter((i) => !found.has(i));
-if (missing.length) { console.error(`Not found: ${missing.join(", ")}`); process.exit(1); }
-
-const groupNames = new Map();
-for (const d of found.values()) {
-  const gid = d.ref.parent.parent?.id;
-  if (gid && !groupNames.has(gid)) {
-    const g = await db.collection("groups").doc(gid).get();
-    groupNames.set(gid, g.exists ? g.get("name") : `(deleted group ${gid.slice(0, 6)})`);
-  }
+if (missing.length) {
+  console.error(`Not found${groupId ? ` in group ${groupId}` : ""}: ${missing.join(", ")}`);
+  process.exit(1);
 }
-const memberName = async (gid, uid) => {
-  const g = await db.collection("groups").doc(gid).get();
-  const n = g.exists ? g.get(`members.${uid}.displayName`) : null;
+
+// One read per group, reused for both the group name and every member lookup.
+const groupSnaps = new Map();
+const groupSnapFor = async (gid) => {
+  if (!gid) return null;
+  if (!groupSnaps.has(gid)) groupSnaps.set(gid, await db.collection("groups").doc(gid).get());
+  return groupSnaps.get(gid);
+};
+const groupNameOf = (gid, snapshot) =>
+  snapshot?.exists ? snapshot.get("name") : `(deleted group ${String(gid).slice(0, 6)})`;
+
+// Legacy settlement docs can be missing fromUid/toUid, so bail out before
+// dereferencing an undefined uid.
+const memberName = async (groupSnapshot, uid) => {
+  if (!uid || typeof uid !== "string") return "(unknown)";
+  const n = groupSnapshot?.exists ? groupSnapshot.get(`members.${uid}.displayName`) : null;
   if (n) return n;
   const u = await db.collection("users").doc(uid).get();
-  return u.exists ? u.get("displayName") : uid.slice(0, 8);
+  return u.exists ? u.get("displayName") || uid.slice(0, 8) : uid.slice(0, 8);
+};
+
+/** createdAt is absent on the oldest documents, so guard the Date conversion. */
+const isoOrUnknown = (ms) => {
+  const n = Number(ms);
+  return Number.isFinite(n) && n > 0 ? new Date(n).toISOString() : "(unknown)";
 };
 
 const backup = [];
 for (const d of found.values()) {
   const gid = d.ref.parent.parent?.id;
   const data = d.data();
-  const from = await memberName(gid, data.fromUid);
-  const to = await memberName(gid, data.toUid);
+  const groupSnapshot = await groupSnapFor(gid);
+  const from = await memberName(groupSnapshot, data.fromUid);
+  const to = await memberName(groupSnapshot, data.toUid);
   const effective = data.status || "approved";
   backup.push({ path: d.ref.path, groupId: gid, data });
 
-  console.log(`${groupNames.get(gid)}  /  ${d.id}`);
+  console.log(`${groupNameOf(gid, groupSnapshot)}  /  ${d.id}`);
   console.log(`   ${from} -> ${to}   INR ${data.amount}`);
   console.log(`   note            ${JSON.stringify(data.note || "")}`);
-  console.log(`   created         ${new Date(data.createdAt).toISOString()}`);
+  console.log(`   created         ${isoOrUnknown(data.createdAt)}`);
   console.log(`   status now      ${effective}${data.status ? "" : " (field absent, app treats as approved)"}`);
   if (mode === "reject") {
     console.log(`   status after    rejected   -> stops counting toward settled balances`);

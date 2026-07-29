@@ -31,7 +31,6 @@ interface NotificationItem {
   settlement?: Settlement;
   /** The expense this notification is about, when it is about one. */
   expenseId?: string;
-  /** How many linked legs this one action will apply to. */
 }
 
 function dateBucket(ts: number): string {
@@ -202,10 +201,18 @@ export default function NotificationsPage() {
   }
   if (!user) return <LoginScreen />;
 
-  async function respond(s: Settlement, status: "approved" | "rejected") {
+  // groupId comes from the notification item, which was built from the group
+  // whose subcollection the settlement was actually read out of. `s.groupId` is
+  // a denormalized copy on the document, so a stale or wrong value there would
+  // send the write to the wrong group's path.
+  async function respond(
+    s: Settlement,
+    groupId: string,
+    status: "approved" | "rejected"
+  ) {
     setBusyId(s.id);
     try {
-      await updateSettlementStatus(s.groupId, s.id, status);
+      await updateSettlementStatus(groupId, s.id, status);
       showToast({
         message:
           status === "approved"
@@ -285,14 +292,14 @@ export default function NotificationsPage() {
                       <div className="flex gap-2 mt-2">
                         <button
                           disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "approved"); }}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "approved"); }}
                           className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
                           Approve
                         </button>
                         <button
                           disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, "rejected"); }}
+                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "rejected"); }}
                           className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
                         >
                           Reject

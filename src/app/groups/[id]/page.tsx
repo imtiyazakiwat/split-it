@@ -95,9 +95,6 @@ function GroupPageInner() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState("");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  // Controlled fields for the edit-expense sheet. It used to read values back
-  // out of the DOM with getElementById, which silently fell back to the old
-  // values whenever the ids weren't found.
   const [confirmState, setConfirmState] = useState<{
     title: string;
     message?: string;
@@ -470,10 +467,14 @@ function GroupPageInner() {
     // Preserve an uneven split's shape: only fall back to an equal split when
     // the people involved actually changed. Rescaling keeps each person's
     // proportion of a legacy exact/percentage expense intact.
-    const splits =
-      sameMembers && original.splitType !== "equal"
-        ? rescaleSplits(original.splits, input.amount)
-        : splitEqually(input.amount, input.splitMemberIds);
+    const keepsUnevenSplit = sameMembers && original.splitType !== "equal";
+    const splits = keepsUnevenSplit
+      ? rescaleSplits(original.splits, input.amount)
+      : splitEqually(input.amount, input.splitMemberIds);
+    // The stored splitType has to follow the splits. Leaving it alone meant an
+    // expense that fell back to an equal split still read as "exact", so the
+    // next edit would try to rescale amounts that were no longer uneven.
+    const splitType = keepsUnevenSplit ? original.splitType : "equal";
     setEditingExpense(null);
     try {
       let receiptUrls: string[] | undefined;
@@ -489,6 +490,7 @@ function GroupPageInner() {
           amount: input.amount,
           paidBy: input.paidBy,
           category: input.category,
+          splitType,
           splits,
           receiptUrls,
         },

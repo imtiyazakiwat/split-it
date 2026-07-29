@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "report": "node scripts/export-report.mjs"
+    "report": "node scripts/export-report.mjs",
+    "rollback": "node scripts/rollback-settlements.mjs"
   },
   "dependencies": {
     "firebase": "^12.15.0",

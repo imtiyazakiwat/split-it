@@ -182,16 +182,29 @@ export async function getGroupByInviteCode(code: string): Promise<Group | null> 
   const snap = await getDocs(q);
   if (snap.empty) return null;
   const d = snap.docs[0];
-  return { id: d.id, ...d.data() } as Group;
+  return toGroup(d.id, d.data());
 }
 
+/**
+ * Normalizes a stored group document.
+ *
+ * `useSimplifiedDebts` replaced the older `settlementMode` string. Legacy
+ * documents were never migrated, so the boolean falls back to the old field:
+ * without this, every group that had opted into simplified debts would quietly
+ * revert to direct settlement and show different amounts owed.
+ */
 function toGroup(id: string, data: Record<string, unknown>): Group {
+  const useSimplifiedDebts =
+    typeof data.useSimplifiedDebts === "boolean"
+      ? data.useSimplifiedDebts
+      : data.settlementMode === "simplified";
   return {
     id,
     ...data,
     description: (data.description as string) || "",
     memberIds: (data.memberIds as string[]) || [],
     members: (data.members as Group["members"]) || {},
+    useSimplifiedDebts,
   } as Group;
 }
 
@@ -291,6 +304,7 @@ export async function updateExpense(
     description?: string;
     amount?: number;
     paidBy?: string;
+    splitType?: SplitType;
     splits?: ExpenseSplit[];
     receiptUrls?: string[];
     category?: string;
