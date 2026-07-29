@@ -1,5 +1,7 @@
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
 import { getMessaging as getAdminMessaging } from "firebase-admin/messaging";
+import { getAuth as getAdminAuth } from "firebase-admin/auth";
+import { getFirestore as getAdminFirestore } from "firebase-admin/firestore";
 
 const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
 const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
@@ -24,4 +26,30 @@ function getFirebaseApp(): App {
 
 export function getMessaging() {
   return getAdminMessaging(getFirebaseApp());
+}
+
+export function getAuth() {
+  return getAdminAuth(getFirebaseApp());
+}
+
+export function getDb() {
+  return getAdminFirestore(getFirebaseApp());
+}
+
+/**
+ * Verifies a `Authorization: Bearer <Firebase ID token>` header and returns the
+ * caller's uid, or null when the header is missing or the token is invalid,
+ * expired or revoked.
+ */
+export async function verifyCaller(
+  authorization: string | null
+): Promise<string | null> {
+  const match = /^Bearer (.+)$/.exec(authorization?.trim() ?? "");
+  if (!match) return null;
+  try {
+    const decoded = await getAuth().verifyIdToken(match[1], true);
+    return decoded.uid;
+  } catch {
+    return null;
+  }
 }

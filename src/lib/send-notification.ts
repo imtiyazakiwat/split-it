@@ -1,5 +1,5 @@
 import { doc, getDoc } from "firebase/firestore";
-import { db } from "./firebase";
+import { auth, db } from "./firebase";
 
 interface NotifyParams {
   title: string;
@@ -26,32 +26,37 @@ export async function notifyGroupMembers(
   await notifyUsers(targets, params);
 }
 
+/**
+ * Asks the server to push to these users.
+ *
+ * We send uids, not FCM registration tokens: /api/notify verifies the caller's
+ * Firebase ID token, checks that each recipient shares a group with them, and
+ * looks the device tokens up itself. Handing the tokens over from here would let
+ * any caller push arbitrary text to a device it had merely seen once.
+ */
 export async function notifyUsers(
   uids: string[],
   params: NotifyParams
 ): Promise<void> {
-  const tokens: string[] = [];
+  if (uids.length === 0) return;
 
-  for (const uid of uids) {
-    try {
-      const snap = await getDoc(doc(db, "users", uid));
-      const data = snap.data();
-      const token = data?.fcmToken as string | undefined;
-      if (token) tokens.push(token);
-    } catch {
-      // skip users whose docs we can't read
-    }
+  const user = auth.currentUser;
+  if (!user) return;
+
+  let idToken: string;
+  try {
+    idToken = await user.getIdToken();
+  } catch {
+    return;
   }
 
-  if (tokens.length === 0) return;
-
-  Promise.allSettled(
-    tokens.map((token) =>
-      fetch("/api/notify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token, ...params }),
-      }).catch(() => {})
-    )
-  );
+  // Fire-and-forget: a failed push must never fail the write that triggered it.
+  void fetch("/api/notify", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${idToken}`,
+    },
+    body: JSON.stringify({ uids, ...params }),
+  }).catch(() => {});
 }
