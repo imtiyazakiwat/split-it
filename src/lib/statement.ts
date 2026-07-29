@@ -176,3 +176,20 @@ export function describeNet(net: number, otherName: string, format: (n: number) 
     ? `${otherName} owes you ${format(net)}`
     : `You owe ${otherName} ${format(-net)}`;
 }
+
+/**
+ * Deep link to a single item inside a group.
+ *
+ * Notifications and activity rows used to point at `/groups/{id}`, which dropped
+ * you at the top of the group and left you hunting for the thing the
+ * notification was actually about. The group screen reads these params and opens
+ * the matching detail sheet.
+ */
+export function groupItemLink(
+  groupId: string,
+  item?: { kind: "expense" | "settlement"; id: string }
+): string {
+  if (!item) return `/groups/${groupId}`;
+  const key = item.kind === "expense" ? "expense" : "settlement";
+  return `/groups/${groupId}?${key}=${encodeURIComponent(item.id)}`;
+}

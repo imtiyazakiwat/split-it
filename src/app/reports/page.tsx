@@ -3,11 +3,12 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import { computeCounterpartyBalances } from "@/lib/global-balance";
+import { computeCounterpartyBalances, GroupDataset } from "@/lib/global-balance";
+import { summariseSpending } from "@/lib/spending";
 import { buildPairStatement, describeNet, PairStatement, StatementRow } from "@/lib/statement";
 import { formatCurrency } from "@/lib/balance";
 import { toCsv, downloadTextFile } from "@/lib/report";
-import { Expense, Settlement } from "@/lib/types";
+import { Expense, Group, Settlement } from "@/lib/types";
 import BottomNav from "@/components/home/BottomNav";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
@@ -86,6 +87,229 @@ function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: s
   );
 }
 
+/** Horizontal proportion bar used by the category and payer breakdowns. */
+function SpendBar({
+  label,
+  emoji,
+  value,
+  max,
+  sub,
+}: {
+  label: string;
+  emoji?: string;
+  value: number;
+  max: number;
+  sub?: string;
+}) {
+  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return (
+    <div className="py-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[14px] font-medium text-[var(--text-primary)] truncate">
+          {emoji ? `${emoji} ` : ""}
+          {label}
+        </span>
+        <span className="text-[14px] font-semibold text-[var(--text-primary)] shrink-0">
+          {formatCurrency(value)}
+        </span>
+      </div>
+      <div className="mt-1.5 h-2 rounded-full bg-[var(--fill)] overflow-hidden">
+        <div className="h-full rounded-full bg-[var(--brand-solid)]" style={{ width: `${pct}%` }} />
+      </div>
+      {sub && <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{sub}</p>}
+    </div>
+  );
+}
+
+function FilterChips({
+  options,
+  value,
+  onChange,
+  label,
+}: {
+  options: { id: string; name: string }[];
+  value: string;
+  onChange: (id: string) => void;
+  label: string;
+}) {
+  return (
+    <div className="mt-4">
+      <p className="text-[11px] font-bold tracking-wide text-[var(--text-tertiary)] mb-2">{label}</p>
+      <div className="flex gap-2 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
+        {options.map((o) => (
+          <button
+            key={o.id}
+            onClick={() => onChange(o.id)}
+            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
+              value === o.id
+                ? "bg-[var(--brand-solid)] text-white"
+                : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
+            }`}
+          >
+            {o.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Spending dashboard: pick a group, optionally pick a person, see what was
+ * spent. With a person selected the figures cover only the expenses the two of
+ * you shared, which is a different question from "what did this group spend".
+ */
+function SpendingDashboard({
+  meUid,
+  groups,
+  datasets,
+}: {
+  meUid: string;
+  groups: Group[];
+  datasets: GroupDataset[];
+}) {
+  const [groupId, setGroupId] = useState("all");
+  const [personUid, setPersonUid] = useState("all");
+
+  const scopedGroups = groupId === "all" ? groups : groups.filter((g) => g.id === groupId);
+  const expenses = scopedGroups.flatMap(
+    (g) => datasets.find((d) => d.group.id === g.id)?.expenses ?? []
+  );
+
+  // Everyone who shares one of the groups in scope.
+  const peopleMap = new Map<string, string>();
+  for (const g of scopedGroups) {
+    for (const uid of g.memberIds || []) {
+      if (uid === meUid) continue;
+      peopleMap.set(uid, g.members?.[uid]?.displayName || "Member");
+    }
+  }
+  const people = Array.from(peopleMap, ([id, name]) => ({ id, name })).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+  // Switching group can strip out the person who was selected; fall back to
+  // everyone rather than reporting zero against someone who isn't here.
+  const activePerson = personUid !== "all" && peopleMap.has(personUid) ? personUid : null;
+  const summary = summariseSpending(meUid, expenses, activePerson);
+  const otherName = activePerson ? peopleMap.get(activePerson) : null;
+  const maxCategory = summary.byCategory[0]?.total ?? 0;
+  const maxPayer = summary.byPayer[0]?.paid ?? 0;
+  const nameOf = (uid: string) =>
+    uid === meUid ? "You" : peopleMap.get(uid) || "Former member";
+
+  return (
+    <div>
+      <FilterChips
+        label="GROUP"
+        value={groupId}
+        onChange={setGroupId}
+        options={[{ id: "all", name: "All groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
+      />
+      {people.length > 0 && (
+        <FilterChips
+          label="SPENT WITH"
+          value={activePerson ?? "all"}
+          onChange={setPersonUid}
+          options={[{ id: "all", name: "Everyone" }, ...people]}
+        />
+      )}
+
+      <div className="mt-5 rounded-[var(--radius-card)] bg-[var(--surface)] p-5 shadow-[var(--shadow-card)]">
+        <p className="text-[13px] text-[var(--text-tertiary)]">
+          {otherName ? `Spent on things you and ${otherName} shared` : "Total spent"}
+          {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
+        </p>
+        <p className="text-[34px] font-extrabold text-[var(--brand)] leading-tight mt-1">
+          {formatCurrency(summary.total)}
+        </p>
+        <p className="text-[13px] text-[var(--text-secondary)] mt-1">
+          {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
+          {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} on average`}
+        </p>
+        {summary.firstTs && summary.lastTs && (
+          <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
+            {fullDate(summary.firstTs)} — {fullDate(summary.lastTs)}
+          </p>
+        )}
+
+        {summary.expenseCount > 0 && (
+          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] grid grid-cols-2 gap-y-3 gap-x-4">
+            <div>
+              <p className="text-[12px] text-[var(--text-tertiary)]">Your share</p>
+              <p className="text-[17px] font-bold text-[var(--text-primary)]">
+                {formatCurrency(summary.myShare)}
+              </p>
+            </div>
+            <div>
+              <p className="text-[12px] text-[var(--text-tertiary)]">You paid up front</p>
+              <p className="text-[17px] font-bold text-[var(--text-primary)]">
+                {formatCurrency(summary.iPaid)}
+              </p>
+            </div>
+            {otherName && (
+              <>
+                <div>
+                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName}&rsquo;s share</p>
+                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
+                    {formatCurrency(summary.theirShare)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName} paid up front</p>
+                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
+                    {formatCurrency(summary.theyPaid)}
+                  </p>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {summary.expenseCount === 0 ? (
+        <p className="text-[14px] text-[var(--text-tertiary)] mt-5">
+          {otherName
+            ? `No expenses shared with ${otherName} in this scope yet.`
+            : "No expenses in this scope yet."}
+        </p>
+      ) : (
+        <>
+          <section className="mt-6">
+            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Where it went</h2>
+            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
+              {summary.byCategory.map((c) => (
+                <SpendBar
+                  key={c.id}
+                  label={c.label}
+                  emoji={c.emoji}
+                  value={c.total}
+                  max={maxCategory}
+                  sub={`${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-6">
+            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Who put the money in</h2>
+            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
+              {summary.byPayer.map((p) => (
+                <SpendBar
+                  key={p.uid}
+                  label={nameOf(p.uid)}
+                  value={p.paid}
+                  max={maxPayer}
+                  sub={`paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`}
+                />
+              ))}
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ReportsInner() {
   const router = useRouter();
   const params = useSearchParams();
@@ -94,6 +318,7 @@ function ReportsInner() {
   const showToast = useToast();
   const personParam = params.get("person");
   const groupParam = params.get("group");
+  const tabParam = params.get("tab") === "spending" ? "spending" : "statements";
   const [scope, setScope] = useState<string>(groupParam || ALL);
 
   const uid = user?.uid;
@@ -114,8 +339,34 @@ function ReportsInner() {
     return (
       <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
         <main className="flex-1 max-w-md w-full mx-auto px-4 pt-6 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
-          <h1 className="text-[30px] font-extrabold text-[var(--text-primary)]">Statements</h1>
-          <p className="text-[15px] text-[var(--text-tertiary)] mt-1 mb-5">
+          <h1 className="text-[30px] font-extrabold text-[var(--text-primary)]">Reports</h1>
+          <div className="flex gap-2 mt-4 mb-1">
+            {[
+              { id: "statements", label: "Statements" },
+              { id: "spending", label: "Spending" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                onClick={() =>
+                  router.replace(t.id === "spending" ? "/reports?tab=spending" : "/reports", {
+                    scroll: false,
+                  })
+                }
+                className={`rounded-full px-4 py-1.5 text-[14px] font-semibold tap-shrink ${
+                  tabParam === t.id
+                    ? "bg-[var(--brand-solid)] text-white"
+                    : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {tabParam === "spending" ? (
+            <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
+          ) : (
+          <>
+          <p className="text-[15px] text-[var(--text-tertiary)] mt-2 mb-5">
             A running account with each person, entry by entry — who paid for what, and what&rsquo;s
             left between you.
           </p>
@@ -157,6 +408,8 @@ function ReportsInner() {
                 </button>
               ))}
             </div>
+          )}
+          </>
           )}
         </main>
         <BottomNav active="reports" />

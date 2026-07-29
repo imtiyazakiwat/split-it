@@ -22,6 +22,7 @@ import {
   SplitType, ExpenseSplit, UserProfile,
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
+import { groupItemLink } from "./statement";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -274,7 +275,7 @@ export async function addExpense(
     notifyGroupMembers(groupId, data.createdBy, {
       title: groupName,
       body: `New expense: ${data.description} — ₹${data.amount}`,
-      link: `/groups/${groupId}`,
+      link: groupItemLink(groupId, { kind: "expense", id: ref.id }),
     });
   } catch {
     // notification is best-effort
@@ -313,7 +314,7 @@ export async function updateExpense(
       notifyGroupMembers(groupId, editedBy, {
         title: groupName,
         body: `${desc} was updated`,
-        link: `/groups/${groupId}`,
+        link: groupItemLink(groupId, { kind: "expense", id: expenseId }),
       });
     } catch {
       // best-effort
@@ -429,7 +430,7 @@ export async function addSettlementRequest(
         data.createdBy === data.fromUid
           ? `${creatorName} says they paid you ₹${data.amount}`
           : `${creatorName} recorded a ₹${data.amount} payment from you`,
-      link: `/groups/${groupId}`,
+      link: groupItemLink(groupId, { kind: "settlement", id: ref.id }),
     });
   } catch {
     // best-effort
@@ -469,7 +470,7 @@ export async function updateSettlementStatus(
       notifyUsers([creator], {
         title: groupName,
         body: `Your settlement request of ₹${amount} was ${status}`,
-        link: `/groups/${groupId}`,
+        link: groupItemLink(groupId, { kind: "settlement", id: settlementId }),
       });
     } catch {
       // best-effort

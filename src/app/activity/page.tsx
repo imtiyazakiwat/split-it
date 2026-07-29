@@ -12,6 +12,7 @@ import {
   buildActivityRecords,
   buildActivityReport,
 } from "@/lib/report";
+import { groupItemLink } from "@/lib/statement";
 import LoginScreen from "@/components/LoginScreen";
 import BottomNav from "@/components/home/BottomNav";
 import ReportPanel from "@/components/activity/ReportPanel";
@@ -379,7 +380,7 @@ export default function ActivityPage() {
                       </div>
                     )}
                     <button
-                      onClick={() => router.push(`/groups/${record.groupId}`)}
+                      onClick={() => router.push(groupItemLink(record.groupId, { kind: record.kind, id: record.id }))}
                       className="w-full text-left relative flex items-start gap-3 py-1.5 tap-shrink"
                     >
                       {record.kind === "expense" ? (
