@@ -118,8 +118,13 @@ export async function POST(req: NextRequest) {
 
     const allowed = uids.filter((uid) => reachable.has(uid));
     if (allowed.length === 0) {
-      // Nothing to do, and deliberately not distinguishable from "they have no
-      // device registered" — a caller shouldn't be able to probe group membership.
+      // The response deliberately doesn't distinguish this from "they have no
+      // device registered" — a caller shouldn't be able to probe who shares a
+      // group with them. The server log does distinguish it, which is where it
+      // needs to be visible when a push goes missing.
+      console.warn(
+        `[notify] caller ${callerUid} may not notify any of: ${uids.join(", ")}`
+      );
       return NextResponse.json({ success: true, sent: 0, skipped: uids.length });
     }
 
@@ -127,17 +132,30 @@ export async function POST(req: NextRequest) {
     const userDocs = await db.getAll(
       ...allowed.map((uid) => db.collection("users").doc(uid))
     );
-    const tokens = userDocs
-      .map((doc) => doc.get("fcmToken"))
-      .filter((token): token is string => typeof token === "string" && !!token);
-
+    // Kept as uid/token pairs rather than a bare token list: FCM reports
+    // failures per token, and pruning a dead one means knowing whose document
+    // to clear.
+    const targets = userDocs
+      .map((doc) => ({ uid: doc.id, token: doc.get("fcmToken") as unknown }))
+      .filter(
+        (t): t is { uid: string; token: string } =>
+          typeof t.token === "string" && !!t.token
+      );
+    const tokens = targets.map((t) => t.token);
     if (tokens.length === 0) {
-      return NextResponse.json({ success: true, sent: 0, skipped: uids.length });
+      console.warn(
+        `[notify] no registered device for any of ${allowed.length} allowed recipient(s)`
+      );
+      return NextResponse.json({
+        success: true,
+        sent: 0,
+        skipped: uids.length,
+        noDevice: allowed.length,
+      });
     }
 
     const truncatedTitle = title.slice(0, MAX_TITLE);
     const truncatedBody = body.slice(0, MAX_BODY);
-
     // FCM data payloads carry strings only.
     const data: Record<string, string> = {
       title: truncatedTitle,
@@ -153,11 +171,34 @@ export async function POST(req: NextRequest) {
       webpush: { headers: { Urgency: "high" } },
     });
 
+    // A token dies when the user clears site data, uninstalls the PWA or revokes
+    // permission. Left in place it fails on every future send — which is exactly
+    // how "notifications just stopped working" presents: silently, and forever.
+    // Clearing it lets the next sign-in register a fresh one.
+    const deadTokenErrors = new Set([
+      "messaging/registration-token-not-registered",
+      "messaging/invalid-registration-token",
+      "messaging/invalid-argument",
+    ]);
+    const stale: string[] = [];
+    response.responses.forEach((r, i) => {
+      if (r.success) return;
+      const code = r.error?.code ?? "unknown";
+      console.error(`[notify] send failed for ${targets[i].uid}: ${code}`);
+      if (deadTokenErrors.has(code)) stale.push(targets[i].uid);
+    });
+    if (stale.length > 0) {
+      await Promise.allSettled(
+        stale.map((uid) => db.collection("users").doc(uid).update({ fcmToken: "" }))
+      );
+    }
+
     return NextResponse.json({
       success: true,
       sent: response.successCount,
       failed: response.failureCount,
       skipped: uids.length - allowed.length,
+      pruned: stale.length,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Internal error";
