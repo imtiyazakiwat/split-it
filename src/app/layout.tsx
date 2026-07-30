@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { GroupDataProvider } from "@/lib/group-data-context";
+import { PaymentsProvider } from "@/lib/payments-context";
 import PwaBootstrap from "@/components/PwaBootstrap";
 import NotificationSetup from "@/components/NotificationSetup";
 import SplashGate from "@/components/SplashGate";
@@ -73,12 +74,14 @@ export default function RootLayout({
         <AuthProvider>
           {/* One shared set of Firestore listeners for every screen. */}
           <GroupDataProvider>
-            <ToastProvider>
-              <PageTransition>{children}</PageTransition>
-              <SplashGate />
-              <PwaBootstrap />
-              <NotificationSetup />
-            </ToastProvider>
+            <PaymentsProvider>
+              <ToastProvider>
+                <PageTransition>{children}</PageTransition>
+                <SplashGate />
+                <PwaBootstrap />
+                <NotificationSetup />
+              </ToastProvider>
+            </PaymentsProvider>
           </GroupDataProvider>
         </AuthProvider>
       </body>

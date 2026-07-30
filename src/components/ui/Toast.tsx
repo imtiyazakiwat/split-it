@@ -58,7 +58,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       {toast && (
         <div
-          className="fixed inset-x-0 z-50 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] px-4 pointer-events-none"
+          className="fixed inset-x-0 z-[60] bottom-[calc(5.5rem+env(safe-area-inset-bottom))] px-4 pointer-events-none"
           role="status"
           aria-live="polite"
         >

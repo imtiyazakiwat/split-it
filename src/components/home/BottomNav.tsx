@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 
-type Tab = "groups" | "activity" | "reports" | "profile";
+type Tab = "groups" | "pay" | "activity" | "reports" | "profile";
 
 const INDIGO = "var(--brand)";
 
@@ -49,11 +49,32 @@ function ProfileIcon({ active }: { active: boolean }) {
   );
 }
 
-export default function BottomNav({ active }: { active: Tab }) {
+function PayIcon({ active }: { active: boolean }) {
+  const stroke = active ? INDIGO : "currentColor";
+  return (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
+      stroke={stroke} strokeWidth="1.8"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      {/* Speech bubble with a rupee inside: the tab is a conversation about money. */}
+      <path d="M21 11.5a8 8 0 0 1-8 8H8l-4 3v-4.6A8 8 0 0 1 13 3.5a8 8 0 0 1 8 8Z" />
+      <path d="M10.5 8h4M10.5 10.5h4M10.5 8v6M10.5 10.5h1.2c1 0 1.8.5 1.8 1.3 0 .9-.8 1.4-1.8 1.4h-1.2l3.2 2.8" />
+    </svg>
+  );
+}
+
+export default function BottomNav({
+  active,
+  /** Small dot on the Pay tab: unseen messages, or money awaiting a decision. */
+  payBadge = false,
+}: {
+  active: Tab;
+  payBadge?: boolean;
+}) {
   const router = useRouter();
 
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
+    { id: "pay", label: "Pay", href: "/pay", Icon: PayIcon },
     { id: "activity", label: "Activity", href: "/activity", Icon: ActivityIcon },
     { id: "reports", label: "Statements", href: "/reports", Icon: ReportsIcon },
     { id: "profile", label: "Settings", href: "/settings", Icon: ProfileIcon },
@@ -72,7 +93,15 @@ export default function BottomNav({ active }: { active: Tab }) {
                 isActive ? "bg-[var(--tint-accent)]" : ""
               }`}
             >
-              <Icon active={isActive} />
+              <span className="relative">
+                <Icon active={isActive} />
+                {id === "pay" && payBadge && (
+                  <span
+                    className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-[var(--neg)] ring-2 ring-[var(--surface)]"
+                    aria-label="Unread"
+                  />
+                )}
+              </span>
               <span
                 className={`text-[11px] font-medium ${
                   isActive ? "text-[var(--brand)]" : "text-[var(--label-secondary)]"

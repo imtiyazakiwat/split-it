@@ -1,7 +1,23 @@
 "use client";
 
 import { ReactNode, useEffect } from "react";
+import { useSheetLayer } from "@/lib/sheet-layer";
 
+/**
+ * Bottom sheet on phones, centred dialog on wider screens.
+ *
+ * Stacking order across the app, highest last:
+ *   z-10  sticky top bar
+ *   z-20  bottom tab bar
+ *   z-30  install prompt
+ *   z-40  floating action buttons
+ *   z-50  sheets and modals (this component, AddExpenseModal)
+ *   z-60  toasts
+ *   z-100 splash
+ *
+ * This used to render at z-20, i.e. underneath the floating "+" button, so the
+ * FAB sat on top of whatever sheet you opened.
+ */
 export default function GlassModal({
   title,
   onClose,
@@ -11,18 +27,16 @@ export default function GlassModal({
   onClose: () => void;
   children: ReactNode;
 }) {
+  useSheetLayer();
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
-    };
+    return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-20 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
       <div
         className="absolute inset-0 bg-black/50 animate-fade-in"
         onClick={onClose}

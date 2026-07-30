@@ -92,6 +92,11 @@ export interface Settlement {
   //              against an opposing balance with the same person in another
   //              group. Offsets are always created as a linked set.
   kind?: SettlementKind;
+  // Set only on `kind: "transfer"` records: the direct transfer this settlement
+  // was created from. The security rules read this document to check the payee,
+  // the payer and the amount all match, which is what makes it safe for one
+  // party to write an already-approved settlement.
+  transferId?: string;
   // Links the legs of one cross-group action together. This is only a grouping
   // hint, never a trust boundary: legs are matched on creator and counterparty
   // as well, so a third party can't smuggle a record into someone else's set.
@@ -101,7 +106,16 @@ export interface Settlement {
   crossGroupLegCount?: number;
 }
 
-export type SettlementKind = "payment" | "offset";
+/**
+ * "payment"  — real money moved (or is claimed to have moved) inside the group.
+ * "offset"   — no money moved: opposing balances with the same person in two
+ *              groups were cancelled against each other.
+ * "transfer" — a direct person-to-person payment (see `DirectTransfer`) that the
+ *              *receiver* chose to book into this group's ledger. These are born
+ *              approved, because the only person who can create one is the payee
+ *              confirming money they already have.
+ */
+export type SettlementKind = "payment" | "offset" | "transfer";
 
 export interface Balance {
   uid: string;
@@ -119,4 +133,69 @@ export interface NotificationPayload {
   body: string;
   icon?: string;
   link?: string;
+}
+
+// ── Direct transfers ────────────────────────────────────────
+
+export type TransferStatus = "pending" | "accepted" | "declined" | "cancelled";
+
+/**
+ * Money sent straight to another person, outside any group.
+ *
+ * A transfer is a *claim* by the sender ("I paid you ₹500"), not a ledger entry.
+ * Nothing moves in any group until the receiver decides what it was:
+ *
+ *   declined  — "I never got this."
+ *   accepted  — received, but purely personal: no group balance changes.
+ *   accepted + appliedGroupId — received *and* booked into that group's ledger,
+ *               where it settles what the sender owed the receiver.
+ *
+ * Keeping the decision with the receiver is the same trust rule the group
+ * settlement flow uses: the person who benefits from a balance moving is never
+ * the person who gets to move it.
+ */
+export interface DirectTransfer {
+  id: string;
+  fromUid: string;
+  toUid: string;
+  /** Exactly [fromUid, toUid]. Lets either side query with array-contains. */
+  participants: string[];
+  amount: number;
+  note?: string;
+  receiptUrls: string[];
+  status: TransferStatus;
+  /** Always the sender. Only the sender can raise a transfer. */
+  createdBy: string;
+  createdAt: number;
+  updatedAt?: number;
+  /** The group this transfer was booked into, once the receiver chose one. */
+  appliedGroupId?: string;
+  /** The settlement created in that group, for deep-linking back to it. */
+  appliedSettlementId?: string;
+}
+
+// ── Chat ────────────────────────────────────────────────────
+
+/**
+ * One text message in a two-person thread. Money events are *not* stored here:
+ * the conversation view merges transfers, settlements and shared expenses with
+ * these at render time, so a payment is never duplicated as chat state that
+ * could drift from the ledger.
+ */
+export interface ChatMessage {
+  id: string;
+  fromUid: string;
+  text: string;
+  createdAt: number;
+}
+
+export interface ChatThread {
+  /** Deterministic: the two uids sorted and joined, so both sides derive it. */
+  id: string;
+  participants: string[];
+  lastMessage?: string;
+  lastMessageFrom?: string;
+  lastMessageAt?: number;
+  /** uid → timestamp of the newest message that uid has seen. */
+  lastRead?: Record<string, number>;
 }
