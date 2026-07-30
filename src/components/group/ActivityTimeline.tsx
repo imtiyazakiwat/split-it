@@ -165,7 +165,9 @@ export default function ActivityTimeline({
                   {s && (
                     <>
                       <p className="text-[15px] text-[var(--text-primary)]">
-                        {isOffset ? (
+                        {s.kind === "transfer" ? (
+                          <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> sent </span><span className="font-semibold text-[var(--pos)]">{memberName(s.toUid)}</span><span className="text-[var(--text-tertiary)]"> directly</span></>
+                        ) : isOffset ? (
                           <><span className="text-[var(--text-tertiary)]">Cross-group offset · </span><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> and </span><span className="font-semibold">{memberName(s.toUid)}</span></>
                         ) : s.status === "pending" ? (
                           <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> requested from </span><span className="font-semibold">{memberName(s.toUid)}</span></>
@@ -177,7 +179,7 @@ export default function ActivityTimeline({
                       </p>
                       <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                         {formatCurrency(s.amount)}
-                        {isOffset ? " · no money moved" : ""}
+                        {s.kind === "transfer" ? " · direct payment" : isOffset ? " · no money moved" : ""}
                         {s.note ? ` · ${s.note}` : ""}
                       </p>
                       {s.receiptUrls.length > 0 && (

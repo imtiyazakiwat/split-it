@@ -419,3 +419,25 @@ textarea:focus-visible,
     transition: none !important;
   }
 }
+
+/* ==========================================================================
+   Floating action button layer.
+
+   The FAB floats over scrolling content, so it must never float over a sheet:
+   opening an expense used to leave the "+" button sitting on top of the sheet,
+   dimmed by the backdrop but still tappable. Sheets now own z-50 and mark the
+   document while they're up, which retires the FAB until they close.
+   ========================================================================== */
+.fab-layer {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+body[data-sheet-open] .fab-layer {
+  opacity: 0;
+  transform: translateY(0.75rem);
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fab-layer {
+    transition: none;
+  }
+}

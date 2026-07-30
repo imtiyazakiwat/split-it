@@ -782,7 +782,7 @@ function GroupPageInner() {
       </main>
 
       {/* Floating Add Expense */}
-      <div className="fixed z-30 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
+      <div className="fab-layer fixed z-40 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
         <div className="max-w-md mx-auto px-4 flex justify-end">
           <CollapsibleFab label="Add expense" onClick={() => setShowAddExpense(true)} />
         </div>

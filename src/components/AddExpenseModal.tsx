@@ -8,6 +8,7 @@ import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
+import { useSheetLayer } from "@/lib/sheet-layer";
 
 function CategoryIcon({ id, active }: { id: string; active: boolean }) {
   const stroke = active ? "var(--brand)" : "var(--text-secondary)";
@@ -61,6 +62,7 @@ export default function AddExpenseModal({
    *  cut-down form, so adding and editing look and behave the same. */
   expense?: Expense | null;
 }) {
+  useSheetLayer();
   const isEdit = !!expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
   const [category, setCategory] = useState(expense?.category || "meal");
@@ -154,7 +156,7 @@ export default function AddExpenseModal({
   }
 
   return (
-    <div className="fixed inset-0 z-40 bg-[var(--background)] flex flex-col animate-modal-in">
+    <div className="fixed inset-0 z-50 bg-[var(--background)] flex flex-col animate-modal-in">
       <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-36">
           {/* Header */}

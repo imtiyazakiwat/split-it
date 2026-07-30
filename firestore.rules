@@ -91,17 +91,52 @@ service cloud.firestore {
 
         allow read: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data);
 
+        function newSettlement() {
+          return request.resource.data;
+        }
+        function transferData(transferId) {
+          return get(/databases/$(database)/documents/transfers/$(transferId)).data;
+        }
+        // A settlement written already-approved is only acceptable when it is
+        // backed by a direct transfer that this caller received: same payer,
+        // same payee, same amount, and not already counted in another group.
+        // Without every one of these checks, "approved on create" would be a
+        // way to clear any balance unilaterally.
+        function backedByMyTransfer() {
+          let t = transferData(newSettlement().transferId);
+          return t.toUid == request.auth.uid
+            && t.fromUid == newSettlement().fromUid
+            && t.amount == newSettlement().amount
+            && t.get('appliedGroupId', '') == '';
+        }
         // Either party may raise a settlement: the payer claiming they paid, or
         // the payee writing off what they're owed (which is what the
         // cross-group offset flow needs). The creator is always recorded.
+        //
+        // The second branch is the direct-transfer path: the *receiver* books
+        // money they already hold into this group. They are the party who would
+        // otherwise be asked to approve it, so there is nobody left to wait for.
         allow create: if isGroupMember(get(/databases/$(database)/documents/groups/$(groupId)).data)
-          && request.auth.uid == request.resource.data.createdBy
-          && (request.auth.uid == request.resource.data.fromUid
-              || request.auth.uid == request.resource.data.toUid)
-          && request.resource.data.fromUid != request.resource.data.toUid
-          && request.resource.data.status == 'pending'
-          && request.resource.data.amount is number
-          && request.resource.data.amount > 0;
+          && request.auth.uid == newSettlement().createdBy
+          && newSettlement().fromUid != newSettlement().toUid
+          && newSettlement().amount is number
+          && newSettlement().amount > 0
+          && (
+            (
+              (request.auth.uid == newSettlement().fromUid
+                || request.auth.uid == newSettlement().toUid)
+              && newSettlement().status == 'pending'
+              && newSettlement().get('kind', 'payment') != 'transfer'
+            )
+            || (
+              newSettlement().get('kind', '') == 'transfer'
+              && request.auth.uid == newSettlement().toUid
+              && newSettlement().status == 'approved'
+              && newSettlement().transferId is string
+              && newSettlement().fromUid in get(/databases/$(database)/documents/groups/$(groupId)).data.memberIds
+              && backedByMyTransfer()
+            )
+          );
 
         // Only the *other* party can approve or decline, and only the status
         // may change. This is what stops someone from unilaterally clearing a
@@ -115,6 +150,113 @@ service cloud.firestore {
           && request.resource.data.status in ['approved', 'rejected'];
 
         allow delete: if false;
+      }
+    }
+
+    // ── Direct person-to-person transfers ──────────────────────────────────
+    // A transfer is the sender's claim that money moved. Only the receiver can
+    // decide what it becomes, which is the same rule that governs group
+    // settlements: whoever benefits from a balance moving never gets to move it.
+    match /transfers/{transferId} {
+      function newTransfer() {
+        return request.resource.data;
+      }
+      function changedKeys() {
+        return request.resource.data.diff(resource.data).affectedKeys();
+      }
+
+      allow read: if isSignedIn() && request.auth.uid in resource.data.participants;
+
+      allow create: if isSignedIn()
+        && request.auth.uid == newTransfer().fromUid
+        && request.auth.uid == newTransfer().createdBy
+        && newTransfer().fromUid != newTransfer().toUid
+        // `participants` is what both sides query on, so it has to be exactly
+        // the two people named on the transfer and nobody else.
+        && newTransfer().participants.hasOnly([newTransfer().fromUid, newTransfer().toUid])
+        && newTransfer().participants.hasAll([newTransfer().fromUid, newTransfer().toUid])
+        && newTransfer().amount is number
+        && newTransfer().amount > 0
+        && newTransfer().status == 'pending'
+        && !('appliedGroupId' in newTransfer());
+
+      function currentStatus() {
+        return resource.data.get('status', 'pending');
+      }
+
+      // The receiver confirms, declines, or books it into a group. Once it has
+      // been booked into a group it is frozen: letting it move again would
+      // double-count the same rupees, or strand the settlement it created.
+      //
+      // Confirming without naming a group is deliberately not the end of the
+      // road — you can accept the money today and decide next week which group
+      // it should settle — so 'accepted' is still writable while
+      // `appliedGroupId` is unset. 'declined' and 'cancelled' are terminal.
+      allow update: if isSignedIn()
+        && request.auth.uid == resource.data.toUid
+        && resource.data.get('appliedGroupId', '') == ''
+        && changedKeys().hasOnly(['status', 'updatedAt', 'appliedGroupId', 'appliedSettlementId'])
+        && request.resource.data.amount == resource.data.amount
+        && request.resource.data.fromUid == resource.data.fromUid
+        && request.resource.data.toUid == resource.data.toUid
+        && (
+          (currentStatus() == 'pending' && request.resource.data.status in ['accepted', 'declined'])
+          || (currentStatus() == 'accepted' && request.resource.data.status == 'accepted')
+        );
+
+      // The sender withdrawing a claim they raised by mistake, and nothing else.
+      allow update: if isSignedIn()
+        && request.auth.uid == resource.data.fromUid
+        && currentStatus() == 'pending'
+        && changedKeys().hasOnly(['status', 'updatedAt'])
+        && request.resource.data.status == 'cancelled';
+
+      // History of who paid whom is never removable.
+      allow delete: if false;
+    }
+
+    // ── Two-person chat threads ───────────────────────────────────────────
+    match /threads/{threadId} {
+      function participantsOf(data) {
+        return data.participants;
+      }
+      function isParticipant(data) {
+        return isSignedIn() && request.auth.uid in participantsOf(data);
+      }
+
+      allow read: if isParticipant(resource.data);
+
+      allow create: if isSignedIn()
+        && request.auth.uid in participantsOf(request.resource.data)
+        && participantsOf(request.resource.data).size() == 2
+        // The id is derived from the pair, so an attacker can't attach a thread
+        // between two other people to an id they control.
+        && threadId == participantsOf(request.resource.data)[0] + '_' + participantsOf(request.resource.data)[1];
+
+      // Participants may update the preview and their own read marker; the pair
+      // itself is immutable, so a thread can never gain a third reader.
+      allow update: if isParticipant(resource.data)
+        && request.resource.data.participants == resource.data.participants;
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function thread() {
+          return get(/databases/$(database)/documents/threads/$(threadId)).data;
+        }
+
+        allow read: if isSignedIn() && request.auth.uid in thread().participants;
+
+        allow create: if isSignedIn()
+          && request.auth.uid == request.resource.data.fromUid
+          && request.auth.uid in thread().participants
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt is number;
+
+        // Sent is sent: nobody edits or deletes what they said, on either side.
+        allow update, delete: if false;
       }
     }
   }
