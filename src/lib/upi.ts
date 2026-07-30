@@ -3,12 +3,13 @@
  *
  * Three things break UPI links in a PWA, and all three are handled here:
  *
- *  1. **App-specific schemes are unreliable.** `tez://`, `phonepe://` and
- *     `paytmmp://` are undocumented and change between app versions. On
- *     Android the supported way to target a specific app is an `intent://`
- *     URL that names the package and declares `scheme=upi`, with a browser
- *     fallback baked in. We now emit those and keep the private scheme only
- *     as a last-resort retry.
+ *  1. **Targeting one specific app differs per platform.** On Android the
+ *     supported route is an `intent://` URL naming the package, with a browser
+ *     fallback baked in. On iOS there is no intent mechanism and no UPI app
+ *     publishes a Universal Link, so the app's own scheme (`phonepe://pay`,
+ *     `tez://upi/pay`, `paytmmp://pay`) is the only thing that works. Falling
+ *     back to the generic `upi://pay` on iOS is what made every button open
+ *     WhatsApp Pay: it owns that scheme on most iPhones.
  *  2. **Unsanitised parameters.** UPI apps silently reject a payment when the
  *     payee name or note contains characters outside a narrow safe set, or
  *     when the note is longer than 50 characters. Both are now normalised.
@@ -89,19 +90,20 @@ export interface UpiApp {
   id: string;
   label: string;
   color: string;
-  /** Android package name; absent for the generic "any app" entry. */
+  /** Android package name, used to build an `intent://` URL. */
   packageName?: string;
-  /** Legacy private scheme, used only as a retry if the intent link fails. */
-  legacyScheme?: string;
   /**
-   * iOS Universal Link base URL.
-   * On iOS, the generic `upi://pay` scheme opens whichever app registered it
-   * first (usually WhatsApp Pay), regardless of which button the user tapped.
-   * Universal Links bypass this by routing directly through the app's own
-   * HTTPS domain, which iOS verifies against the AASA file.
-   * Set to `null` when no reliable link is available for that app on iOS.
+   * The app's own URL scheme *and* payment path, e.g. "phonepe://pay".
+   *
+   * This is the documented way to open one specific UPI app, and it is the only
+   * thing that works on iOS: the generic `upi://pay` scheme there is claimed by
+   * whichever UPI app registered it first (WhatsApp Pay on most iPhones), so
+   * every button would open that same app regardless of what the user tapped.
+   *
+   * Schemes per NTT DATA Payment Services' iOS UPI intent guide:
+   * https://in.nttdatapay.com/docs/integration-guide/use-cases-and-solutions/upi-intent-in-webView-ios
    */
-  iosLink?: string | null;
+  scheme?: string;
 }
 
 export const UPI_APPS: UpiApp[] = [
@@ -110,30 +112,26 @@ export const UPI_APPS: UpiApp[] = [
     label: "Google Pay",
     color: "#4285F4",
     packageName: "com.google.android.apps.nbbang",
-    legacyScheme: "tez://upi/pay",
-    // iOS Universal Link: opens Google Pay directly without a scheme chooser.
-    iosLink: "https://pay.google.com/gp/v/app/pay",
+    // Google Pay India shipped as "Tez" and kept the scheme.
+    scheme: "tez://upi/pay",
   },
   {
     id: "phonepe",
     label: "PhonePe",
     color: "#5F259F",
     packageName: "com.phonepe.app",
-    legacyScheme: "phonepe://pay",
-    // PhonePe registers this Universal Link on iOS.
-    iosLink: "https://phon.pe/ru_",
+    scheme: "phonepe://pay",
   },
   {
     id: "paytm",
     label: "Paytm",
     color: "#00BAF2",
     packageName: "net.one97.paytm",
-    legacyScheme: "paytmmp://pay",
-    // Paytm doesn't have a reliable iOS Universal Link for UPI payments,
-    // so we fall back to the generic upi:// scheme for it on iOS.
-    iosLink: null,
+    scheme: "paytmmp://pay",
   },
   {
+    // No scheme on purpose: this is the "let the OS choose" entry, which is
+    // exactly what `upi://pay` does.
     id: "other",
     label: "Any UPI app",
     color: "#34C759",
@@ -143,30 +141,17 @@ export const UPI_APPS: UpiApp[] = [
 /**
  * Builds the best available URI for an app on the current platform.
  *
- * Android: intent:// URL with the app's package name.
- * iOS: Universal Link (HTTPS) when the app provides one, so the correct app
- *       opens directly. The generic `upi://pay` scheme on iOS opens whichever
- *       single app registered it first — usually WhatsApp Pay — regardless of
- *       what the user tapped. Universal Links fix this completely because iOS
- *       verifies the domain → app association.
- * Elsewhere: standard `upi://pay` and let the OS figure it out.
+ * Android — `intent://` naming the package, with a browser fallback baked in.
+ * iOS     — the app's own scheme (`phonepe://pay`, `tez://upi/pay`, ...).
+ *           Universal Links are *not* used: none of the UPI apps publish an
+ *           HTTPS payment link, so an https:// URL just renders their marketing
+ *           page in the browser instead of opening the app.
+ * Anywhere else — plain `upi://pay` and let the OS decide.
  */
 export function buildAppUri(app: UpiApp, params: UpiPaymentParams): string {
   if (app.packageName && isLikelyAndroid()) return buildIntentUri(params, app.packageName);
-  if (isLikelyIOS() && app.iosLink) return buildIosLink(app.iosLink, params);
+  if (app.scheme && isLikelyIOS()) return `${app.scheme}?${buildQuery(params)}`;
   return buildUpiUri(params);
-}
-
-/**
- * Builds an iOS Universal Link for the given UPI app. The UPI params are passed
- * as query parameters on the HTTPS URL. Each app parses them from the incoming
- * link — the query names (pa, pn, am, cu, tn) are the standard UPI spec, so
- * every app that supports Universal Links for payments accepts them.
- */
-function buildIosLink(baseUrl: string, params: UpiPaymentParams): string {
-  const query = buildQuery(params);
-  const separator = baseUrl.includes("?") ? "&" : "?";
-  return `${baseUrl}${separator}${query}`;
 }
 
 export function isLikelyAndroid(): boolean {
@@ -195,14 +180,16 @@ export function launchUpi(app: UpiApp, params: UpiPaymentParams): boolean {
     return false;
   }
 
-  // If the intent URL couldn't be handled the page stays visible; retry once
-  // with the app's own scheme (older app versions) before giving up.
-  if (app.legacyScheme && isLikelyAndroid()) {
-    const legacy = `${app.legacyScheme}?${buildQuery(params)}`;
+  // Android only: if the intent URL couldn't be handled the page stays visible,
+  // so retry once with the app's own scheme before giving up. On iOS the scheme
+  // *is* the primary attempt, so there is nothing left to fall back to in code —
+  // the caller's UI offers "copy the UPI ID" instead.
+  if (app.scheme && isLikelyAndroid()) {
+    const direct = `${app.scheme}?${buildQuery(params)}`;
     window.setTimeout(() => {
       if (document.visibilityState === "visible") {
         try {
-          window.location.href = legacy;
+          window.location.href = direct;
         } catch {
           // caller already shows the manual fallback
         }
