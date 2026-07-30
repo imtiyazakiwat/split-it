@@ -93,6 +93,15 @@ export interface UpiApp {
   packageName?: string;
   /** Legacy private scheme, used only as a retry if the intent link fails. */
   legacyScheme?: string;
+  /**
+   * iOS Universal Link base URL.
+   * On iOS, the generic `upi://pay` scheme opens whichever app registered it
+   * first (usually WhatsApp Pay), regardless of which button the user tapped.
+   * Universal Links bypass this by routing directly through the app's own
+   * HTTPS domain, which iOS verifies against the AASA file.
+   * Set to `null` when no reliable link is available for that app on iOS.
+   */
+  iosLink?: string | null;
 }
 
 export const UPI_APPS: UpiApp[] = [
@@ -102,6 +111,8 @@ export const UPI_APPS: UpiApp[] = [
     color: "#4285F4",
     packageName: "com.google.android.apps.nbbang",
     legacyScheme: "tez://upi/pay",
+    // iOS Universal Link: opens Google Pay directly without a scheme chooser.
+    iosLink: "https://pay.google.com/gp/v/app/pay",
   },
   {
     id: "phonepe",
@@ -109,6 +120,8 @@ export const UPI_APPS: UpiApp[] = [
     color: "#5F259F",
     packageName: "com.phonepe.app",
     legacyScheme: "phonepe://pay",
+    // PhonePe registers this Universal Link on iOS.
+    iosLink: "https://phon.pe/ru_",
   },
   {
     id: "paytm",
@@ -116,6 +129,9 @@ export const UPI_APPS: UpiApp[] = [
     color: "#00BAF2",
     packageName: "net.one97.paytm",
     legacyScheme: "paytmmp://pay",
+    // Paytm doesn't have a reliable iOS Universal Link for UPI payments,
+    // so we fall back to the generic upi:// scheme for it on iOS.
+    iosLink: null,
   },
   {
     id: "other",
@@ -125,19 +141,43 @@ export const UPI_APPS: UpiApp[] = [
 ];
 
 /**
- * Builds the best available URI for an app on the current platform. Off Android
- * there is no reliable way to target a specific app — the private schemes are
- * undocumented and largely dead — so we emit the standard `upi://pay` link and
- * let the OS decide. The UI leads with "copy the UPI ID" on those platforms.
+ * Builds the best available URI for an app on the current platform.
+ *
+ * Android: intent:// URL with the app's package name.
+ * iOS: Universal Link (HTTPS) when the app provides one, so the correct app
+ *       opens directly. The generic `upi://pay` scheme on iOS opens whichever
+ *       single app registered it first — usually WhatsApp Pay — regardless of
+ *       what the user tapped. Universal Links fix this completely because iOS
+ *       verifies the domain → app association.
+ * Elsewhere: standard `upi://pay` and let the OS figure it out.
  */
 export function buildAppUri(app: UpiApp, params: UpiPaymentParams): string {
   if (app.packageName && isLikelyAndroid()) return buildIntentUri(params, app.packageName);
+  if (isLikelyIOS() && app.iosLink) return buildIosLink(app.iosLink, params);
   return buildUpiUri(params);
+}
+
+/**
+ * Builds an iOS Universal Link for the given UPI app. The UPI params are passed
+ * as query parameters on the HTTPS URL. Each app parses them from the incoming
+ * link — the query names (pa, pn, am, cu, tn) are the standard UPI spec, so
+ * every app that supports Universal Links for payments accepts them.
+ */
+function buildIosLink(baseUrl: string, params: UpiPaymentParams): string {
+  const query = buildQuery(params);
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  return `${baseUrl}${separator}${query}`;
 }
 
 export function isLikelyAndroid(): boolean {
   if (typeof navigator === "undefined") return false;
   return /Android/i.test(navigator.userAgent);
+}
+
+export function isLikelyIOS(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 }
 
 /**

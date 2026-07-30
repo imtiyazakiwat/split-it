@@ -92,15 +92,27 @@ export async function POST(req: NextRequest) {
 
     const db = getDb();
 
-    // Authorization: you may only notify people you share a group with. The
-    // permitted set is derived here rather than taken from the request.
-    const groupSnap = await db
-      .collection("groups")
-      .where("memberIds", "array-contains", callerUid)
-      .get();
+    // Authorization: you may notify people you share a group with, or people
+    // you have a direct transfer relationship with (the transfers collection
+    // stores `participants: [fromUid, toUid]`). Without the second check,
+    // chat messages and transfer notifications between two people who share a
+    // group would sometimes fail if the Firestore read lagged.
+    const [groupSnap, transferSnap] = await Promise.all([
+      db
+        .collection("groups")
+        .where("memberIds", "array-contains", callerUid)
+        .get(),
+      db
+        .collection("transfers")
+        .where("participants", "array-contains", callerUid)
+        .get(),
+    ]);
     const reachable = new Set<string>();
     for (const doc of groupSnap.docs) {
       for (const uid of (doc.get("memberIds") as string[]) || []) reachable.add(uid);
+    }
+    for (const doc of transferSnap.docs) {
+      for (const uid of (doc.get("participants") as string[]) || []) reachable.add(uid);
     }
     reachable.delete(callerUid);
 
