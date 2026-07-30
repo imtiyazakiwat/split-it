@@ -11,6 +11,7 @@ import {
   UpiPaymentParams,
   copyToClipboard,
   isLikelyAndroid,
+  isLikelyIOS,
   isValidUpiId,
   launchUpi,
 } from "@/lib/upi";
@@ -61,7 +62,9 @@ export default function SettleUpModal({
   const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
-  const androidLikely = isLikelyAndroid();
+  // Both Android (intent://) and iOS (app-specific schemes) can hand off to a
+  // named UPI app; desktop can't, and there the copy-the-ID route is the answer.
+  const canHandOff = isLikelyAndroid() || isLikelyIOS();
 
   /**
    * The group document's copy of a member's UPI ID is a mirror that can be
@@ -251,9 +254,9 @@ export default function SettleUpModal({
             >
               Copy UPI ID · {resolvedUpiId}
             </button>
-            {!androidLikely ? (
+            {!canHandOff ? (
               <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
-                UPI apps only open automatically on Android. Elsewhere, copy{" "}
+                UPI apps can only be opened from a phone. On desktop, copy{" "}
                 {toName}&rsquo;s UPI ID above and pay from your bank app.
               </p>
             ) : (
