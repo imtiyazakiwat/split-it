@@ -50,7 +50,11 @@ export async function notifyUsers(
     return;
   }
 
-  // Fire-and-forget: a failed push must never fail the write that triggered it.
+  // Still fire-and-forget — a failed push must never fail the write that
+  // triggered it — but no longer *silent*. Swallowing every outcome meant a
+  // misconfigured service account, an expired device token or a recipient the
+  // server refused to reach all looked identical from the client: nothing
+  // happened and nothing was logged.
   void fetch("/api/notify", {
     method: "POST",
     headers: {
@@ -58,5 +62,19 @@ export async function notifyUsers(
       Authorization: `Bearer ${idToken}`,
     },
     body: JSON.stringify({ uids, ...params }),
-  }).catch(() => {});
+  })
+    .then(async (res) => {
+      const result = await res.json().catch(() => null);
+      if (!res.ok) {
+        console.error("[notify] push rejected:", res.status, result);
+        return;
+      }
+      if (result && result.sent === 0) {
+        console.warn(
+          "[notify] nothing delivered:",
+          JSON.stringify({ requested: uids.length, ...result })
+        );
+      }
+    })
+    .catch((err) => console.error("[notify] push request failed:", err));
 }

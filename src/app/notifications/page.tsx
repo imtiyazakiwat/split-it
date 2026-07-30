@@ -4,6 +4,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
+import { usePayments } from "@/lib/payments-context";
+import { computeCounterpartyBalances } from "@/lib/global-balance";
+import { hasUnread } from "@/lib/chat";
 import {
   updateSettlementStatus,
 } from "@/lib/firestore";
@@ -18,11 +21,16 @@ import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
 
-type NotificationKind = "request" | "status" | "expense";
+type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
 
 interface NotificationItem {
   key: string;
   ts: number;
+  /**
+   * Empty for notifications that don't belong to a group — a direct transfer or
+   * a chat message. Those carry `href` instead, since there is no group item to
+   * deep-link into.
+   */
   groupId: string;
   groupName: string;
   kind: NotificationKind;
@@ -31,6 +39,8 @@ interface NotificationItem {
   settlement?: Settlement;
   /** The expense this notification is about, when it is about one. */
   expenseId?: string;
+  /** Explicit navigation target, used when there is no group item to link to. */
+  href?: string;
 }
 
 function dateBucket(ts: number): string {
@@ -65,6 +75,22 @@ function KindIcon({ kind }: { kind: NotificationKind }) {
         </svg>
       </span>
     );
+  if (kind === "transfer")
+    return (
+      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 3v18M8 7h5.5a2.5 2.5 0 0 1 0 5H8M8 12h8M8 16.5h8" />
+        </svg>
+      </span>
+    );
+  if (kind === "message")
+    return (
+      <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M21 11.5a8 8 0 0 1-8 8H8l-4 3v-4.6A8 8 0 0 1 13 3.5a8 8 0 0 1 8 8Z" />
+        </svg>
+      </span>
+    );
   return (
     <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -79,6 +105,9 @@ export default function NotificationsPage() {
   const router = useRouter();
   const showToast = useToast();
   const { datasets } = useGroupData();
+  // Direct transfers and chat live outside any group, so they were invisible
+  // here: this page only ever walked group expenses and settlements.
+  const { transfers, threads } = usePayments();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [seenAt] = useState<number>(() => {
     if (typeof window === "undefined") return 0;
@@ -183,8 +212,111 @@ export default function NotificationsPage() {
       }
     }
 
+    // ── Direct transfers ──────────────────────────────────────────────
+    // Names come from the shared-group profile mirror; someone you only ever
+    // paid directly falls back to a generic label rather than a raw uid.
+    const nameByUid = new Map(
+      computeCounterpartyBalances(uid, datasets).map((c) => [c.uid, c.displayName])
+    );
+    const personName = (target: string) => nameByUid.get(target) || "Someone";
+
+    for (const t of transfers) {
+      const incoming = t.toUid === uid;
+      const other = incoming ? t.fromUid : t.toUid;
+
+      if (incoming && t.status === "pending") {
+        // The one genuinely actionable transfer state: money is claimed to have
+        // arrived and only this user can say what it was.
+        items.push({
+          key: `tr-req-${t.id}`,
+          ts: t.updatedAt || t.createdAt,
+          groupId: "",
+          groupName: "",
+          kind: "transfer",
+          href: `/chat/${other}`,
+          title: (
+            <>
+              <span className="font-semibold">{personName(other)}</span>
+              <span className="text-[var(--text-tertiary)]"> sent you </span>
+              <span className="font-semibold">{formatCurrency(t.amount)}</span>
+              <span className="text-[var(--text-tertiary)]"> — confirm it</span>
+            </>
+          ),
+          subtitle: t.note ? `Direct payment · ${t.note}` : "Direct payment",
+        });
+        continue;
+      }
+
+      // The sender hearing back about what happened to their payment.
+      if (!incoming && t.status !== "pending") {
+        const outcome =
+          t.status === "declined"
+            ? "was marked as not received"
+            : t.appliedGroupId
+            ? `was counted in ${
+                datasets.find((d) => d.group.id === t.appliedGroupId)?.group.name || "a group"
+              }`
+            : "was confirmed";
+        items.push({
+          key: `tr-st-${t.id}`,
+          ts: t.updatedAt || t.createdAt,
+          groupId: "",
+          groupName: "",
+          kind: t.status === "declined" ? "status" : "transfer",
+          href: `/chat/${other}`,
+          title: (
+            <>
+              <span className="text-[var(--text-tertiary)]">Your </span>
+              <span className="font-semibold">{formatCurrency(t.amount)}</span>
+              <span className="text-[var(--text-tertiary)]"> to </span>
+              <span className="font-semibold">{personName(other)}</span>
+              <span
+                className={
+                  t.status === "declined"
+                    ? " text-[var(--neg)]"
+                    : " text-[var(--text-tertiary)]"
+                }
+              >
+                {" "}
+                {outcome}
+              </span>
+            </>
+          ),
+          subtitle: "Direct payment",
+        });
+      }
+    }
+
+    // ── Chat ──────────────────────────────────────────────────────────
+    // One row per conversation, not per message: a thread with nine unread
+    // messages is one thing to deal with, and only the thread summary is loaded
+    // on this screen anyway.
+    for (const thread of threads) {
+      if (!thread.lastMessageAt || !thread.lastMessage) continue;
+      if (thread.lastMessageFrom === uid) continue;
+      const other = thread.participants.find((p) => p !== uid);
+      if (!other) continue;
+      items.push({
+        key: `msg-${thread.id}-${thread.lastMessageAt}`,
+        ts: thread.lastMessageAt,
+        groupId: "",
+        groupName: "",
+        kind: "message",
+        href: `/chat/${other}`,
+        title: (
+          <>
+            <span className="font-semibold">{personName(other)}</span>
+            <span className="text-[var(--text-tertiary)]">
+              {hasUnread(thread, uid) ? " messaged you" : " said"}
+            </span>
+          </>
+        ),
+        subtitle: thread.lastMessage,
+      });
+    }
+
     return items.sort((a, b) => b.ts - a.ts);
-  }, [datasets, uid]);
+  }, [datasets, transfers, threads, uid]);
 
   useEffect(() => {
     if (allItems.length === 0 || typeof window === "undefined") return;
@@ -258,7 +390,7 @@ export default function NotificationsPage() {
               </svg>
             </div>
             <p className="text-[16px] font-semibold text-[var(--text-primary)]">You&rsquo;re all caught up</p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Payment requests and new expenses will show up here.</p>
+            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Payments, messages and new expenses will show up here.</p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -270,14 +402,15 @@ export default function NotificationsPage() {
                 <div
                   onClick={() =>
                     router.push(
-                      groupItemLink(
-                        item.groupId,
-                        item.expenseId
-                          ? { kind: "expense", id: item.expenseId }
-                          : item.settlement
-                          ? { kind: "settlement", id: item.settlement.id }
-                          : undefined
-                      )
+                      item.href ??
+                        groupItemLink(
+                          item.groupId,
+                          item.expenseId
+                            ? { kind: "expense", id: item.expenseId }
+                            : item.settlement
+                            ? { kind: "settlement", id: item.settlement.id }
+                            : undefined
+                        )
                     )
                   }
                   className={`flex items-start gap-3 rounded-[var(--radius-inner)] p-3.5 cursor-pointer tap-shrink ${
