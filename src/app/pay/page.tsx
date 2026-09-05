@@ -7,6 +7,7 @@ import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { DirectTransfer } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import BottomNav from "@/components/home/BottomNav";
@@ -251,8 +252,8 @@ export default function PayPage() {
         ) : (
           <div className="space-y-1.5">
             {rows.map((r) => {
-              const iOwe = r.net > 0.01;
-              const theyOwe = r.net < -0.01;
+              const iOwe = !isSettled(r.net) && r.net > 0;
+              const theyOwe = !isSettled(r.net) && r.net < 0;
               return (
                 <button
                   key={r.uid}
@@ -355,9 +356,9 @@ export default function PayPage() {
                         {c.displayName}
                       </p>
                       <p className="text-[12px] text-[var(--label-tertiary)]">
-                        {c.net > 0.01
+                        {!isSettled(c.net) && c.net > 0
                           ? `You owe ${formatCurrency(c.net)}`
-                          : c.net < -0.01
+                          : !isSettled(c.net) && c.net < 0
                           ? `Owes you ${formatCurrency(-c.net)}`
                           : "Settled up"}
                       </p>

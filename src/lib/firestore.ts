@@ -23,6 +23,8 @@ import {
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 import { groupItemLink } from "./statement";
+import { normaliseSplits } from "./balance";
+import { roundMoney, sumMoney } from "./money";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -275,8 +277,16 @@ export async function addExpense(
     category?: string;
   }
 ): Promise<string> {
+  // Whole paise, and splits guaranteed to sum to the total. Nothing downstream
+  // can recover from a stored expense that breaks this, because every debt view
+  // reads `splits` while the group total reads `amount`.
+  const amount = roundMoney(data.amount);
+  const splits = normaliseSplits(amount, data.splits);
+
   const ref = await addDoc(collection(db, "groups", groupId, "expenses"), {
     ...stripUndefined(data),
+    amount,
+    splits,
     receiptUrls: data.receiptUrls || [],
     groupId,
     createdAt: Date.now(),
@@ -314,8 +324,36 @@ export async function updateExpense(
   // Only send the fields that actually changed. Re-adding `receiptUrls` after
   // stripping undefined values used to make every edit throw
   // "Unsupported field value: undefined".
+  const patch = stripUndefined(data) as Record<string, unknown>;
+  // An edit that touches the amount or the splits has to leave the two
+  // consistent. `amount` alone was accepted before, which silently detached the
+  // payer's credit from what the members were actually charged.
+  if (data.amount !== undefined) patch.amount = roundMoney(data.amount);
+  if (data.splits !== undefined) {
+    // Splits must always sum to the expense total. When only the splits change,
+    // the total to reconcile against is the one already stored — rounding the
+    // splits on their own would let `sum(splits)` drift from `amount`, which is
+    // precisely the divergence that mints balances no settlement can clear.
+    let target = data.amount !== undefined ? roundMoney(data.amount) : undefined;
+    if (target === undefined) {
+      const snap = await getDoc(doc(db, "groups", groupId, "expenses", expenseId));
+      const stored = snap.data()?.amount;
+      target = typeof stored === "number" ? roundMoney(stored) : undefined;
+    }
+    if (target !== undefined) {
+      patch.splits = normaliseSplits(target, data.splits);
+    } else {
+      // No readable total to anchor to (a missing or malformed document). Write
+      // both sides from the splits so they are consistent by construction
+      // rather than leaving the pair contradicting each other.
+      const splits = data.splits.map((s) => ({ uid: s.uid, amount: roundMoney(s.amount) }));
+      patch.splits = splits;
+      patch.amount = sumMoney(splits.map((s) => s.amount));
+    }
+  }
+
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
-    ...stripUndefined(data),
+    ...patch,
     updatedAt: Date.now(),
     editAction: "edited",
   });
@@ -412,6 +450,9 @@ export interface NewSettlement {
 function settlementPayload(groupId: string, data: NewSettlement) {
   return {
     ...stripUndefined(data as unknown as Record<string, unknown>),
+    // Sub-paise amounts would survive into the ledger and make a balance
+    // unpayable: you can't transfer a third of a paise.
+    amount: roundMoney(data.amount),
     receiptUrls: data.receiptUrls || [],
     expenseIds: data.expenseIds || [],
     kind: data.kind || "payment",

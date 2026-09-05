@@ -1,4 +1,11 @@
 import { Expense, Settlement, Balance, SimplifiedTransaction } from "./types";
+import {
+  allocatePaise,
+  dividePaise,
+  fromPaise,
+  isSettled,
+  toPaise,
+} from "./money";
 
 /**
  * An expense counts towards balances unless it was deleted.
@@ -30,43 +37,92 @@ export function approvedSettlements(settlements: Settlement[]): Settlement[] {
   return settlements.filter((s) => (s.status || "approved") === "approved");
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+export { isSettled };
+
+/**
+ * Everyone who appears anywhere in a group's ledger, not just its current
+ * members.
+ *
+ * Removing a member strips them from `memberIds` but leaves their expenses and
+ * splits in place, so their share of the ledger lives on. Deriving the
+ * participant set from the data means a debt involving someone who has left is
+ * still listed and can still be settled. Previously `computeDirectDebts` looped
+ * over `memberIds` alone, so those debts appeared in the balance chips with no
+ * corresponding settle-up row — visible, but impossible to clear.
+ */
+export function ledgerParticipants(
+  memberIds: string[],
+  expenses: Expense[],
+  settlements: Settlement[]
+): string[] {
+  const uids = new Set<string>(memberIds);
+  for (const expense of activeExpenses(expenses)) {
+    if (expense.paidBy) uids.add(expense.paidBy);
+    for (const split of expense.splits || []) {
+      if (split.uid) uids.add(split.uid);
+    }
+  }
+  for (const s of approvedSettlements(settlements)) {
+    if (s.fromUid) uids.add(s.fromUid);
+    if (s.toUid) uids.add(s.toUid);
+  }
+  return [...uids];
+}
+
+/**
+ * What an expense actually allocated to people, in paise.
+ *
+ * The payer is credited this rather than `expense.amount`, and that difference
+ * matters. Every "who owes whom" view in the app is built purely from
+ * `split.amount`, so crediting the payer `amount` made the two disagree
+ * whenever the splits didn't sum to the total — the payer kept a residual that
+ * no settlement could ever clear, because nobody was carrying the other side of
+ * it. `subscribeToExpenses` defaults a missing `splits` array to `[]`, so a
+ * single bad write was enough to mint a permanent phantom balance.
+ *
+ * Crediting the allocated total instead makes the ledger close by construction:
+ * the sum of every member's net is always exactly zero, and any unallocated
+ * remainder is treated as what it is — the payer's own cost.
+ */
+function allocatedPaise(expense: Expense): number {
+  return (expense.splits || []).reduce((total, s) => total + toPaise(s.amount), 0);
+}
 
 export function computeBalances(
   memberIds: string[],
   expenses: Expense[],
   settlements: Settlement[]
 ): Balance[] {
-  const net: Record<string, number> = {};
-  memberIds.forEach((uid) => (net[uid] = 0));
+  const net = new Map<string, number>();
+  for (const uid of ledgerParticipants(memberIds, expenses, settlements)) {
+    net.set(uid, 0);
+  }
+  const bump = (uid: string, paise: number) => net.set(uid, (net.get(uid) || 0) + paise);
 
   for (const expense of activeExpenses(expenses)) {
-    net[expense.paidBy] = (net[expense.paidBy] || 0) + expense.amount;
-    for (const split of expense.splits) {
-      net[split.uid] = (net[split.uid] || 0) - split.amount;
+    bump(expense.paidBy, allocatedPaise(expense));
+    for (const split of expense.splits || []) {
+      bump(split.uid, -toPaise(split.amount));
     }
   }
 
   for (const settlement of approvedSettlements(settlements)) {
-    net[settlement.fromUid] = (net[settlement.fromUid] || 0) + settlement.amount;
-    net[settlement.toUid] = (net[settlement.toUid] || 0) - settlement.amount;
+    bump(settlement.fromUid, toPaise(settlement.amount));
+    bump(settlement.toUid, -toPaise(settlement.amount));
   }
 
-  return Object.entries(net).map(([uid, netAmount]) => ({
-    uid,
-    netAmount: round2(netAmount),
-  }));
+  return [...net.entries()].map(([uid, paise]) => ({ uid, netAmount: fromPaise(paise) }));
 }
 
 export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
   const creditors = balances
-    .filter((b) => b.netAmount > 0.01)
-    .map((b) => ({ ...b }))
-    .sort((a, b) => b.netAmount - a.netAmount);
+    .map((b) => ({ uid: b.uid, paise: toPaise(b.netAmount) }))
+    .filter((b) => b.paise > 0)
+    .sort((a, b) => b.paise - a.paise || a.uid.localeCompare(b.uid));
   const debtors = balances
-    .filter((b) => b.netAmount < -0.01)
-    .map((b) => ({ ...b, netAmount: -b.netAmount }))
-    .sort((a, b) => b.netAmount - a.netAmount);
+    .map((b) => ({ uid: b.uid, paise: -toPaise(b.netAmount) }))
+    .filter((b) => b.paise > 0)
+    .sort((a, b) => b.paise - a.paise || a.uid.localeCompare(b.uid));
 
   const transactions: SimplifiedTransaction[] = [];
   let i = 0;
@@ -75,21 +131,24 @@ export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
   while (i < debtors.length && j < creditors.length) {
     const debtor = debtors[i];
     const creditor = creditors[j];
-    const amount = Math.min(debtor.netAmount, creditor.netAmount);
+    const amount = Math.min(debtor.paise, creditor.paise);
 
-    if (amount > 0.01) {
+    // Emit every non-zero transfer. The old version skipped anything at or
+    // below one paise while still deducting it from both sides, so the
+    // transactions it produced didn't always add up to the balances it was
+    // given.
+    if (amount > 0) {
       transactions.push({
         fromUid: debtor.uid,
         toUid: creditor.uid,
-        amount: round2(amount),
+        amount: fromPaise(amount),
       });
     }
 
-    debtor.netAmount -= amount;
-    creditor.netAmount -= amount;
-
-    if (debtor.netAmount < 0.01) i++;
-    if (creditor.netAmount < 0.01) j++;
+    debtor.paise -= amount;
+    creditor.paise -= amount;
+    if (debtor.paise === 0) i++;
+    if (creditor.paise === 0) j++;
   }
 
   return transactions;
@@ -101,36 +160,47 @@ export function simplifyDebts(balances: Balance[]): SimplifiedTransaction[] {
  * reduce what the payer owes the payee. Unlike simplifyDebts this never routes
  * a debt through a third party, which is what makes it safe to compare and
  * offset the same pair's balances across different groups.
+ *
+ * Values are exact paise.
  */
 export function computePairwiseLedger(
   expenses: Expense[],
   settlements: Settlement[]
 ): Record<string, Record<string, number>> {
-  // owes[a][b] = how much a owes b
+  // owes[a][b] = how much a owes b, in paise
   const owes: Record<string, Record<string, number>> = {};
-  const add = (a: string, b: string, amount: number) => {
+  const add = (a: string, b: string, paise: number) => {
     if (!owes[a]) owes[a] = {};
-    owes[a][b] = (owes[a][b] || 0) + amount;
+    owes[a][b] = (owes[a][b] || 0) + paise;
   };
 
   for (const expense of activeExpenses(expenses)) {
-    for (const split of expense.splits) {
+    for (const split of expense.splits || []) {
       if (split.uid === expense.paidBy) continue;
-      add(split.uid, expense.paidBy, split.amount);
+      add(split.uid, expense.paidBy, toPaise(split.amount));
     }
   }
 
   for (const s of approvedSettlements(settlements)) {
     // s.fromUid paid s.toUid, reducing what fromUid owes toUid.
-    add(s.fromUid, s.toUid, -s.amount);
+    add(s.fromUid, s.toUid, -toPaise(s.amount));
   }
 
   return owes;
 }
 
+/** Net paise `a` owes `b`. Negative means `b` owes `a`. */
+function pairNetPaise(
+  owes: Record<string, Record<string, number>>,
+  a: string,
+  b: string
+): number {
+  return (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0);
+}
+
 /**
- * Net amount `a` owes `b` for a single group. Negative means `b` owes `a`.
- * This is the building block for cross-group settlement.
+ * Net amount `a` owes `b` for a single group, in rupees. Negative means `b`
+ * owes `a`. This is the building block for cross-group comparison.
  */
 export function pairwiseNet(
   uidA: string,
@@ -138,8 +208,7 @@ export function pairwiseNet(
   expenses: Expense[],
   settlements: Settlement[]
 ): number {
-  const owes = computePairwiseLedger(expenses, settlements);
-  return round2((owes[uidA]?.[uidB] || 0) - (owes[uidB]?.[uidA] || 0));
+  return fromPaise(pairNetPaise(computePairwiseLedger(expenses, settlements), uidA, uidB));
 }
 
 export function computeDirectDebts(
@@ -148,20 +217,23 @@ export function computeDirectDebts(
   settlements: Settlement[]
 ): SimplifiedTransaction[] {
   const owes = computePairwiseLedger(expenses, settlements);
+  // Derived from the ledger, not from memberIds, so a balance with someone who
+  // has left the group still gets a row that can be settled.
+  const participants = ledgerParticipants(memberIds, expenses, settlements);
 
   const transactions: SimplifiedTransaction[] = [];
   const seen = new Set<string>();
-  for (const a of memberIds) {
-    for (const b of memberIds) {
+  for (const a of participants) {
+    for (const b of participants) {
       if (a === b) continue;
       const key = [a, b].sort().join("|");
       if (seen.has(key)) continue;
       seen.add(key);
-      const net = (owes[a]?.[b] || 0) - (owes[b]?.[a] || 0);
-      if (net > 0.01) {
-        transactions.push({ fromUid: a, toUid: b, amount: round2(net) });
-      } else if (net < -0.01) {
-        transactions.push({ fromUid: b, toUid: a, amount: round2(-net) });
+      const net = pairNetPaise(owes, a, b);
+      if (net > 0) {
+        transactions.push({ fromUid: a, toUid: b, amount: fromPaise(net) });
+      } else if (net < 0) {
+        transactions.push({ fromUid: b, toUid: a, amount: fromPaise(-net) });
       }
     }
   }
@@ -205,54 +277,63 @@ export function computeSettlementProgress(
   expenses: Expense[],
   settlements: Settlement[]
 ): SettlementProgress {
-  let totalDebt = 0;
+  let totalDebtPaise = 0;
   for (const expense of activeExpenses(expenses)) {
-    for (const split of expense.splits) {
+    for (const split of expense.splits || []) {
       if (split.uid === expense.paidBy) continue;
-      totalDebt += split.amount;
+      totalDebtPaise += toPaise(split.amount);
     }
   }
-  totalDebt = round2(totalDebt);
 
-  const clearedDebt = round2(
-    approvedSettlements(settlements).reduce((sum, s) => sum + s.amount, 0)
+  const clearedPaise = approvedSettlements(settlements).reduce(
+    (sum, s) => sum + toPaise(s.amount),
+    0
   );
 
-  const balances = computeBalances(memberIds, expenses, settlements);
-  const outstanding = Math.max(
-    0,
-    round2(balances.reduce((sum, b) => sum + (b.netAmount > 0 ? b.netAmount : 0), 0))
+  const outstandingPaise = computeBalances(memberIds, expenses, settlements).reduce(
+    (sum, b) => sum + Math.max(0, toPaise(b.netAmount)),
+    0
   );
 
   // Nothing was ever owed, and nothing was ever paid.
-  if (totalDebt <= 0.01 && clearedDebt <= 0.01) {
+  if (totalDebtPaise === 0 && clearedPaise === 0) {
     return { totalDebt: 0, clearedDebt: 0, outstanding: 0, pct: 100, isEmpty: true };
   }
 
-  const movement = round2(clearedDebt + outstanding);
+  const movement = clearedPaise + outstandingPaise;
   // Debts that cancelled each other out need no payment at all: fully settled.
   const pct =
-    movement <= 0.01
+    movement === 0
       ? 100
-      : Math.max(0, Math.min(100, Math.round((clearedDebt / movement) * 100)));
-  return { totalDebt, clearedDebt, outstanding, pct, isEmpty: false };
+      : Math.max(0, Math.min(100, Math.round((clearedPaise / movement) * 100)));
+
+  return {
+    totalDebt: fromPaise(totalDebtPaise),
+    clearedDebt: fromPaise(clearedPaise),
+    outstanding: fromPaise(outstandingPaise),
+    pct,
+    isEmpty: false,
+  };
 }
 
-export function splitEqually(amount: number, memberIds: string[]): { uid: string; amount: number }[] {
+/**
+ * Splits `amount` equally, to the paise, summing back to `amount` exactly.
+ *
+ * The remainder is spread one paise per person instead of being piled onto the
+ * first member — see `dividePaise`.
+ */
+export function splitEqually(
+  amount: number,
+  memberIds: string[]
+): { uid: string; amount: number }[] {
   if (memberIds.length === 0) return [];
-  const share = Math.floor((amount / memberIds.length) * 100) / 100;
-  const splits = memberIds.map((uid) => ({ uid, amount: share }));
-  const total = share * memberIds.length;
-  const remainder = round2(amount - total);
-  if (remainder !== 0) {
-    splits[0].amount = round2(splits[0].amount + remainder);
-  }
-  return splits;
+  const shares = dividePaise(toPaise(amount), memberIds.length);
+  return memberIds.map((uid, i) => ({ uid, amount: fromPaise(shares[i]) }));
 }
 
 /**
  * Rescales an existing split to a new total, preserving each person's relative
- * share and putting any rounding remainder on the first entry.
+ * share and summing back to `newAmount` exactly.
  *
  * Editing an expense used to change only the amount and leave the splits
  * untouched, so a ₹300 expense edited to ₹600 still had ₹100+₹100+₹100 of
@@ -264,16 +345,31 @@ export function rescaleSplits(
   newAmount: number
 ): { uid: string; amount: number }[] {
   if (splits.length === 0) return [];
-  const oldTotal = splits.reduce((sum, s) => sum + s.amount, 0);
-  if (oldTotal <= 0) return splitEqually(newAmount, splits.map((s) => s.uid));
+  const weights = splits.map((s) => toPaise(s.amount));
+  const shares = allocatePaise(toPaise(newAmount), weights);
+  return splits.map((s, i) => ({ uid: s.uid, amount: fromPaise(shares[i]) }));
+}
 
-  const scaled = splits.map((s) => ({
-    uid: s.uid,
-    amount: Math.floor((s.amount / oldTotal) * newAmount * 100) / 100,
-  }));
-  const remainder = round2(newAmount - scaled.reduce((sum, s) => sum + s.amount, 0));
-  if (remainder !== 0) scaled[0].amount = round2(scaled[0].amount + remainder);
-  return scaled;
+/**
+ * Forces a stored split to sum to its expense total, in whole paise.
+ *
+ * Applied on every write so the invariant the whole ledger depends on —
+ * `sum(splits) === amount` — can never be broken by a rounding slip, a
+ * hand-edited document, or an amount typed with three decimal places.
+ */
+export function normaliseSplits(
+  amount: number,
+  splits: { uid: string; amount: number }[]
+): { uid: string; amount: number }[] {
+  if (splits.length === 0) return [];
+  const target = toPaise(amount);
+  const current = splits.map((s) => toPaise(s.amount));
+  const total = current.reduce((t, v) => t + v, 0);
+  if (total === target) {
+    return splits.map((s, i) => ({ uid: s.uid, amount: fromPaise(current[i]) }));
+  }
+  const shares = total > 0 ? allocatePaise(target, current) : dividePaise(target, splits.length);
+  return splits.map((s, i) => ({ uid: s.uid, amount: fromPaise(shares[i]) }));
 }
 
 export function formatCurrency(amount: number, currency = "INR"): string {

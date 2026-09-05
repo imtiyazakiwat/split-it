@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import GlassModal from "@/components/ui/GlassModal";
 import { Expense, Group, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { buildPairStatement, describeNet, StatementRow } from "@/lib/statement";
 
 function shortDate(ts: number): string {
@@ -47,8 +48,8 @@ export default function PersonStatementSheet({
   const router = useRouter();
   const otherName = group.members[otherUid]?.displayName || "Member";
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
-  const iOwe = stmt.net < -0.01;
-  const settled = Math.abs(stmt.net) < 0.01;
+  const settled = isSettled(stmt.net);
+  const iOwe = !settled && stmt.net < 0;
   // With simplified debts on, the group's payment plan chains balances through
   // third parties, so this pairwise figure is history between the two of you —
   // not an amount to pay. Offering "Settle X" here would contradict the plan on
@@ -74,9 +75,9 @@ export default function PersonStatementSheet({
           <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
             Just between you two, in {group.name}
           </p>
-          {(stmt.pendingFromMe > 0.01 || stmt.pendingFromThem > 0.01) && (
+          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
             <p className="text-[12px] text-[var(--warning)] mt-2">
-              {stmt.pendingFromThem > 0.01
+              {!isSettled(stmt.pendingFromThem)
                 ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
                 : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
               . Not counted above.
@@ -94,13 +95,13 @@ export default function PersonStatementSheet({
             <span className="text-[var(--text-tertiary)]">{otherName} covered for you</span>
             <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.theyCoveredForMe)}</span>
           </div>
-          {stmt.iPaid > 0.01 && (
+          {!isSettled(stmt.iPaid) && (
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--text-tertiary)]">Payments you sent</span>
               <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>
             </div>
           )}
-          {stmt.theyPaid > 0.01 && (
+          {!isSettled(stmt.theyPaid) && (
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--text-tertiary)]">Payments {otherName} sent</span>
               <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>
@@ -148,7 +149,7 @@ export default function PersonStatementSheet({
                           : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
                       </p>
                       <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                        {Math.abs(row.balance) < 0.01
+                        {isSettled(row.balance)
                           ? "settled"
                           : row.balance > 0
                           ? `owes you ${formatCurrency(row.balance)}`

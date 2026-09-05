@@ -17,6 +17,7 @@ import {
   settlementCreator,
 } from "@/lib/balance";
 import { groupItemLink } from "@/lib/statement";
+import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
@@ -249,13 +250,18 @@ export default function NotificationsPage() {
 
       // The sender hearing back about what happened to their payment.
       if (!incoming && t.status !== "pending") {
+        const legs = transferAllocations(t);
+        const groupNameOf = (groupId: string) =>
+          datasets.find((d) => d.group.id === groupId)?.group.name || "a group";
         const outcome =
           t.status === "declined"
             ? "was marked as not received"
-            : t.appliedGroupId
-            ? `was counted in ${
-                datasets.find((d) => d.group.id === t.appliedGroupId)?.group.name || "a group"
-              }`
+            : legs.length === 1
+            ? `was counted in ${groupNameOf(legs[0].groupId)}`
+            : legs.length > 1
+            ? `was split across ${legs.length} groups: ${legs
+                .map((l) => `${formatCurrency(l.amount)} in ${groupNameOf(l.groupId)}`)
+                .join(", ")}`
             : "was confirmed";
         items.push({
           key: `tr-st-${t.id}`,

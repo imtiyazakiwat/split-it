@@ -1,5 +1,6 @@
 import { Expense, Group, Settlement } from "./types";
-import { computePairwiseLedger } from "./balance";
+import { computePairwiseLedger, ledgerParticipants } from "./balance";
+import { fromPaise, isSettled, roundMoney } from "./money";
 
 /**
  * Cross-group balances (read-only).
@@ -17,7 +18,11 @@ import { computePairwiseLedger } from "./balance";
  * one group to another.
  */
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+// Paise-exact. Rounding at every accumulation step is only safe when each step
+// is itself exact: `roundMoney` collapses the binary representation error each
+// time instead of letting it compound, which is what the old `Math.round(n*100)`
+// version did while also double-rounding each group's net into the totals.
+const round2 = roundMoney;
 
 export interface GroupPairBalance {
   groupId: string;
@@ -63,7 +68,11 @@ export function computeCounterpartyBalances(
     if (!group.memberIds?.includes(meUid)) continue;
     const owes = computePairwiseLedger(expenses, settlements);
 
-    for (const uid of group.memberIds) {
+    // Derived from the ledger, not from `memberIds`, so a balance with someone
+    // who has left a shared group still shows up here. The Pay and Reports
+    // screens read this directly, so filtering to current members hid exactly
+    // the debts that are hardest to notice and easiest to forget.
+    for (const uid of ledgerParticipants(group.memberIds, expenses, settlements)) {
       if (uid === meUid) continue;
       const member = group.members?.[uid];
       let entry = byUid.get(uid);
@@ -87,8 +96,9 @@ export function computeCounterpartyBalances(
       if (member?.upiId) entry.upiId = member.upiId;
       entry.sharedGroupCount += 1;
 
-      const net = round2((owes[meUid]?.[uid] || 0) - (owes[uid]?.[meUid] || 0));
-      if (Math.abs(net) < 0.01) continue;
+      // computePairwiseLedger works in paise, so convert once here.
+      const net = fromPaise((owes[meUid]?.[uid] || 0) - (owes[uid]?.[meUid] || 0));
+      if (isSettled(net)) continue;
       entry.groups.push({ groupId: group.id, groupName: group.name, net });
     }
   }
