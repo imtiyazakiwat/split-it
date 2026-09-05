@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import GlassModal from "@/components/ui/GlassModal";
 import { Expense, Group, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { buildPairStatement, describeNet, StatementRow } from "@/lib/statement";
 
 function shortDate(ts: number): string {
@@ -47,8 +48,8 @@ export default function PersonStatementSheet({
   const router = useRouter();
   const otherName = group.members[otherUid]?.displayName || "Member";
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
-  const iOwe = stmt.net < -0.01;
-  const settled = Math.abs(stmt.net) < 0.01;
+  const settled = isSettled(stmt.net);
+  const iOwe = !settled && stmt.net < 0;
   // With simplified debts on, the group's payment plan chains balances through
   // third parties, so this pairwise figure is history between the two of you —
   // not an amount to pay. Offering "Settle X" here would contradict the plan on
@@ -148,7 +149,7 @@ export default function PersonStatementSheet({
                           : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
                       </p>
                       <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                        {Math.abs(row.balance) < 0.01
+                        {isSettled(row.balance)
                           ? "settled"
                           : row.balance > 0
                           ? `owes you ${formatCurrency(row.balance)}`

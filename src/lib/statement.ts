@@ -1,5 +1,6 @@
 import { Expense, Settlement, SettlementStatus } from "./types";
 import { isActiveExpense } from "./balance";
+import { fromPaise, isSettled, toPaise } from "./money";
 
 /**
  * Pairwise statement between two people — the "why do I owe this?" ledger.
@@ -11,9 +12,13 @@ import { isActiveExpense } from "./balance";
  * Sign convention throughout: POSITIVE means `otherUid` owes `meUid`.
  * Negative means `meUid` owes `otherUid`. Only these two people's shares are
  * ever considered, so the total never routes through a third person.
+ *
+ * Accumulated in exact paise. This file used to apply `round2` at every single
+ * step while `computeBalances` accumulated raw floats and rounded once at the
+ * end, so the statement's total and the group screen's balance chip could
+ * differ by a paise for the same pair — the "why do I owe this" screen
+ * contradicting the number it was opened to explain.
  */
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 export type StatementRowKind = "expense-they-paid" | "expense-i-paid" | "payment-i-sent" | "payment-they-sent";
 
@@ -78,6 +83,7 @@ export function buildPairStatement(
   settlements: Settlement[]
 ): PairStatement {
   const rows: StatementRow[] = [];
+  // All accumulators are exact paise; converted to rupees only in the result.
   let iCoveredForThem = 0;
   let theyCoveredForMe = 0;
   let iPaid = 0;
@@ -88,35 +94,42 @@ export function buildPairStatement(
 
   for (const e of expenses) {
     if (!isActiveExpense(e)) continue;
-    const myShare = e.splits.find((s) => s.uid === meUid)?.amount ?? 0;
-    const theirShare = e.splits.find((s) => s.uid === otherUid)?.amount ?? 0;
+    const splits = e.splits || [];
+    // Presence in the split, not a positive amount, decides whether the expense
+    // is shared: a genuine zero share still means the two of them were both on
+    // the bill, and testing `> 0` dropped it from the statement and from
+    // `sharedExpenseCount` entirely.
+    const mine = splits.find((s) => s.uid === meUid);
+    const theirs = splits.find((s) => s.uid === otherUid);
+    const mySharePaise = toPaise(mine?.amount ?? 0);
+    const theirSharePaise = toPaise(theirs?.amount ?? 0);
 
-    if (e.paidBy === otherUid && myShare > 0) {
+    if (e.paidBy === otherUid && mine) {
       sharedExpenseCount += 1;
-      theyCoveredForMe = round2(theyCoveredForMe + myShare);
+      theyCoveredForMe += mySharePaise;
       rows.push({
         key: `e-${e.id}`,
         ts: e.createdAt,
         kind: "expense-they-paid",
         label: e.description || "Expense",
-        expenseTotal: round2(e.amount),
-        shareAmount: round2(myShare),
-        delta: -round2(myShare),
+        expenseTotal: fromPaise(toPaise(e.amount)),
+        shareAmount: fromPaise(mySharePaise),
+        delta: fromPaise(-mySharePaise),
         balance: 0,
         informationalOnly: false,
         expenseId: e.id,
       });
-    } else if (e.paidBy === meUid && theirShare > 0) {
+    } else if (e.paidBy === meUid && theirs) {
       sharedExpenseCount += 1;
-      iCoveredForThem = round2(iCoveredForThem + theirShare);
+      iCoveredForThem += theirSharePaise;
       rows.push({
         key: `e-${e.id}`,
         ts: e.createdAt,
         kind: "expense-i-paid",
         label: e.description || "Expense",
-        expenseTotal: round2(e.amount),
-        shareAmount: round2(theirShare),
-        delta: round2(theirShare),
+        expenseTotal: fromPaise(toPaise(e.amount)),
+        shareAmount: fromPaise(theirSharePaise),
+        delta: fromPaise(theirSharePaise),
         balance: 0,
         informationalOnly: false,
         expenseId: e.id,
@@ -132,13 +145,14 @@ export function buildPairStatement(
     const status = settlementStatus(s);
     const approved = status === "approved";
     const iSent = s.fromUid === meUid;
+    const amountPaise = toPaise(s.amount);
 
     if (approved) {
-      if (iSent) iPaid = round2(iPaid + s.amount);
-      else theyPaid = round2(theyPaid + s.amount);
+      if (iSent) iPaid += amountPaise;
+      else theyPaid += amountPaise;
     } else if (status === "pending") {
-      if (iSent) pendingFromMe = round2(pendingFromMe + s.amount);
-      else pendingFromThem = round2(pendingFromThem + s.amount);
+      if (iSent) pendingFromMe += amountPaise;
+      else pendingFromThem += amountPaise;
     }
 
     rows.push({
@@ -149,7 +163,7 @@ export function buildPairStatement(
       note: s.note || undefined,
       // A payment I make reduces what I owe, i.e. moves the balance towards
       // them owing me. Only approved payments move it at all.
-      delta: approved ? (iSent ? round2(s.amount) : -round2(s.amount)) : 0,
+      delta: approved ? fromPaise(iSent ? amountPaise : -amountPaise) : 0,
       balance: 0,
       status,
       informationalOnly: !approved,
@@ -159,29 +173,29 @@ export function buildPairStatement(
 
   rows.sort((a, b) => a.ts - b.ts || a.key.localeCompare(b.key));
 
-  let running = 0;
+  let runningPaise = 0;
   for (const row of rows) {
-    running = round2(running + row.delta);
-    row.balance = running;
+    runningPaise += toPaise(row.delta);
+    row.balance = fromPaise(runningPaise);
   }
 
   return {
     otherUid,
     rows,
-    net: running,
-    iCoveredForThem,
-    theyCoveredForMe,
-    iPaid,
-    theyPaid,
-    pendingFromMe,
-    pendingFromThem,
+    net: fromPaise(runningPaise),
+    iCoveredForThem: fromPaise(iCoveredForThem),
+    theyCoveredForMe: fromPaise(theyCoveredForMe),
+    iPaid: fromPaise(iPaid),
+    theyPaid: fromPaise(theyPaid),
+    pendingFromMe: fromPaise(pendingFromMe),
+    pendingFromThem: fromPaise(pendingFromThem),
     sharedExpenseCount,
   };
 }
 
 /** "Ganesh owes you ₹98.50" / "You owe Ganesh ₹20" / "You're settled up". */
 export function describeNet(net: number, otherName: string, format: (n: number) => string): string {
-  if (Math.abs(net) < 0.01) return "You\u2019re settled up";
+  if (isSettled(net)) return "You\u2019re settled up";
   return net > 0
     ? `${otherName} owes you ${format(net)}`
     : `You owe ${otherName} ${format(-net)}`;

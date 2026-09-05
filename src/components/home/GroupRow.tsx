@@ -1,6 +1,7 @@
 "use client";
 
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { Group } from "@/lib/types";
 import Skeleton from "@/components/ui/Skeleton";
 
@@ -61,7 +62,7 @@ export default function GroupRow({
 }) {
   const theme = THEMES[index % THEMES.length];
   const emoji = emojiFor(group.name);
-  const settled = Math.abs(net) < 0.01;
+  const settled = isSettled(net);
 
   const memberPhotos = group.memberIds
     .slice(0, 3)

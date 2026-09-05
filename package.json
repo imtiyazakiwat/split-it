@@ -8,7 +8,10 @@
     "start": "next start",
     "lint": "eslint",
     "report": "node scripts/export-report.mjs",
-    "rollback": "node scripts/rollback-settlements.mjs"
+    "rollback": "node scripts/rollback-settlements.mjs",
+    "audit": "node scripts/audit-balances.mjs",
+    "inspect-group": "node scripts/inspect-group.mjs",
+    "trace-pair": "node scripts/trace-pair.mjs"
   },
   "dependencies": {
     "firebase": "^12.15.0",

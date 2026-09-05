@@ -5,6 +5,7 @@ import { Expense } from "@/lib/types";
 import { addSettlementRequest, resolveUpiId } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
+import { roundMoney } from "@/lib/money";
 import {
   UPI_APPS,
   UpiApp,
@@ -61,7 +62,13 @@ export default function SettleUpModal({
   const [upiChecked, setUpiChecked] = useState(false);
   const showToast = useToast();
 
-  const parsedAmount = parseFloat(amount) || 0;
+  // Snapped to whole paise, so a settlement can't leave behind a fraction of a
+  // paise that no payment could ever clear.
+  const parsedAmount = roundMoney(parseFloat(amount) || 0);
+  // Paying more than you owe flips the balance rather than failing, which is how
+  // a group ends up looking permanently unsettled after everyone thinks they've
+  // paid up. Flag it while the number can still be changed.
+  const overpayBy = suggestedAmount > 0 ? roundMoney(parsedAmount - suggestedAmount) : 0;
   // Both Android (intent://) and iOS (app-specific schemes) can hand off to a
   // named UPI app; desktop can't, and there the copy-the-ID route is the answer.
   const canHandOff = isLikelyAndroid() || isLikelyIOS();
@@ -189,6 +196,25 @@ export default function SettleUpModal({
             <p className="text-[12px] text-[var(--label-tertiary)] mt-1">
               You owe {toName} {formatCurrency(suggestedAmount)}
             </p>
+          )}
+          {overpayBy > 0 && (
+            <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
+              <p className="text-[13px] text-[var(--label-secondary)]">
+                That&rsquo;s {formatCurrency(overpayBy)} more than you owe. Once{" "}
+                {toName} approves it,{" "}
+                <span className="font-medium">
+                  they&rsquo;ll owe you {formatCurrency(overpayBy)}
+                </span>{" "}
+                and this group will still show a balance.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAmount(suggestedAmount.toFixed(2))}
+                className="mt-2 rounded-full bg-[var(--surface)] px-3 py-1.5 text-[13px] font-semibold text-[var(--accent)] tap-shrink"
+              >
+                Pay exactly {formatCurrency(suggestedAmount)}
+              </button>
+            </div>
           )}
         </div>
 

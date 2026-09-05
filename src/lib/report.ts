@@ -6,6 +6,7 @@ import {
 } from "./balance";
 import { categoryMeta } from "./categories";
 import { GroupDataset } from "./global-balance";
+import { roundMoney, sumMoney, toPaise } from "./money";
 
 /**
  * Flat, exportable records + roll-ups for the Activity dashboard.
@@ -16,7 +17,8 @@ import { GroupDataset } from "./global-balance";
  * and the CSV download.
  */
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+// Paise-exact, so the per-bucket running totals stay exact.
+const round2 = roundMoney;
 
 export interface ExpenseRecord {
   kind: "expense";
@@ -197,31 +199,23 @@ export function buildActivityReport(
   const expenses = records.filter((r): r is ExpenseRecord => r.kind === "expense");
   const settlements = records.filter((r): r is SettlementRecord => r.kind === "settlement");
 
-  const totalSpend = round2(expenses.reduce((s, e) => s + e.amount, 0));
-  const myShare = round2(expenses.reduce((s, e) => s + e.myShare, 0));
-  const iPaid = round2(expenses.reduce((s, e) => s + (e.iPaid ? e.amount : 0), 0));
+  const totalSpend = sumMoney(expenses.map((e) => e.amount));
+  const myShare = sumMoney(expenses.map((e) => e.myShare));
+  const iPaid = sumMoney(expenses.map((e) => (e.iPaid ? e.amount : 0)));
 
   // Offsets clear a balance without any money changing hands, so they must not
   // be counted as cash sent or received — they get their own line.
   const cash = settlements.filter((s) => s.settlementKind === "payment");
   const approved = cash.filter((s) => s.status === "approved");
   const pending = cash.filter((s) => s.status === "pending");
-  const paidOut = round2(
-    approved.filter((s) => s.direction === "out").reduce((s, x) => s + x.amount, 0)
-  );
-  const receivedIn = round2(
-    approved.filter((s) => s.direction === "in").reduce((s, x) => s + x.amount, 0)
-  );
-  const pendingOut = round2(
-    pending.filter((s) => s.direction === "out").reduce((s, x) => s + x.amount, 0)
-  );
-  const pendingIn = round2(
-    pending.filter((s) => s.direction === "in").reduce((s, x) => s + x.amount, 0)
-  );
-  const offsetTotal = round2(
+  const paidOut = sumMoney(approved.filter((s) => s.direction === "out").map((x) => x.amount));
+  const receivedIn = sumMoney(approved.filter((s) => s.direction === "in").map((x) => x.amount));
+  const pendingOut = sumMoney(pending.filter((s) => s.direction === "out").map((x) => x.amount));
+  const pendingIn = sumMoney(pending.filter((s) => s.direction === "in").map((x) => x.amount));
+  const offsetTotal = sumMoney(
     settlements
       .filter((s) => s.settlementKind === "offset" && s.status === "approved")
-      .reduce((sum, s) => sum + s.amount, 0)
+      .map((s) => s.amount)
   );
 
   const catMap = new Map<string, Bucket>();
@@ -256,43 +250,49 @@ export function buildActivityReport(
     monthMap.set(key, bucket);
   });
 
-  const byGroup: GroupBucket[] = datasets.map((dataset) => {
+  // One pass per group. This used to call `computeSettlementProgress` three
+  // separate times for every dataset — once here and once in each of the
+  // totalDebt/clearedDebt reduces below — and each call runs a full
+  // `computeBalances` internally, so the whole ledger of every group was walked
+  // four times to render one screen.
+  const progressByGroup = datasets.map((dataset) => ({
+    dataset,
+    balances: computeBalances(dataset.group.memberIds, dataset.expenses, dataset.settlements),
+    progress: computeSettlementProgress(
+      dataset.group.memberIds,
+      dataset.expenses,
+      dataset.settlements
+    ),
+  }));
+
+  const byGroup: GroupBucket[] = progressByGroup.map(({ dataset, balances, progress }) => {
     const groupExpenses = expenses.filter((e) => e.groupId === dataset.group.id);
-    const balances = computeBalances(
-      dataset.group.memberIds,
-      dataset.expenses,
-      dataset.settlements
-    );
-    const progress = computeSettlementProgress(
-      dataset.group.memberIds,
-      dataset.expenses,
-      dataset.settlements
-    );
     return {
       key: dataset.group.id,
       label: dataset.group.name,
-      total: round2(groupExpenses.reduce((s, e) => s + e.amount, 0)),
-      myShare: round2(groupExpenses.reduce((s, e) => s + e.myShare, 0)),
+      total: sumMoney(groupExpenses.map((e) => e.amount)),
+      myShare: sumMoney(groupExpenses.map((e) => e.myShare)),
       count: groupExpenses.length,
       net: balances.find((b) => b.uid === meUid)?.netAmount ?? 0,
       settledPct: progress.pct,
     };
   });
 
-  const currentNet = round2(byGroup.reduce((s, g) => s + g.net, 0));
-  const totalReceive = round2(byGroup.reduce((s, g) => s + (g.net > 0 ? g.net : 0), 0));
-  const totalOwe = round2(byGroup.reduce((s, g) => s + (g.net < 0 ? -g.net : 0), 0));
+  const currentNet = sumMoney(byGroup.map((g) => g.net));
+  const totalReceive = sumMoney(byGroup.map((g) => (g.net > 0 ? g.net : 0)));
+  const totalOwe = sumMoney(byGroup.map((g) => (g.net < 0 ? -g.net : 0)));
 
-  const totalDebt = datasets.reduce((sum, d) => {
-    const p = computeSettlementProgress(d.group.memberIds, d.expenses, d.settlements);
-    return sum + p.totalDebt;
-  }, 0);
-  const clearedDebt = datasets.reduce((sum, d) => {
-    const p = computeSettlementProgress(d.group.memberIds, d.expenses, d.settlements);
-    return sum + p.clearedDebt;
-  }, 0);
+  const clearedDebt = sumMoney(progressByGroup.map((p) => p.progress.clearedDebt));
+  const outstanding = sumMoney(progressByGroup.map((p) => p.progress.outstanding));
+  // Same denominator the group screen uses (`cleared / (cleared + outstanding)`).
+  // Dividing by the gross historical debt instead made this figure disagree with
+  // the per-group percentage sitting right next to it, and it read below 100%
+  // for a fully settled group whose debts had partly cancelled out.
+  const movement = toPaise(clearedDebt) + toPaise(outstanding);
   const settledPct =
-    totalDebt <= 0.01 ? 100 : Math.max(0, Math.min(100, Math.round((clearedDebt / totalDebt) * 100)));
+    movement === 0
+      ? 100
+      : Math.max(0, Math.min(100, Math.round((toPaise(clearedDebt) / movement) * 100)));
 
   const timestamps = records.map((r) => r.ts);
 

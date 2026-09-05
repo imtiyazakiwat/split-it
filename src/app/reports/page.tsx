@@ -7,6 +7,7 @@ import { computeCounterpartyBalances, GroupDataset } from "@/lib/global-balance"
 import { summariseSpending } from "@/lib/spending";
 import { buildPairStatement, describeNet, PairStatement, StatementRow } from "@/lib/statement";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { toCsv, downloadTextFile } from "@/lib/report";
 import { Expense, Group, Settlement } from "@/lib/types";
 import BottomNav from "@/components/home/BottomNav";
@@ -62,7 +63,7 @@ function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: s
               <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{fullDate(row.ts)}</p>
               <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{rowWording(row, otherName)}</p>
               <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-                {Math.abs(row.balance) < 0.01
+                {isSettled(row.balance)
                   ? "Balance: settled"
                   : row.balance > 0
                   ? `Balance: ${otherName} owes you ${formatCurrency(row.balance)}`
@@ -460,7 +461,7 @@ function ReportsInner() {
         row.delta > 0.001 ? row.delta : "",
         row.delta < -0.001 ? -row.delta : "",
         Math.abs(row.balance).toFixed(2),
-        Math.abs(row.balance) < 0.01 ? "settled" : row.balance > 0 ? `${otherName} owes you` : `you owe ${otherName}`,
+        isSettled(row.balance) ? "settled" : row.balance > 0 ? `${otherName} owes you` : `you owe ${otherName}`,
       ]);
     }
     rows.push([]);
@@ -489,7 +490,7 @@ function ReportsInner() {
         {/* The bottom line, in words */}
         <div
           className={`mt-4 rounded-[var(--radius-card)] p-5 ${
-            Math.abs(stmt.net) < 0.01
+            isSettled(stmt.net)
               ? "bg-[var(--fill-soft)]"
               : stmt.net > 0
               ? "bg-[var(--tint-success-soft)]"

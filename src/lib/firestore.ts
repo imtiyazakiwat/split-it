@@ -23,6 +23,8 @@ import {
 } from "./types";
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 import { groupItemLink } from "./statement";
+import { normaliseSplits } from "./balance";
+import { roundMoney } from "./money";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -275,8 +277,16 @@ export async function addExpense(
     category?: string;
   }
 ): Promise<string> {
+  // Whole paise, and splits guaranteed to sum to the total. Nothing downstream
+  // can recover from a stored expense that breaks this, because every debt view
+  // reads `splits` while the group total reads `amount`.
+  const amount = roundMoney(data.amount);
+  const splits = normaliseSplits(amount, data.splits);
+
   const ref = await addDoc(collection(db, "groups", groupId, "expenses"), {
     ...stripUndefined(data),
+    amount,
+    splits,
     receiptUrls: data.receiptUrls || [],
     groupId,
     createdAt: Date.now(),
@@ -314,8 +324,21 @@ export async function updateExpense(
   // Only send the fields that actually changed. Re-adding `receiptUrls` after
   // stripping undefined values used to make every edit throw
   // "Unsupported field value: undefined".
+  const patch = stripUndefined(data) as Record<string, unknown>;
+  // An edit that touches the amount or the splits has to leave the two
+  // consistent. `amount` alone was accepted before, which silently detached the
+  // payer's credit from what the members were actually charged.
+  if (data.amount !== undefined) patch.amount = roundMoney(data.amount);
+  if (data.splits !== undefined) {
+    const target = data.amount !== undefined ? roundMoney(data.amount) : undefined;
+    patch.splits =
+      target !== undefined
+        ? normaliseSplits(target, data.splits)
+        : data.splits.map((s) => ({ uid: s.uid, amount: roundMoney(s.amount) }));
+  }
+
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {
-    ...stripUndefined(data),
+    ...patch,
     updatedAt: Date.now(),
     editAction: "edited",
   });
@@ -412,6 +435,9 @@ export interface NewSettlement {
 function settlementPayload(groupId: string, data: NewSettlement) {
   return {
     ...stripUndefined(data as unknown as Record<string, unknown>),
+    // Sub-paise amounts would survive into the ledger and make a balance
+    // unpayable: you can't transfer a third of a paise.
+    amount: roundMoney(data.amount),
     receiptUrls: data.receiptUrls || [],
     expenseIds: data.expenseIds || [],
     kind: data.kind || "payment",

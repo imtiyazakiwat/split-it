@@ -10,6 +10,7 @@ import {
   computeBalances,
   formatCurrency,
 } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import LoginScreen from "@/components/LoginScreen";
 import GlassModal from "@/components/ui/GlassModal";
@@ -138,13 +139,13 @@ export default function Home() {
 
   const totalReceive = rows.reduce((s, r) => s + (r.net > 0 ? r.net : 0), 0);
   const totalOwe = rows.reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0);
-  const settledCount = rows.filter((r) => r.loaded && Math.abs(r.net) < 0.01).length;
+  const settledCount = rows.filter((r) => r.loaded && isSettled(r.net)).length;
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
   // Show skeletons rather than a misleading ₹0 while data is still arriving.
   const balancesPending = groups.length > 0 && !allLoaded;
 
-  const peopleToShow = counterparties.filter((c) => Math.abs(c.net) > 0.01);
+  const peopleToShow = counterparties.filter((c) => !isSettled(c.net));
 
   const filtered = groups.filter((g) =>
     g.name.toLowerCase().includes(query.trim().toLowerCase())
@@ -291,7 +292,7 @@ export default function Home() {
             </p>
             <div className="space-y-2.5">
               {peopleToShow.map((person) => {
-                const iOweNet = person.net > 0.01;
+                const iOweNet = !isSettled(person.net) && person.net > 0;
                 return (
                   <button
                     key={person.uid}
@@ -321,18 +322,18 @@ export default function Home() {
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-[11px] text-[var(--text-tertiary)]">
-                        {Math.abs(person.net) < 0.01 ? "net" : iOweNet ? "you owe" : "owes you"}
+                        {isSettled(person.net) ? "net" : iOweNet ? "you owe" : "owes you"}
                       </p>
                       <p
                         className={`text-[16px] font-bold ${
-                          Math.abs(person.net) < 0.01
+                          isSettled(person.net)
                             ? "text-[var(--text-tertiary)]"
                             : iOweNet
                             ? "text-[var(--neg)]"
                             : "text-[var(--pos)]"
                         }`}
                       >
-                        {Math.abs(person.net) < 0.01 ? "₹0" : formatCurrency(Math.abs(person.net))}
+                        {isSettled(person.net) ? "₹0" : formatCurrency(Math.abs(person.net))}
                       </p>
                     </div>
                   </button>

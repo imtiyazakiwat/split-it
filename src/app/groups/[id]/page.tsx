@@ -24,6 +24,7 @@ import {
   splitEqually,
   formatCurrency,
 } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import { groupItemLink } from "@/lib/statement";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
@@ -295,7 +296,7 @@ function GroupPageInner() {
     const name = memberName(uid);
     const net = balances.find((b) => b.uid === uid)?.netAmount ?? 0;
     const warn =
-      Math.abs(net) > 0.01
+      !isSettled(net)
         ? `\n\nHeads up: ${name} still has an unsettled balance of ${formatCurrency(
             Math.abs(net)
           )}. Removing them drops it from the group's balances.`
@@ -312,10 +313,9 @@ function GroupPageInner() {
   function handleLeaveGroup() {
     if (!group) return;
     const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
-    const warn =
-      Math.abs(net) > 0.01
-        ? `\n\nYou still have an unsettled balance of ${formatCurrency(Math.abs(net))} here.`
-        : "";
+    const warn = !isSettled(net)
+      ? `\n\nYou still have an unsettled balance of ${formatCurrency(Math.abs(net))} here.`
+      : "";
     setConfirmState({
       title: `Leave “${group.name}”?`,
       message: `You'll be removed from this group.${warn}`,
@@ -541,7 +541,7 @@ function GroupPageInner() {
   // members always show; people who have left only appear while they still
   // carry a balance, so their share of the ledger stays visible.
   const memberBalances = [...balances]
-    .filter((b) => group.memberIds.includes(b.uid) || Math.abs(b.netAmount) > 0.01)
+    .filter((b) => group.memberIds.includes(b.uid) || !isSettled(b.netAmount))
     .sort((a, b) => b.netAmount - a.netAmount);
 
   const createdAgo = createdAgoText(group.createdAt);
@@ -637,7 +637,7 @@ function GroupPageInner() {
             <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
               {progress.isEmpty
                 ? "nothing to settle"
-                : progress.outstanding < 0.01
+                : isSettled(progress.outstanding)
                 ? "everyone's square"
                 : `${formatCurrency(progress.outstanding)} still to move`}
             </p>
@@ -698,8 +698,13 @@ function GroupPageInner() {
           <div className="flex gap-3 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
             {memberBalances.map((b) => {
               const isMe = b.uid === currentUser.uid;
-              const pos = b.netAmount > 0.01;
-              const neg = b.netAmount < -0.01;
+              // One definition of "settled" for the label, the colour and the
+              // number. These were three separate `0.01` comparisons, so a
+              // residual under the threshold rendered a real figure next to a
+              // "settled up" chip.
+              const settled = isSettled(b.netAmount);
+              const pos = !settled && b.netAmount > 0;
+              const neg = !settled && b.netAmount < 0;
               return (
                 <button
                   key={b.uid}
@@ -728,7 +733,8 @@ function GroupPageInner() {
                     <div className="min-w-0">
                       <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{isMe ? "You" : memberName(b.uid)}</p>
                       <p className={`text-[15px] font-bold ${pos ? "text-[var(--pos)]" : neg ? "text-[var(--neg)]" : "text-[var(--text-tertiary)]"}`}>
-                        {pos ? "+" : neg ? "-" : ""}{formatCurrency(Math.abs(b.netAmount))}
+                        {pos ? "+" : neg ? "-" : ""}
+                        {formatCurrency(settled ? 0 : Math.abs(b.netAmount))}
                       </p>
                     </div>
                   </div>

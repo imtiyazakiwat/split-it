@@ -1,6 +1,7 @@
 import { Expense } from "./types";
 import { isActiveExpense } from "./balance";
 import { categoryMeta } from "./categories";
+import { roundMoney } from "./money";
 
 /**
  * "How much have we spent?" for a chosen group and, optionally, a chosen person.
@@ -15,7 +16,9 @@ import { categoryMeta } from "./categories";
  * changes the numbers, it doesn't undo the spend.
  */
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+// Paise-exact, so accumulating step by step stays exact instead of compounding
+// float error into the category and payer totals.
+const round2 = roundMoney;
 
 export interface CategorySpend {
   id: string;

@@ -49,3 +49,7 @@ next-env.d.ts
 # exported CSV reports (contain member emails / UPI ids)
 /reports/
 /reports/*.csv
+# firebase emulator / CLI debug logs
+firestore-debug.log
+firebase-debug.log
+ui-debug.log

@@ -5,6 +5,7 @@ import { resolveUpiId } from "@/lib/firestore";
 import { createTransfer } from "@/lib/transfers";
 import { uploadImage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
+import { roundMoney } from "@/lib/money";
 import {
   UPI_APPS,
   UpiApp,
@@ -60,7 +61,17 @@ export default function SendMoneyModal({
   const [upiChecked, setUpiChecked] = useState(false);
   const showToast = useToast();
 
-  const parsedAmount = parseFloat(amount) || 0;
+  // Snapped to whole paise: a sub-paise transfer leaves a balance that can
+  // never be paid off, since no payment rail can move a third of a paise.
+  const parsedAmount = roundMoney(parseFloat(amount) || 0);
+  /**
+   * Overpaying doesn't fail, it flips the balance — and that is exactly how a
+   * stubborn leftover appears. Sending ₹438.68 against a ₹279.09 debt makes the
+   * other person owe you ₹159.59; if they then round their refund up, you owe
+   * them the difference and the group looks unsettled forever. So say so before
+   * the money moves rather than leaving it to be discovered in the ledger.
+   */
+  const overpayBy = suggestedAmount > 0 ? roundMoney(parsedAmount - suggestedAmount) : 0;
   // Both Android (intent://) and iOS (app-specific schemes) can hand off to a
   // named UPI app; desktop can't, and there the copy-the-ID route is the answer.
   const canHandOff = isLikelyAndroid() || isLikelyIOS();
@@ -173,6 +184,25 @@ export default function SendMoneyModal({
           />
           {contextLine && (
             <p className="text-[12px] text-[var(--label-tertiary)] mt-1">{contextLine}</p>
+          )}
+          {overpayBy > 0 && (
+            <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
+              <p className="text-[13px] text-[var(--label-secondary)]">
+                That&rsquo;s {formatCurrency(overpayBy)} more than the{" "}
+                {formatCurrency(suggestedAmount)} you owe. After this,{" "}
+                <span className="font-medium">
+                  {toName} will owe you {formatCurrency(overpayBy)}
+                </span>
+                , and your groups will keep showing a balance until that comes back.
+              </p>
+              <button
+                type="button"
+                onClick={() => setAmount(suggestedAmount.toFixed(2))}
+                className="mt-2 rounded-full bg-[var(--surface)] px-3 py-1.5 text-[13px] font-semibold text-[var(--accent)] tap-shrink"
+              >
+                Send exactly {formatCurrency(suggestedAmount)}
+              </button>
+            </div>
           )}
         </div>
 

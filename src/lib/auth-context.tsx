@@ -29,6 +29,37 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/**
+ * Marks that we handed the tab off to a full-page redirect sign-in, so the next
+ * load knows to wait for `getRedirectResult` before deciding nobody is signed
+ * in. Survives the navigation because it lives in sessionStorage.
+ */
+const REDIRECT_PENDING_KEY = "splitit:auth-redirect-pending";
+
+const redirectPending = {
+  get(): boolean {
+    try {
+      return sessionStorage.getItem(REDIRECT_PENDING_KEY) === "1";
+    } catch {
+      return false;
+    }
+  },
+  set() {
+    try {
+      sessionStorage.setItem(REDIRECT_PENDING_KEY, "1");
+    } catch {
+      /* private mode / storage disabled */
+    }
+  },
+  clear() {
+    try {
+      sessionStorage.removeItem(REDIRECT_PENDING_KEY);
+    } catch {
+      /* ignore */
+    }
+  },
+};
+
 /** Keeps `users/{uid}` in step with the Google account, for member lookups. */
 async function upsertUserDoc(u: User): Promise<void> {
   try {
@@ -50,23 +81,35 @@ async function upsertUserDoc(u: User): Promise<void> {
 }
 
 /**
- * Popups are unreliable on Android — in an installed PWA or an in-app webview
- * `signInWithPopup` either throws immediately or opens a window that can never
- * post back, which left the app stuck with `user === null` and screens that
- * rendered nothing. We keep the popup for desktop (better UX) and fall back to
- * a full-page redirect whenever it isn't viable.
+ * In-app webviews (Facebook, Instagram, Line) rewrite `window.open` into a
+ * same-tab navigation. The Auth SDK opens a popup and then waits for a message
+ * that can never arrive, so it hangs forever; a redirect is the only flow with
+ * any chance of completing there.
+ *
+ * Everything else — including installed PWAs and Android Chrome — uses a popup.
+ * This used to redirect for `isAndroid || isStandalone`, which is what caused
+ * the sign-in loop: `signInWithRedirect` sends an installed PWA out to Chrome,
+ * the OAuth round-trip completes in Chrome's browsing context, and the return
+ * to `start_url` is captured by the PWA — a different context that never held
+ * the pending-redirect state. `getRedirectResult` there resolves to null, the
+ * login screen comes back, and tapping again repeats the whole trip.
+ *
+ * Firebase documents the popup as the required fix for any app not served from
+ * `<project>.firebaseapp.com`, because the redirect flow depends on a
+ * cross-origin iframe against `authDomain` that browsers now partition:
+ * https://firebase.google.com/docs/auth/web/redirect-best-practices
  */
-function shouldUseRedirect(): boolean {
+function mustUseRedirect(): boolean {
   if (typeof window === "undefined") return false;
-  const ua = navigator.userAgent;
-  const isAndroid = /Android/i.test(ua);
-  const isStandalone =
-    window.matchMedia?.("(display-mode: standalone)").matches ||
-    ("standalone" in navigator && (navigator as unknown as { standalone: boolean }).standalone);
-  // Facebook / Instagram / Line etc. in-app browsers block popups outright.
-  const isInAppBrowser = /FBAN|FBAV|Instagram|Line|WebView|; wv\)/i.test(ua);
-  return isAndroid || !!isStandalone || isInAppBrowser;
+  return /FBAN|FBAV|Instagram|Line\//i.test(navigator.userAgent);
 }
+
+/** Popup failures that are worth retrying as a redirect. */
+const POPUP_FALLBACK_CODES = new Set([
+  "auth/popup-blocked",
+  "auth/operation-not-supported-in-this-environment",
+  "auth/web-storage-unsupported",
+]);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -74,14 +117,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const syncedUidRef = useRef<string | null>(null);
 
   useEffect(() => {
-    // Completes a redirect sign-in when the browser lands back on the app.
-    getRedirectResult(auth).catch((err) => {
-      console.error("[auth] redirect sign-in failed:", err);
-    });
+    let cancelled = false;
+
+    // Only touched when we know a redirect is outstanding. Calling this on every
+    // cold start forced the SDK to spin up its cross-origin auth iframe against
+    // authDomain before the app could render — a network round-trip to another
+    // origin on the critical path, for a flow almost nobody uses.
+    const pending = redirectPending.get();
+    const settleRedirect = pending
+      ? getRedirectResult(auth)
+          .catch((err) => {
+            console.error("[auth] redirect sign-in failed:", err);
+            return null;
+          })
+          .finally(() => redirectPending.clear())
+      : Promise.resolve(null);
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setLoading(false);
       // Runs for redirect sign-ins too, where there's no popup result to hook
       // the profile write onto.
       if (u && syncedUidRef.current !== u.uid) {
@@ -89,12 +142,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void upsertUserDoc(u);
       }
       if (!u) syncedUidRef.current = null;
+
+      if (u) {
+        setLoading(false);
+        return;
+      }
+      // Signed out *might* just mean the redirect result hasn't landed yet.
+      // Releasing the loading gate here is what made the login screen flash
+      // back up mid-redirect and invited the user to start another one.
+      void settleRedirect.then(() => {
+        if (!cancelled) setLoading(false);
+      });
     });
-    return unsubscribe;
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
   }, []);
 
   async function signInWithGoogle() {
-    if (shouldUseRedirect()) {
+    if (mustUseRedirect()) {
+      redirectPending.set();
       await signInWithRedirect(auth, googleProvider);
       return;
     }
@@ -103,20 +172,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await upsertUserDoc(result.user);
     } catch (err) {
       const code = (err as { code?: string }).code || "";
-      const recoverable = [
-        "auth/popup-blocked",
-        "auth/popup-closed-by-user",
-        "auth/cancelled-popup-request",
-        "auth/operation-not-supported-in-this-environment",
-        "auth/web-storage-unsupported",
-        "auth/internal-error",
-      ].includes(code);
-      if (!recoverable) throw err;
+      // The user closing the popup, or double-tapping the button, is not a
+      // failure to escalate — retrying as a redirect there would drag them
+      // through a full page navigation they never asked for.
+      if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+        return;
+      }
+      if (!POPUP_FALLBACK_CODES.has(code)) throw err;
+      redirectPending.set();
       await signInWithRedirect(auth, googleProvider);
     }
   }
 
   async function signOut() {
+    redirectPending.clear();
     await firebaseSignOut(auth);
   }
 

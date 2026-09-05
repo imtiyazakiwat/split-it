@@ -98,16 +98,27 @@ service cloud.firestore {
           return get(/databases/$(database)/documents/transfers/$(transferId)).data;
         }
         // A settlement written already-approved is only acceptable when it is
-        // backed by a direct transfer that this caller received: same payer,
-        // same payee, same amount, and not already counted in another group.
-        // Without every one of these checks, "approved on create" would be a
-        // way to clear any balance unilaterally.
+        // backed by a direct transfer that this caller received. The proof is
+        // the allocation the receiver committed onto the transfer *before*
+        // creating this document: this settlement's own id must appear in
+        // `allocations`, naming this group and this exact amount.
+        //
+        // That is what lets one payment settle several groups without letting
+        // the same rupees be counted twice — each leg is pinned to its own
+        // settlement id, and the transfer's `allocatedAmount` can never exceed
+        // the payment. Checking `t.amount == amount` instead, as this used to,
+        // forced every booking to consume the whole transfer, so a payment
+        // bigger than one group's debt had to overshoot it.
+        //
+        // Rules see only pre-batch state, which is why the plan is a separate
+        // earlier write rather than part of the same batch.
         function backedByMyTransfer() {
           let t = transferData(newSettlement().transferId);
+          let leg = t.get('allocations', {}).get(settlementId, {});
           return t.toUid == request.auth.uid
             && t.fromUid == newSettlement().fromUid
-            && t.amount == newSettlement().amount
-            && t.get('appliedGroupId', '') == '';
+            && leg.get('groupId', '') == groupId
+            && leg.get('amount', -1) == newSettlement().amount;
         }
         // Either party may raise a settlement: the payer claiming they paid, or
         // the payee writing off what they're owed (which is what the
@@ -178,27 +189,42 @@ service cloud.firestore {
         && newTransfer().amount is number
         && newTransfer().amount > 0
         && newTransfer().status == 'pending'
-        && !('appliedGroupId' in newTransfer());
+        && !('appliedGroupId' in newTransfer())
+        && !('allocations' in newTransfer())
+        && !('allocatedAmount' in newTransfer());
 
       function currentStatus() {
         return resource.data.get('status', 'pending');
       }
 
-      // The receiver confirms, declines, or books it into a group. Once it has
-      // been booked into a group it is frozen: letting it move again would
-      // double-count the same rupees, or strand the settlement it created.
+      // The receiver confirms, declines, or books it into groups.
       //
-      // Confirming without naming a group is deliberately not the end of the
-      // road — you can accept the money today and decide next week which group
-      // it should settle — so 'accepted' is still writable while
-      // `appliedGroupId` is unset. 'declined' and 'cancelled' are terminal.
+      // Booking is no longer one-shot: a payment can cover debts in several
+      // groups, and one that exceeds the first group's balance must be able to
+      // put the rest somewhere else (or nowhere) instead of overshooting. So
+      // `allocations` may grow over time, bounded by two invariants:
+      //
+      //   - `allocatedAmount` never exceeds the payment, so the same rupees
+      //     cannot be counted twice; and
+      //   - existing keys are never dropped, because each one has a settlement
+      //     document behind it that would otherwise be stranded.
+      //
+      // Accepting without naming a group stays valid — take the money today,
+      // decide next week which group it settles. 'declined' and 'cancelled' are
+      // terminal, and a declined payment may not carry allocations at all.
       allow update: if isSignedIn()
         && request.auth.uid == resource.data.toUid
-        && resource.data.get('appliedGroupId', '') == ''
-        && changedKeys().hasOnly(['status', 'updatedAt', 'appliedGroupId', 'appliedSettlementId'])
+        && changedKeys().hasOnly(['status', 'updatedAt', 'appliedGroupId', 'appliedSettlementId', 'allocations', 'allocatedAmount'])
         && request.resource.data.amount == resource.data.amount
         && request.resource.data.fromUid == resource.data.fromUid
         && request.resource.data.toUid == resource.data.toUid
+        && request.resource.data.get('allocatedAmount', 0) is number
+        && request.resource.data.get('allocatedAmount', 0) >= 0
+        && request.resource.data.get('allocatedAmount', 0) <= resource.data.amount
+        && request.resource.data.get('allocations', {}).keys().hasAll(
+             resource.data.get('allocations', {}).keys())
+        && (request.resource.data.get('allocations', {}).size() == 0
+            || request.resource.data.status == 'accepted')
         && (
           (currentStatus() == 'pending' && request.resource.data.status in ['accepted', 'declined'])
           || (currentStatus() == 'accepted' && request.resource.data.status == 'accepted')

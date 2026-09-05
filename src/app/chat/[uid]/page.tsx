@@ -7,6 +7,8 @@ import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
+import { transferAllocations, unallocatedAmount } from "@/lib/transfer-allocation";
 import { groupItemLink } from "@/lib/statement";
 import {
   MAX_MESSAGE_LENGTH,
@@ -84,14 +86,26 @@ function TransferBubble({
 }) {
   const t = item.transfer!;
   const mine = item.side === "me";
+  // A payment can be split across several groups, and can be only partly
+  // assigned, so the status line has to describe an allocation rather than a
+  // single destination.
+  const legs = transferAllocations(t);
+  const unassigned = unallocatedAmount(t);
   const status = (() => {
     if (t.status === "cancelled") return { text: "Withdrawn", tone: "flat" as const };
     if (t.status === "declined") return { text: "Marked as not received", tone: "bad" as const };
-    if (t.status === "accepted" && t.appliedGroupId)
+    if (t.status === "accepted" && legs.length > 0) {
+      const where =
+        legs.length === 1
+          ? `Counted in ${groupNameOf(legs[0].groupId)}`
+          : `Counted across ${legs.length} groups`;
       return {
-        text: `Counted in ${groupNameOf(t.appliedGroupId)}`,
+        text: isSettled(unassigned)
+          ? where
+          : `${where} · ${formatCurrency(unassigned)} unassigned`,
         tone: "good" as const,
       };
+    }
     if (t.status === "accepted")
       return { text: "Confirmed · not counted in a group", tone: "flat" as const };
     return {
@@ -167,12 +181,16 @@ function TransferBubble({
             Confirm &amp; choose a group
           </button>
         )}
-        {!mine && t.status === "accepted" && !t.appliedGroupId && (
+        {/* Still offered once part of the payment is booked: the remainder can
+            go to another group whenever a new balance shows up there. */}
+        {!mine && t.status === "accepted" && !isSettled(unassigned) && (
           <button
             onClick={() => onDecide(t)}
             className="mt-2.5 w-full rounded-full bg-[var(--fill)] text-[var(--text-primary)] px-4 py-2 text-[13px] font-semibold tap-shrink"
           >
-            Attach to a group
+            {legs.length === 0
+              ? "Attach to a group"
+              : `Assign remaining ${formatCurrency(unassigned)}`}
           </button>
         )}
         {mine && t.status === "pending" && (
@@ -183,21 +201,21 @@ function TransferBubble({
             Withdraw
           </button>
         )}
-        {mine && t.status === "accepted" && t.appliedSettlementId && t.appliedGroupId && (
-          <button
-            onClick={() =>
-              onNavigate(
-                groupItemLink(t.appliedGroupId!, {
-                  kind: "settlement",
-                  id: t.appliedSettlementId!,
-                })
-              )
-            }
-            className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
-          >
-            View in {groupNameOf(t.appliedGroupId)}
-          </button>
-        )}
+        {mine &&
+          t.status === "accepted" &&
+          legs.map((leg) => (
+            <button
+              key={leg.settlementId}
+              onClick={() =>
+                onNavigate(
+                  groupItemLink(leg.groupId, { kind: "settlement", id: leg.settlementId })
+                )
+              }
+              className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
+            >
+              View {formatCurrency(leg.amount)} in {groupNameOf(leg.groupId)}
+            </button>
+          ))}
         <p className={`text-[11px] mt-1.5 ${mine ? "text-white/60" : "text-[var(--text-quaternary)]"}`}>
           {timeLabel(item.ts)}
         </p>

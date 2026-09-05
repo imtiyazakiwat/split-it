@@ -147,8 +147,8 @@ export type TransferStatus = "pending" | "accepted" | "declined" | "cancelled";
  *
  *   declined  — "I never got this."
  *   accepted  — received, but purely personal: no group balance changes.
- *   accepted + appliedGroupId — received *and* booked into that group's ledger,
- *               where it settles what the sender owed the receiver.
+ *   accepted + allocations — received *and* split across one or more group
+ *               ledgers, settling what the sender owed the receiver in each.
  *
  * Keeping the decision with the receiver is the same trust rule the group
  * settlement flow uses: the person who benefits from a balance moving is never
@@ -168,10 +168,41 @@ export interface DirectTransfer {
   createdBy: string;
   createdAt: number;
   updatedAt?: number;
-  /** The group this transfer was booked into, once the receiver chose one. */
+  /**
+   * Where the money went, keyed by the id of the settlement each leg created.
+   *
+   * Keyed by settlement id rather than held as an array because the security
+   * rules validate a settlement against `allocations[settlementId]`, and rules
+   * can index a map by a path wildcard but cannot search a list.
+   *
+   * One payment often clears debts in several groups at once, and a payment
+   * larger than a single group's balance must not have the excess dumped into
+   * that group — the excess would just flip the balance the other way. So each
+   * leg is capped at what the sender actually owed there, and whatever is left
+   * over stays unallocated and available to book later.
+   */
+  allocations?: Record<string, TransferAllocation>;
+  /**
+   * Sum of `allocations`, in rupees. Stored rather than derived so the security
+   * rules can bound it against `amount` without iterating the map.
+   */
+  allocatedAmount?: number;
+  /**
+   * @deprecated Superseded by `allocations`. Transfers booked before multi-group
+   * allocation existed carry only this pair, and `transferAllocations()` folds
+   * them into the same shape at read time. Still written for the first leg so
+   * older clients keep rendering "counted in <group>" correctly.
+   */
   appliedGroupId?: string;
-  /** The settlement created in that group, for deep-linking back to it. */
+  /** @deprecated See `appliedGroupId`. */
   appliedSettlementId?: string;
+}
+
+/** One group's share of a direct transfer. */
+export interface TransferAllocation {
+  groupId: string;
+  /** Rupees booked into that group. Never more than was owed there. */
+  amount: number;
 }
 
 // ── Chat ────────────────────────────────────────────────────
