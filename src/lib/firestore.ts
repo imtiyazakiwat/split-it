@@ -85,6 +85,27 @@ export async function updateGroupProfile(
   await updateDoc(doc(db, "groups", groupId), payload);
 }
 
+/**
+ * Archives or restores a group for one member only.
+ *
+ * Written as a dotted path so the update touches nothing but this member's own
+ * entry. That matters for two reasons: the security rules only permit a member
+ * to change `members.{uid}` (`membersEditIsSelfOnly`), and writing the whole
+ * `members` map back would race with anyone else's profile edit.
+ *
+ * Archiving is purely a view preference — it moves the group to another tab and
+ * leaves every balance exactly as it was.
+ */
+export async function setGroupArchived(
+  groupId: string,
+  uid: string,
+  archived: boolean
+): Promise<void> {
+  await updateDoc(doc(db, "groups", groupId), {
+    [`members.${uid}.archivedAt`]: archived ? Date.now() : deleteField(),
+  });
+}
+
 // Removes a member from the group (admin action). Their expenses/settlements
 // stay in history, but they lose access and drop off the member list.
 export async function removeMember(groupId: string, uid: string): Promise<void> {

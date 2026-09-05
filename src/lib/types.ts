@@ -12,6 +12,21 @@ export interface GroupMember {
   email: string;
   photoURL?: string;
   upiId?: string;
+  /**
+   * When this member archived the group out of their own home screen, if they
+   * have. Archiving is deliberately per-member rather than a property of the
+   * group: clutter is personal, and one person tidying away a finished trip
+   * should not hide it from everyone else who may still be settling up.
+   *
+   * It lives here, inside the member's own entry, because the security rules
+   * already allow a member to write `members.{uid}` and nothing else
+   * (`membersEditIsSelfOnly`), and `members` is not an admin-only field. So this
+   * needs no rules change and no separate per-user document.
+   *
+   * Archiving never changes a balance. It only decides which tab a group
+   * appears under.
+   */
+  archivedAt?: number;
 }
 
 export interface Group {

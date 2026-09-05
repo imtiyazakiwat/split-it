@@ -12,6 +12,7 @@ import {
   deleteGroup,
   removeMember,
   addExpense,
+  setGroupArchived,
 } from "@/lib/firestore";
 import { Expense, Settlement } from "@/lib/types";
 import {
@@ -25,6 +26,7 @@ import {
   formatCurrency,
 } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
+import { isArchivedFor } from "@/lib/group-filters";
 import { groupItemLink } from "@/lib/statement";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
@@ -198,6 +200,7 @@ function GroupPageInner() {
   const openSettlement = (s: Settlement) =>
     router.push(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
 
+  const iArchived = isArchivedFor(group, currentUser.uid);
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
   // Direct pairwise debts by default: you only ever owe the people you
@@ -308,6 +311,39 @@ function GroupPageInner() {
       destructive: true,
       onConfirm: () => removeMember(group.id, uid),
     });
+  }
+
+  function handleToggleArchive() {
+    if (!group) return;
+    const gid = group.id;
+    const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
+
+    const apply = async () => {
+      try {
+        await setGroupArchived(gid, currentUser.uid, !iArchived);
+        setShowGroupInfo(false);
+        showToast({ message: iArchived ? "Group restored" : "Group archived" });
+      } catch (err) {
+        showToast({
+          message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
+        });
+      }
+    };
+
+    // Archiving never writes off a debt, but it does move the group somewhere
+    // the user isn't looking, so say so plainly before hiding money.
+    if (!iArchived && !isSettled(net)) {
+      setConfirmState({
+        title: "Archive with an open balance?",
+        message: `You still have an unsettled balance of ${formatCurrency(
+          Math.abs(net)
+        )} here. Archiving only tidies your home screen — the balance stays, and it keeps counting towards your totals.`,
+        confirmLabel: "Archive anyway",
+        onConfirm: apply,
+      });
+      return;
+    }
+    void apply();
   }
 
   function handleLeaveGroup() {
@@ -918,6 +954,20 @@ function GroupPageInner() {
                 ))}
               </div>
             </div>
+
+            {/* Archiving is personal: it moves this group into your Archived tab
+                and leaves it exactly where it is for everyone else. */}
+            <button
+              onClick={handleToggleArchive}
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink"
+            >
+              {iArchived ? "Restore to active groups" : "Archive this group"}
+            </button>
+            <p className="text-[12px] text-[var(--label-tertiary)] -mt-1">
+              {iArchived
+                ? "It will show up under Your Groups again."
+                : "Hides it from your home screen without changing any balance. Only you see this."}
+            </p>
 
             {!isAdmin && (
               <button

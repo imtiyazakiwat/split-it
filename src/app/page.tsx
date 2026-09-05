@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import { createGroup, joinGroupByCode } from "@/lib/firestore";
+import { createGroup, joinGroupByCode, setGroupArchived } from "@/lib/firestore";
 import {
   canRespondToSettlement,
   computeBalances,
@@ -12,6 +12,14 @@ import {
 } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
+import {
+  archivedAtFor,
+  classifyGroup,
+  countByTab,
+  GROUP_TABS,
+  GroupTab,
+  isArchivedFor,
+} from "@/lib/group-filters";
 import LoginScreen from "@/components/LoginScreen";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
@@ -36,6 +44,7 @@ export default function Home() {
   const { groups, groupsLoaded, byGroup, datasets, allLoaded, error } = useGroupData();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
+  const [tab, setTab] = useState<GroupTab>("active");
   const [showAdd, setShowAdd] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -70,9 +79,12 @@ export default function Home() {
         loaded: !!data?.loaded,
         lastActivityTs,
         pendingCount: settlements.filter((s) => canRespondToSettlement(s, uid)).length,
+        hasActivity: expenses.length > 0 || settlements.length > 0,
       };
     });
   }, [groups, byGroup, uid]);
+
+  const tabCounts = useMemo(() => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }), [rows, uid]);
 
   const counterparties = useMemo(
     () => (uid ? computeCounterpartyBalances(uid, datasets) : []),
@@ -139,7 +151,6 @@ export default function Home() {
 
   const totalReceive = rows.reduce((s, r) => s + (r.net > 0 ? r.net : 0), 0);
   const totalOwe = rows.reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0);
-  const settledCount = rows.filter((r) => r.loaded && isSettled(r.net)).length;
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
   // Show skeletons rather than a misleading ₹0 while data is still arriving.
@@ -147,17 +158,46 @@ export default function Home() {
 
   const peopleToShow = counterparties.filter((c) => !isSettled(c.net));
 
-  const filtered = groups.filter((g) =>
-    g.name.toLowerCase().includes(query.trim().toLowerCase())
-  );
-  const filteredIds = new Set(filtered.map((g) => g.id));
+  const needle = query.trim().toLowerCase();
   const sortedRows = rows
-    .filter((r) => filteredIds.has(r.group.id))
+    .filter((r) => classifyGroup(r, currentUser.uid) === tab)
+    .filter((r) => r.group.name.toLowerCase().includes(needle))
     .sort((a, b) =>
       sort === "name"
         ? a.group.name.localeCompare(b.group.name)
+        : tab === "archived"
+        ? // Most recently tidied away first, which is where a mistake will be.
+          archivedAtFor(b.group, currentUser.uid) - archivedAtFor(a.group, currentUser.uid)
         : (b.lastActivityTs || b.group.createdAt) - (a.lastActivityTs || a.group.createdAt)
     );
+
+  // Archiving is a view preference, never a write-off, so the totals above keep
+  // counting archived groups. This surfaces the money that is sitting in a tab
+  // the user isn't looking at, rather than letting it quietly disappear.
+  const archivedOutstanding = rows
+    .filter((r) => isArchivedFor(r.group, currentUser.uid) && !isSettled(r.net))
+    .length;
+
+  async function handleToggleArchive(groupId: string, archived: boolean) {
+    try {
+      await setGroupArchived(groupId, currentUser.uid, archived);
+      showToast({ message: archived ? "Group archived" : "Group restored" });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
+      });
+    }
+  }
+
+  const emptyMessage = query
+    ? "No groups match your search."
+    : tab === "archived"
+    ? "Nothing archived. Groups you archive are tucked away here."
+    : tab === "settled"
+    ? "No settled groups yet. Groups where everyone is square land here."
+    : groups.length === 0
+    ? "No groups yet. Tap Add to create or join one."
+    : "Nothing needs attention. Check the Settled tab.";
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
@@ -274,6 +314,7 @@ export default function Home() {
               <p className="text-[17px] font-bold text-[var(--text-primary)] leading-none">{groups.length}</p>
               <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
                 Group{groups.length !== 1 ? "s" : ""}
+                {tabCounts.archived > 0 ? ` · ${tabCounts.archived} archived` : ""}
               </p>
             </div>
             <span className="text-[var(--text-quaternary)] text-lg">›</span>
@@ -374,12 +415,51 @@ export default function Home() {
           </button>
         </div>
 
+        {/* Tabs. Keeps finished trips and squared-up flatshares out of the way
+            without hiding them, and without touching any balance. */}
+        <div
+          role="tablist"
+          aria-label="Filter groups"
+          className="mt-3 flex gap-1 bg-[var(--fill)] rounded-full p-1"
+        >
+          {GROUP_TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                role="tab"
+                aria-selected={active}
+                onClick={() => setTab(t.id)}
+                className={`flex-1 rounded-full py-2 text-[13px] font-semibold tap-shrink ${
+                  active
+                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
+                    : "text-[var(--text-secondary)]"
+                }`}
+              >
+                {t.label}
+                {tabCounts[t.id] > 0 && (
+                  <span className={active ? "text-[var(--brand)]" : "text-[var(--text-tertiary)]"}>
+                    {" "}
+                    {tabCounts[t.id]}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === "archived" && archivedOutstanding > 0 && (
+          <p className="mt-2.5 text-[12px] text-[var(--warning)]">
+            {archivedOutstanding} archived group{archivedOutstanding !== 1 ? "s" : ""} still
+            {archivedOutstanding !== 1 ? " have" : " has"} an unsettled balance. Archiving only
+            tidies the list — these are still counted in your totals above.
+          </p>
+        )}
+
         {/* Group list */}
         <div className="mt-3 space-y-3">
           {sortedRows.length === 0 && (
-            <p className="text-center text-[var(--text-tertiary)] text-sm py-14">
-              {query ? "No groups match your search." : "No groups yet. Tap Add to create or join one."}
-            </p>
+            <p className="text-center text-[var(--text-tertiary)] text-sm py-14">{emptyMessage}</p>
           )}
           {sortedRows.map((row, i) => (
             <GroupRow
@@ -391,13 +471,30 @@ export default function Home() {
               lastActivityTs={row.lastActivityTs}
               pendingCount={row.pendingCount}
               onOpen={() => router.push(`/groups/${row.group.id}`)}
+              action={
+                tab === "archived"
+                  ? {
+                      label: "Restore",
+                      ariaLabel: `Restore ${row.group.name} to your active groups`,
+                      onClick: () => handleToggleArchive(row.group.id, false),
+                    }
+                  : {
+                      label: "Archive",
+                      ariaLabel: `Archive ${row.group.name}`,
+                      onClick: () => handleToggleArchive(row.group.id, true),
+                    }
+              }
             />
           ))}
         </div>
 
-        {/* All-settled banner */}
-        {settledCount > 0 && (
-          <div className="mt-4 flex items-center gap-3 bg-[var(--tint-accent)] rounded-[var(--radius-card)] p-4">
+        {/* Only on the Active tab, and now a way through to the settled ones
+            rather than a second copy of the count already on the tab. */}
+        {tab === "active" && tabCounts.settled > 0 && (
+          <button
+            onClick={() => setTab("settled")}
+            className="mt-4 w-full text-left flex items-center gap-3 bg-[var(--tint-accent)] rounded-[var(--radius-card)] p-4 tap-shrink"
+          >
             <span className="w-10 h-10 rounded-full bg-[var(--surface)] text-[var(--brand)] flex items-center justify-center shrink-0 shadow-sm">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
                 <path d="M12 2l1.9 5.8L20 9.7l-5 3.6 1.9 6L12 15.8 6.1 19.3 8 13.3l-5-3.6 6.1-1.9z" />
@@ -405,11 +502,15 @@ export default function Home() {
             </span>
             <div className="flex-1 min-w-0">
               <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                You&rsquo;re all settled in {settledCount} group{settledCount !== 1 ? "s" : ""}.
+                You&rsquo;re all settled in {tabCounts.settled} group
+                {tabCounts.settled !== 1 ? "s" : ""}.
               </p>
-              <p className="text-[13px] text-[var(--text-tertiary)]">Great job keeping things balanced! 🎉</p>
+              <p className="text-[13px] text-[var(--text-tertiary)]">
+                Tap to review or archive them 🎉
+              </p>
             </div>
-          </div>
+            <span className="text-[var(--text-quaternary)] text-lg shrink-0">›</span>
+          </button>
         )}
       </main>
 
