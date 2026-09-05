@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { addSettlementRequest, updateSettlementStatus } from "@/lib/firestore";
 import { formatCurrency } from "@/lib/balance";
+import { toPaise } from "@/lib/money";
 import GlassModal from "@/components/ui/GlassModal";
 import GlassButton from "@/components/ui/GlassButton";
 import { useToast } from "@/components/ui/Toast";
@@ -62,7 +63,7 @@ export default function ForwardModal({
       setError("Enter a valid amount.");
       return;
     }
-    if (amt > incomingAmount + 0.01) {
+    if (toPaise(amt) > toPaise(incomingAmount)) {
       setError(`You can forward at most ${formatCurrency(incomingAmount)}.`);
       return;
     }

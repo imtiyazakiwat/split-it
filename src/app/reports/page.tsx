@@ -505,7 +505,7 @@ function ReportsInner() {
             You covered {formatCurrency(stmt.iCoveredForThem)} of {otherName}&rsquo;s share.{" "}
             {otherName} covered {formatCurrency(stmt.theyCoveredForMe)} of yours.
           </p>
-          {(stmt.pendingFromMe > 0.01 || stmt.pendingFromThem > 0.01) && (
+          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
             <p className="text-[13px] text-[var(--warning)] mt-2">
               A payment is still waiting to be approved, so it isn&rsquo;t counted above.
             </p>

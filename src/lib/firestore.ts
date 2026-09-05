@@ -24,7 +24,7 @@ import {
 import { notifyGroupMembers, notifyUsers } from "./send-notification";
 import { groupItemLink } from "./statement";
 import { normaliseSplits } from "./balance";
-import { roundMoney } from "./money";
+import { roundMoney, sumMoney } from "./money";
 
 function genInviteCode(): string {
   return Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -330,11 +330,26 @@ export async function updateExpense(
   // payer's credit from what the members were actually charged.
   if (data.amount !== undefined) patch.amount = roundMoney(data.amount);
   if (data.splits !== undefined) {
-    const target = data.amount !== undefined ? roundMoney(data.amount) : undefined;
-    patch.splits =
-      target !== undefined
-        ? normaliseSplits(target, data.splits)
-        : data.splits.map((s) => ({ uid: s.uid, amount: roundMoney(s.amount) }));
+    // Splits must always sum to the expense total. When only the splits change,
+    // the total to reconcile against is the one already stored — rounding the
+    // splits on their own would let `sum(splits)` drift from `amount`, which is
+    // precisely the divergence that mints balances no settlement can clear.
+    let target = data.amount !== undefined ? roundMoney(data.amount) : undefined;
+    if (target === undefined) {
+      const snap = await getDoc(doc(db, "groups", groupId, "expenses", expenseId));
+      const stored = snap.data()?.amount;
+      target = typeof stored === "number" ? roundMoney(stored) : undefined;
+    }
+    if (target !== undefined) {
+      patch.splits = normaliseSplits(target, data.splits);
+    } else {
+      // No readable total to anchor to (a missing or malformed document). Write
+      // both sides from the splits so they are consistent by construction
+      // rather than leaving the pair contradicting each other.
+      const splits = data.splits.map((s) => ({ uid: s.uid, amount: roundMoney(s.amount) }));
+      patch.splits = splits;
+      patch.amount = sumMoney(splits.map((s) => s.amount));
+    }
   }
 
   await updateDoc(doc(db, "groups", groupId, "expenses", expenseId), {

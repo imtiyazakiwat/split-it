@@ -378,8 +378,10 @@ textarea:focus-visible,
   animation: splash-shimmer 1.6s ease-in-out 0.4s infinite;
 }
 
+/* Duration must match FADE_MS in components/SplashGate.tsx: the gate unmounts on
+   a timer, so a longer animation here would be cut off mid-fade. */
 .animate-splash-out {
-  animation: splash-out 0.4s ease-in forwards;
+  animation: splash-out 0.25s ease-in forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {

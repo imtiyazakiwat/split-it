@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatCurrency } from "@/lib/balance";
+import { isSettled } from "@/lib/money";
 import {
   ActivityRecord,
   ActivityReport,
@@ -170,13 +171,13 @@ export default function ReportPanel({
             label="Settlements sent"
             value={formatCurrency(report.paidOut)}
             tone="neg"
-            hint={report.pendingOut > 0.01 ? `${formatCurrency(report.pendingOut)} pending` : "all confirmed"}
+            hint={!isSettled(report.pendingOut) ? `${formatCurrency(report.pendingOut)} pending` : "all confirmed"}
           />
           <Stat
             label="Settlements received"
             value={formatCurrency(report.receivedIn)}
             tone="pos"
-            hint={report.pendingIn > 0.01 ? `${formatCurrency(report.pendingIn)} awaiting you` : "all confirmed"}
+            hint={!isSettled(report.pendingIn) ? `${formatCurrency(report.pendingIn)} awaiting you` : "all confirmed"}
           />
         </div>
       </div>
@@ -188,7 +189,7 @@ export default function ReportPanel({
           <Stat label="You owe" value={formatCurrency(report.totalOwe)} tone="neg" />
           <Stat label="You will receive" value={formatCurrency(report.totalReceive)} tone="pos" />
         </div>
-        {report.offsetTotal > 0.01 && (
+        {!isSettled(report.offsetTotal) && (
           <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--tint-accent)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
             {formatCurrency(report.offsetTotal)} was cleared by cancelling balances across
             groups — no money changed hands.

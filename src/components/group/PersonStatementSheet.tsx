@@ -75,9 +75,9 @@ export default function PersonStatementSheet({
           <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
             Just between you two, in {group.name}
           </p>
-          {(stmt.pendingFromMe > 0.01 || stmt.pendingFromThem > 0.01) && (
+          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
             <p className="text-[12px] text-[var(--warning)] mt-2">
-              {stmt.pendingFromThem > 0.01
+              {!isSettled(stmt.pendingFromThem)
                 ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
                 : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
               . Not counted above.
@@ -95,13 +95,13 @@ export default function PersonStatementSheet({
             <span className="text-[var(--text-tertiary)]">{otherName} covered for you</span>
             <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.theyCoveredForMe)}</span>
           </div>
-          {stmt.iPaid > 0.01 && (
+          {!isSettled(stmt.iPaid) && (
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--text-tertiary)]">Payments you sent</span>
               <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>
             </div>
           )}
-          {stmt.theyPaid > 0.01 && (
+          {!isSettled(stmt.theyPaid) && (
             <div className="flex justify-between text-[14px]">
               <span className="text-[var(--text-tertiary)]">Payments {otherName} sent</span>
               <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>

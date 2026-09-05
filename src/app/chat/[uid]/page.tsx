@@ -8,7 +8,11 @@ import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
-import { transferAllocations, unallocatedAmount } from "@/lib/transfer-allocation";
+import {
+  missingAllocationLegs,
+  transferAllocations,
+  unallocatedAmount,
+} from "@/lib/transfer-allocation";
 import { groupItemLink } from "@/lib/statement";
 import {
   MAX_MESSAGE_LENGTH,
@@ -17,7 +21,7 @@ import {
   subscribeToMessages,
   threadIdFor,
 } from "@/lib/chat";
-import { cancelTransfer } from "@/lib/transfers";
+import { cancelTransfer, reconcileTransferAllocations } from "@/lib/transfers";
 import { buildConversation, ConversationItem } from "@/lib/conversation";
 import { ChatMessage, DirectTransfer } from "@/lib/types";
 import { getUserProfile } from "@/lib/firestore";
@@ -73,15 +77,20 @@ function TransferBubble({
   item,
   otherName,
   groupNameOf,
+  settlementIdsByGroup,
   onDecide,
   onCancel,
+  onRepair,
   onNavigate,
 }: {
   item: ConversationItem;
   otherName: string;
   groupNameOf: (groupId: string) => string;
+  /** Settlement ids present in each loaded group, for spotting missing legs. */
+  settlementIdsByGroup: Map<string, Set<string>>;
   onDecide: (t: DirectTransfer) => void;
   onCancel: (t: DirectTransfer) => void;
+  onRepair: (t: DirectTransfer) => void;
   onNavigate: (href: string) => void;
 }) {
   const t = item.transfer!;
@@ -91,6 +100,11 @@ function TransferBubble({
   // single destination.
   const legs = transferAllocations(t);
   const unassigned = unallocatedAmount(t);
+  // Booking a payment takes two writes, so a leg can be recorded on the transfer
+  // while its settlement never reached the group. That understates the balance
+  // silently, and a fully assigned payment offers no other reason to come back
+  // here — so surface it and let the receiver finish the job.
+  const broken = missingAllocationLegs(t, settlementIdsByGroup);
   const status = (() => {
     if (t.status === "cancelled") return { text: "Withdrawn", tone: "flat" as const };
     if (t.status === "declined") return { text: "Marked as not received", tone: "bad" as const };
@@ -99,6 +113,14 @@ function TransferBubble({
         legs.length === 1
           ? `Counted in ${groupNameOf(legs[0].groupId)}`
           : `Counted across ${legs.length} groups`;
+      if (broken.length > 0) {
+        return {
+          text: `Not fully recorded — ${formatCurrency(
+            broken.reduce((sum, l) => sum + l.amount, 0)
+          )} is missing from ${broken.length === 1 ? "a group" : "some groups"}`,
+          tone: "warn" as const,
+        };
+      }
       return {
         text: isSettled(unassigned)
           ? where
@@ -179,6 +201,14 @@ function TransferBubble({
             className="mt-2.5 w-full rounded-full bg-[var(--brand-solid)] text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
           >
             Confirm &amp; choose a group
+          </button>
+        )}
+        {!mine && broken.length > 0 && (
+          <button
+            onClick={() => onRepair(t)}
+            className="mt-2.5 w-full rounded-full bg-[var(--tint-warning)] text-[var(--warning)] px-4 py-2 text-[13px] font-semibold tap-shrink"
+          >
+            Finish recording this payment
           </button>
         )}
         {/* Still offered once part of the payment is booked: the remainder can
@@ -425,15 +455,38 @@ function ChatPageInner() {
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [items.length]);
 
+  const settlementIdsByGroup = useMemo(
+    () =>
+      new Map(
+        datasets.map((d) => [d.group.id, new Set(d.settlements.map((s) => s.id))] as const)
+      ),
+    [datasets]
+  );
+
   if (loading || (user && !groupsLoaded)) return <ChatSkeleton />;
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
   const net = counterparty?.net ?? 0;
-  const iOwe = net > 0.01;
-  const theyOwe = net < -0.01;
+  const iOwe = !isSettled(net) && net > 0;
+  const theyOwe = !isSettled(net) && net < 0;
   const groupNameOf = (groupId: string) =>
     datasets.find((d) => d.group.id === groupId)?.group.name || "a group";
+  async function handleRepairTransfer(t: DirectTransfer) {
+    try {
+      const repaired = await reconcileTransferAllocations(t);
+      showToast({
+        message:
+          repaired > 0
+            ? `Recorded ${repaired} missing ${repaired === 1 ? "entry" : "entries"}`
+            : "Already up to date",
+      });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't finish recording: ${err.message}` : "Couldn't finish recording",
+      });
+    }
+  }
   const navigate = (href: string) => router.push(href);
 
   async function handleSend(e: React.FormEvent) {
@@ -541,8 +594,10 @@ function ChatPageInner() {
                       item={item}
                       otherName={otherName}
                       groupNameOf={groupNameOf}
+                      settlementIdsByGroup={settlementIdsByGroup}
                       onDecide={setDecide}
                       onCancel={handleCancelTransfer}
+                      onRepair={handleRepairTransfer}
                       onNavigate={navigate}
                     />
                   )}

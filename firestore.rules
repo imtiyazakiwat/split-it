@@ -202,12 +202,24 @@ service cloud.firestore {
       // Booking is no longer one-shot: a payment can cover debts in several
       // groups, and one that exceeds the first group's balance must be able to
       // put the rest somewhere else (or nowhere) instead of overshooting. So
-      // `allocations` may grow over time, bounded by two invariants:
+      // `allocations` grows over time, under three guards:
       //
-      //   - `allocatedAmount` never exceeds the payment, so the same rupees
-      //     cannot be counted twice; and
-      //   - existing keys are never dropped, because each one has a settlement
-      //     document behind it that would otherwise be stranded.
+      //   - keys are append-only. Dropping one would strand the settlement
+      //     document behind it.
+      //   - existing entries are immutable. Rewriting a booked leg downwards
+      //     would free up headroom to spend again while its settlement stands.
+      //   - `allocatedAmount` only ever rises, and never past the payment.
+      //
+      // What these do NOT enforce is that `allocatedAmount` equals the sum of
+      // `allocations`: rules cannot iterate a map, so a single write could still
+      // add entries totalling more than the payment. That is deliberately
+      // accepted rather than papered over. A settlement moves the balance from
+      // the payer towards the payee, so the only party over-allocation can hurt
+      // is the receiver who performs it — they would be writing off more of the
+      // sender's debt than they were actually paid. Every other trust boundary
+      // (who may create a leg, for which group, at which amount) is enforced
+      // above in `backedByMyTransfer`. `scripts/audit-balances.mjs` reconciles
+      // the sum against the legs and reports any drift.
       //
       // Accepting without naming a group stays valid — take the money today,
       // decide next week which group it settles. 'declined' and 'cancelled' are
@@ -219,10 +231,12 @@ service cloud.firestore {
         && request.resource.data.fromUid == resource.data.fromUid
         && request.resource.data.toUid == resource.data.toUid
         && request.resource.data.get('allocatedAmount', 0) is number
-        && request.resource.data.get('allocatedAmount', 0) >= 0
+        && request.resource.data.get('allocatedAmount', 0) >= resource.data.get('allocatedAmount', 0)
         && request.resource.data.get('allocatedAmount', 0) <= resource.data.amount
         && request.resource.data.get('allocations', {}).keys().hasAll(
              resource.data.get('allocations', {}).keys())
+        && request.resource.data.get('allocations', {})
+             .diff(resource.data.get('allocations', {})).changedKeys().hasOnly([])
         && (request.resource.data.get('allocations', {}).size() == 0
             || request.resource.data.status == 'accepted')
         && (

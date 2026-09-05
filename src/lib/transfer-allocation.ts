@@ -99,6 +99,29 @@ export function isFullyUnallocated(transfer: DirectTransfer): boolean {
 }
 
 /**
+ * Allocation legs the transfer claims exist but which are absent from the group
+ * ledger.
+ *
+ * Booking is necessarily two writes — the security rules can only authorise a
+ * settlement against a plan that was already committed — so a failure in between
+ * leaves the transfer saying the money is counted while the group has no record
+ * of it, understating the balance. A fully allocated transfer no longer appears
+ * as unassigned, so nothing would otherwise prompt a repair.
+ *
+ * Groups absent from `settlementIdsByGroup` are skipped rather than reported:
+ * their data simply isn't loaded, which is not the same as a missing leg.
+ */
+export function missingAllocationLegs(
+  transfer: DirectTransfer,
+  settlementIdsByGroup: Map<string, Set<string>>
+): { settlementId: string; groupId: string; amount: number }[] {
+  return transferAllocations(transfer).filter((leg) => {
+    const known = settlementIdsByGroup.get(leg.groupId);
+    return !!known && !known.has(leg.settlementId);
+  });
+}
+
+/**
  * Builds the plan for booking `available` rupees across `groups`.
  *
  * `desired` gives the receiver's chosen amount per group; a group absent from it

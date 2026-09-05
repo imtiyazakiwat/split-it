@@ -185,6 +185,12 @@ export async function includeTransferInGroups(
     throw new Error("Each group can only take one share of a payment.");
   }
 
+  // Heal any leg whose plan was committed but whose settlement never landed,
+  // before planning more. Without this, a phase-2 failure is terminal: the group
+  // it belongs to is rejected below as "already counted", and a fully allocated
+  // transfer disappears from `unappliedForMe` entirely, so nothing ever retries.
+  await reconcileTransferAllocations(transfer);
+
   const already = transferAllocations(transfer);
   const alreadyGroups = new Set(already.map((a) => a.groupId));
   for (const leg of requested) {
@@ -243,6 +249,39 @@ export async function includeTransferInGroups(
     settlementId: l.ref.id,
     amount: l.amount,
   }));
+}
+
+/**
+ * Recreates settlements for allocations that were committed to the transfer but
+ * never written, and reports how many it repaired.
+ *
+ * The two-phase write is forced by the security rules (they only see pre-batch
+ * state, so the plan must be committed before the legs it authorises). That
+ * leaves a window: if the second phase fails, the transfer claims the money is
+ * booked while the group ledger has no record of it, understating the balance.
+ * Because the plan is committed with its settlement ids already chosen, the
+ * repair is deterministic — write exactly the documents that are missing.
+ *
+ * Safe to call at any time: `writeAllocationLegs` skips legs that already exist.
+ */
+export async function reconcileTransferAllocations(
+  transfer: DirectTransfer
+): Promise<number> {
+  const committed = transferAllocations(transfer);
+  if (committed.length === 0) return 0;
+
+  const planned: PlannedLegRef[] = committed.map((a) => ({
+    groupId: a.groupId,
+    amount: a.amount,
+    ref: doc(db, "groups", a.groupId, "settlements", a.settlementId),
+  }));
+
+  const existing = await Promise.all(planned.map((l) => getDoc(l.ref)));
+  const missing = planned.filter((_, i) => !existing[i].exists());
+  if (missing.length === 0) return 0;
+
+  await writeAllocationLegs(transfer, missing, transfer.updatedAt || Date.now());
+  return missing.length;
 }
 
 type PlannedLegRef = { groupId: string; amount: number; ref: DocumentReference };

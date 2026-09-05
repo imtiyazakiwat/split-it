@@ -90,6 +90,7 @@ for await (const d of db.collectionGroup("settlements").stream()) {
     status: x.status || "approved",
     statusMissing: !x.status,
     kind: x.kind || "payment",
+    transferId: x.transferId || "",
     createdAt: x.createdAt,
     note: x.note || "",
   });
@@ -257,12 +258,86 @@ for (const gid of [...allGids].sort()) {
 }
 
 // ── transfers ────────────────────────────────────────────────
-for (const t of transfers) {
-  if (t.status === "pending") {
-    flag("ATTENTION", "(direct transfers)", `${inr(P(t.amount))} from ${nameOf(null, t.fromUid)} to ${nameOf(null, t.toUid)} is still pending confirmation`);
+// Index every settlement by id so each allocation leg can be reconciled against
+// the document it claims to have created.
+const settlementById = new Map();
+for (const [gid, list] of settlementsByGroup) {
+  for (const s of list) settlementById.set(s.id, { ...s, groupId: gid });
+}
+
+/** Allocation legs in one shape, folding in pre-multi-group records. */
+const legsOf = (t) => {
+  const entries = Object.entries(t.allocations || {});
+  if (entries.length > 0) {
+    return entries.map(([settlementId, a]) => ({
+      settlementId,
+      groupId: a?.groupId || "",
+      amount: Number(a?.amount) || 0,
+    }));
   }
-  if (t.status === "accepted" && !t.appliedGroupId) {
-    flag("ATTENTION", "(direct transfers)", `${inr(P(t.amount))} from ${nameOf(null, t.fromUid)} to ${nameOf(null, t.toUid)} was confirmed but never booked into a group, so it still hasn't reduced any group balance`);
+  if (t.appliedGroupId && t.appliedSettlementId) {
+    return [
+      { settlementId: t.appliedSettlementId, groupId: t.appliedGroupId, amount: t.amount },
+    ];
+  }
+  return [];
+};
+
+const TRANSFERS = "(direct transfers)";
+
+for (const t of transfers) {
+  const who = `${inr(P(t.amount))} from ${nameOf(null, t.fromUid)} to ${nameOf(null, t.toUid)}`;
+
+  if (t.status === "pending") {
+    flag("ATTENTION", TRANSFERS, `${who} is still pending confirmation`);
+    continue;
+  }
+  if (t.status !== "accepted") continue;
+
+  const legs = legsOf(t);
+  const legTotal = legs.reduce((sum, l) => sum + P(l.amount), 0);
+
+  // Accepted with nothing booked is a legitimate choice ("I got it, but it
+  // wasn't for a group"), so it is informational rather than a fault. The old
+  // check keyed off `appliedGroupId` alone and so both mislabelled this case and
+  // missed every problem below.
+  if (legs.length === 0) {
+    flag("INFO", TRANSFERS, `${who} was confirmed but not booked into any group, so it hasn't reduced a group balance`);
+    continue;
+  }
+
+  // The booking is two writes (the rules can only authorise a settlement against
+  // an already-committed plan), so a leg can exist in the plan with no
+  // settlement behind it. That silently understates the group's balance.
+  for (const leg of legs) {
+    const s = settlementById.get(leg.settlementId);
+    if (!s) {
+      flag("CRITICAL", TRANSFERS, `${who}: ${inr(P(leg.amount))} is recorded as counted in group ${leg.groupId.slice(0, 8)} but settlement ${leg.settlementId.slice(0, 8)} does not exist — that group's balance is understated by ${inr(P(leg.amount))}. Re-open the payment in the app to repair it.`);
+      continue;
+    }
+    if (s.groupId !== leg.groupId) {
+      flag("CRITICAL", TRANSFERS, `${who}: allocation names group ${leg.groupId.slice(0, 8)} but settlement ${leg.settlementId.slice(0, 8)} lives in ${s.groupId.slice(0, 8)}`);
+    }
+    if (P(s.amount) !== P(leg.amount)) {
+      flag("CRITICAL", TRANSFERS, `${who}: allocation says ${inr(P(leg.amount))} but settlement ${leg.settlementId.slice(0, 8)} records ${inr(P(s.amount))}`);
+    }
+    if (s.fromUid !== t.fromUid || s.toUid !== t.toUid) {
+      flag("CRITICAL", TRANSFERS, `${who}: settlement ${leg.settlementId.slice(0, 8)} is between different people (${nameOf(null, s.fromUid)} -> ${nameOf(null, s.toUid)})`);
+    }
+    if (s.transferId && s.transferId !== t.id) {
+      flag("CRITICAL", TRANSFERS, `${who}: settlement ${leg.settlementId.slice(0, 8)} points at transfer ${s.transferId.slice(0, 8)}`);
+    }
+  }
+
+  // The rules bound `allocatedAmount` but cannot sum the map, so this is the
+  // only place the two are compared.
+  if (t.allocatedAmount !== undefined && P(t.allocatedAmount) !== legTotal) {
+    flag("CRITICAL", TRANSFERS, `${who}: allocatedAmount is ${inr(P(t.allocatedAmount))} but the legs total ${inr(legTotal)}`);
+  }
+  if (legTotal > P(t.amount)) {
+    flag("CRITICAL", TRANSFERS, `${who}: booked ${inr(legTotal)} across ${legs.length} groups, which is ${inr(legTotal - P(t.amount))} more than was ever sent`);
+  } else if (legTotal < P(t.amount)) {
+    flag("INFO", TRANSFERS, `${who}: ${inr(P(t.amount) - legTotal)} is still unassigned to any group`);
   }
 }
 

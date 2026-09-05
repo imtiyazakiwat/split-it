@@ -4,8 +4,9 @@
  * Usage: node scripts/inspect-group.mjs "<group name or id>"
  */
 import { db } from "./lib/admin.mjs";
+import { selectGroup } from "./lib/select.mjs";
 
-const needle = (process.argv[2] || "").toLowerCase();
+const needle = process.argv[2] || "";
 if (!needle) {
   console.error('Usage: node scripts/inspect-group.mjs "<group name or id>"');
   process.exit(1);
@@ -25,14 +26,7 @@ for await (const d of db.collection("users").stream()) users.set(d.id, d.data())
 const groups = [];
 for await (const d of db.collection("groups").stream()) groups.push({ id: d.id, ...d.data() });
 
-const group = groups.find(
-  (g) => g.id.toLowerCase() === needle || (g.name || "").toLowerCase().includes(needle)
-);
-if (!group) {
-  console.error(`No group matched "${needle}". Available:`);
-  for (const g of groups) console.error(`  ${g.id}  ${g.name}`);
-  process.exit(1);
-}
+const group = selectGroup(groups, needle);
 
 const name = (uid) =>
   group.members?.[uid]?.displayName || users.get(uid)?.displayName || `(${uid.slice(0, 6)})`;

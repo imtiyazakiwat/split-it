@@ -228,20 +228,20 @@ export default function Home() {
               <Skeleton className="h-4 w-24 rounded-md" />
               <Skeleton className="h-10 w-40 mt-2 rounded-lg" />
             </div>
-          ) : totalOwe > 0.01 ? (
+          ) : !isSettled(totalOwe) ? (
             <div>
               <p className="text-[15px] text-[var(--text-tertiary)]">You owe</p>
               <p className="text-[36px] font-extrabold text-[var(--neg)] leading-tight mt-0.5 truncate">
                 {formatCurrency(totalOwe)}
               </p>
-              {totalReceive > 0.01 && (
+              {!isSettled(totalReceive) && (
                 <p className="text-[14px] text-[var(--text-secondary)] mt-1">
                   You&rsquo;ll also receive{" "}
                   <span className="font-semibold text-[var(--pos)]">{formatCurrency(totalReceive)}</span>
                 </p>
               )}
             </div>
-          ) : totalReceive > 0.01 ? (
+          ) : !isSettled(totalReceive) ? (
             <div>
               <p className="text-[15px] text-[var(--text-tertiary)]">You will receive</p>
               <p className="text-[36px] font-extrabold text-[var(--pos)] leading-tight mt-0.5 truncate">

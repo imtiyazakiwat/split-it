@@ -17,6 +17,7 @@ import SplashScreen from "@/components/SplashScreen";
  * to open.
  */
 const MIN_SPLASH_MS = 300;
+/** Must match the `.animate-splash-out` duration in globals.css. */
 const FADE_MS = 250;
 const SAFETY_MS = 6000;
 

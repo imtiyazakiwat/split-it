@@ -1,5 +1,5 @@
 import { Expense, Group, Settlement } from "./types";
-import { computePairwiseLedger } from "./balance";
+import { computePairwiseLedger, ledgerParticipants } from "./balance";
 import { fromPaise, isSettled, roundMoney } from "./money";
 
 /**
@@ -68,7 +68,11 @@ export function computeCounterpartyBalances(
     if (!group.memberIds?.includes(meUid)) continue;
     const owes = computePairwiseLedger(expenses, settlements);
 
-    for (const uid of group.memberIds) {
+    // Derived from the ledger, not from `memberIds`, so a balance with someone
+    // who has left a shared group still shows up here. The Pay and Reports
+    // screens read this directly, so filtering to current members hid exactly
+    // the debts that are hardest to notice and easiest to forget.
+    for (const uid of ledgerParticipants(group.memberIds, expenses, settlements)) {
       if (uid === meUid) continue;
       const member = group.members?.[uid];
       let entry = byUid.get(uid);
