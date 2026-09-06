@@ -217,7 +217,7 @@ export default function NotificationsPage() {
     // Names come from the shared-group profile mirror; someone you only ever
     // paid directly falls back to a generic label rather than a raw uid.
     const nameByUid = new Map(
-      computeCounterpartyBalances(uid, datasets).map((c) => [c.uid, c.displayName])
+      computeCounterpartyBalances(uid, datasets, transfers).map((c) => [c.uid, c.displayName])
     );
     const personName = (target: string) => nameByUid.get(target) || "Someone";
 

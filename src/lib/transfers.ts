@@ -139,8 +139,9 @@ export async function declineTransfer(transfer: DirectTransfer): Promise<void> {
 }
 
 /**
- * The receiver confirming the money without touching any group ledger — a gift,
- * a repayment of something the app never tracked, splitting a bill in cash.
+ * The receiver confirming the money as personal (not booked into any group).
+ * Counts towards the person-to-person direct balance until it is attached to
+ * a group later.
  */
 export async function acknowledgeTransfer(transfer: DirectTransfer): Promise<void> {
   await updateDoc(doc(db, "transfers", transfer.id), {

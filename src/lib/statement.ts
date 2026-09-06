@@ -1,6 +1,7 @@
-import { Expense, Settlement, SettlementStatus } from "./types";
+import { DirectTransfer, Expense, Settlement, SettlementStatus } from "./types";
 import { isActiveExpense } from "./balance";
 import { fromPaise, isSettled, toPaise } from "./money";
+import { unallocatedAmount } from "./transfer-allocation";
 
 /**
  * Pairwise statement between two people — the "why do I owe this?" ledger.
@@ -20,7 +21,13 @@ import { fromPaise, isSettled, toPaise } from "./money";
  * contradicting the number it was opened to explain.
  */
 
-export type StatementRowKind = "expense-they-paid" | "expense-i-paid" | "payment-i-sent" | "payment-they-sent";
+export type StatementRowKind =
+  | "expense-they-paid"
+  | "expense-i-paid"
+  | "payment-i-sent"
+  | "payment-they-sent"
+  | "direct-i-sent"
+  | "direct-they-sent";
 
 export interface StatementRow {
   key: string;
@@ -48,26 +55,39 @@ export interface StatementRow {
   informationalOnly: boolean;
   expenseId?: string;
   settlementId?: string;
+  transferId?: string;
+  /** Full transfer amount, set only on direct rows (for partial-booking copy). */
+  transferAmount?: number;
+  /** How much of the transfer was already booked into groups. Direct rows only. */
+  allocatedAmount?: number;
 }
 
 export interface PairStatement {
   otherUid: string;
   rows: StatementRow[];
-  /** Positive: they owe me. Negative: I owe them. */
+  /** Positive: they owe me. Negative: I owe them. Groups + direct combined. */
   net: number;
   /** Total of their shares on expenses I covered. */
   iCoveredForThem: number;
   /** Total of my shares on expenses they covered. */
   theyCoveredForMe: number;
-  /** Approved payments I sent them. */
+  /** Approved payments I sent them (groups + direct remainder). */
   iPaid: number;
-  /** Approved payments they sent me. */
+  /** Approved payments they sent me (groups + direct remainder). */
   theyPaid: number;
-  /** Payments awaiting a response, by direction. */
+  /** Payments awaiting a response, by direction (groups + direct). */
   pendingFromMe: number;
   pendingFromThem: number;
   /** Number of expenses the two of them actually shared. */
   sharedExpenseCount: number;
+  /** Direct-only net (statement sign: positive = they owe me). */
+  directNet: number;
+  /** Accepted direct remainder I sent (personal, not in any group). */
+  iPaidDirect: number;
+  /** Accepted direct remainder they sent. */
+  theyPaidDirect: number;
+  /** Number of direct transfers touching this pair (any status). */
+  directTransferCount: number;
 }
 
 function settlementStatus(s: Settlement): SettlementStatus {
@@ -80,7 +100,8 @@ export function buildPairStatement(
   meUid: string,
   otherUid: string,
   expenses: Expense[],
-  settlements: Settlement[]
+  settlements: Settlement[],
+  transfers: DirectTransfer[] = []
 ): PairStatement {
   const rows: StatementRow[] = [];
   // All accumulators are exact paise; converted to rupees only in the result.
@@ -91,6 +112,9 @@ export function buildPairStatement(
   let pendingFromMe = 0;
   let pendingFromThem = 0;
   let sharedExpenseCount = 0;
+  let iPaidDirect = 0;
+  let theyPaidDirect = 0;
+  let directTransferCount = 0;
 
   for (const e of expenses) {
     if (!isActiveExpense(e)) continue;
@@ -171,6 +195,81 @@ export function buildPairStatement(
     });
   }
 
+  // ── Direct (non-group) transfers ────────────────────────────────
+  // Only the unallocated remainder moves the balance here: whatever was booked
+  // into a group already appears above as its `transfer` settlement. Pending /
+  // declined / cancelled rows are informational (delta 0), same as group
+  // settlements awaiting approval.
+  for (const t of transfers) {
+    const involvesPair =
+      (t.fromUid === meUid && t.toUid === otherUid) ||
+      (t.fromUid === otherUid && t.toUid === meUid);
+    if (!involvesPair) continue;
+    directTransferCount += 1;
+    const iSent = t.fromUid === meUid;
+    const fullPaise = toPaise(t.amount);
+    const unallocPaise = toPaise(unallocatedAmount(t));
+    const allocatedPaise = fullPaise - unallocPaise;
+
+    if (t.status === "accepted") {
+      if (isSettled(unallocatedAmount(t))) continue; // fully booked → legs cover it
+      if (iSent) {
+        iPaid += unallocPaise;
+        iPaidDirect += unallocPaise;
+      } else {
+        theyPaid += unallocPaise;
+        theyPaidDirect += unallocPaise;
+      }
+      rows.push({
+        key: `d-${t.id}`,
+        ts: t.createdAt,
+        kind: iSent ? "direct-i-sent" : "direct-they-sent",
+        label: "Direct payment",
+        note: t.note || undefined,
+        delta: fromPaise(iSent ? unallocPaise : -unallocPaise),
+        balance: 0,
+        status: "approved",
+        informationalOnly: false,
+        transferId: t.id,
+        transferAmount: fromPaise(fullPaise),
+        allocatedAmount: fromPaise(allocatedPaise),
+      });
+    } else if (t.status === "pending") {
+      if (iSent) pendingFromMe += fullPaise;
+      else pendingFromThem += fullPaise;
+      rows.push({
+        key: `d-${t.id}`,
+        ts: t.createdAt,
+        kind: iSent ? "direct-i-sent" : "direct-they-sent",
+        label: "Direct payment",
+        note: t.note || undefined,
+        delta: 0,
+        balance: 0,
+        status: "pending",
+        informationalOnly: true,
+        transferId: t.id,
+        transferAmount: fromPaise(fullPaise),
+        allocatedAmount: 0,
+      });
+    } else {
+      // declined / cancelled — history only, never moves the balance.
+      rows.push({
+        key: `d-${t.id}`,
+        ts: t.createdAt,
+        kind: iSent ? "direct-i-sent" : "direct-they-sent",
+        label: "Direct payment",
+        note: t.note || undefined,
+        delta: 0,
+        balance: 0,
+        status: "rejected",
+        informationalOnly: true,
+        transferId: t.id,
+        transferAmount: fromPaise(fullPaise),
+        allocatedAmount: 0,
+      });
+    }
+  }
+
   rows.sort((a, b) => a.ts - b.ts || a.key.localeCompare(b.key));
 
   let runningPaise = 0;
@@ -190,6 +289,10 @@ export function buildPairStatement(
     pendingFromMe: fromPaise(pendingFromMe),
     pendingFromThem: fromPaise(pendingFromThem),
     sharedExpenseCount,
+    directNet: fromPaise(iPaidDirect - theyPaidDirect),
+    iPaidDirect: fromPaise(iPaidDirect),
+    theyPaidDirect: fromPaise(theyPaidDirect),
+    directTransferCount,
   };
 }
 

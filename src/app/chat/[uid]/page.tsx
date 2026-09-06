@@ -129,7 +129,7 @@ function TransferBubble({
       };
     }
     if (t.status === "accepted")
-      return { text: "Confirmed · not counted in a group", tone: "flat" as const };
+      return { text: "Confirmed · personal balance (not in a group)", tone: "flat" as const };
     return {
       text: mine ? `Waiting for ${otherName} to confirm` : "Waiting for you to confirm",
       tone: "warn" as const,
@@ -411,11 +411,16 @@ function ChatPageInner() {
 
   const counterparty = useMemo(() => {
     if (!meUid) return undefined;
-    return computeCounterpartyBalances(meUid, datasets).find((c) => c.uid === otherUid);
-  }, [meUid, datasets, otherUid]);
+    return computeCounterpartyBalances(meUid, datasets, transfers).find((c) => c.uid === otherUid);
+  }, [meUid, datasets, transfers, otherUid]);
+
+  // Transfer-only counterparties carry no profile (displayName "Member"), so
+  // still resolve the real name from their user document.
+  const needsProfile =
+    !counterparty || !counterparty.displayName || counterparty.displayName === "Member";
 
   useEffect(() => {
-    if (!otherUid || counterparty || !groupsLoaded) return;
+    if (!otherUid || !needsProfile || !groupsLoaded) return;
     let cancelled = false;
     getUserProfile(otherUid).then((p) => {
       if (cancelled || !p) return;
@@ -428,9 +433,11 @@ function ChatPageInner() {
     return () => {
       cancelled = true;
     };
-  }, [otherUid, counterparty, groupsLoaded]);
+  }, [otherUid, needsProfile, groupsLoaded]);
 
-  const otherName = counterparty?.displayName || fallbackProfile?.displayName || "Someone";
+  const otherName = needsProfile
+    ? fallbackProfile?.displayName || counterparty?.displayName || "Someone"
+    : counterparty?.displayName || "Someone";
   const otherPhoto = counterparty?.photoURL || fallbackProfile?.photoURL;
   const otherUpiId = counterparty?.upiId || fallbackProfile?.upiId;
 

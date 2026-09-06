@@ -12,6 +12,7 @@ import {
 } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
+import { usePayments } from "@/lib/payments-context";
 import {
   archivedAtFor,
   classifyGroup,
@@ -42,6 +43,7 @@ export default function Home() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const { groups, groupsLoaded, byGroup, datasets, allLoaded, error } = useGroupData();
+  const { transfers } = usePayments();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [tab, setTab] = useState<GroupTab>("active");
@@ -87,8 +89,8 @@ export default function Home() {
   const tabCounts = useMemo(() => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }), [rows, uid]);
 
   const counterparties = useMemo(
-    () => (uid ? computeCounterpartyBalances(uid, datasets) : []),
-    [uid, datasets]
+    () => (uid ? computeCounterpartyBalances(uid, datasets, transfers) : []),
+    [uid, datasets, transfers]
   );
 
   if (loading || (!groupsLoaded && user)) {
@@ -149,8 +151,11 @@ export default function Home() {
 
   const firstName = (currentUser.displayName || "there").split(" ")[0];
 
-  const totalReceive = rows.reduce((s, r) => s + (r.net > 0 ? r.net : 0), 0);
-  const totalOwe = rows.reduce((s, r) => s + (r.net < 0 ? -r.net : 0), 0);
+  // Totals net across groups AND confirmed direct payments, so they agree with
+  // "By person" below. Per-group rows stay group-only; direct lives in the
+  // person totals.
+  const totalOwe = counterparties.reduce((s, c) => s + (c.net > 0 ? c.net : 0), 0);
+  const totalReceive = counterparties.reduce((s, c) => s + (c.net < 0 ? -c.net : 0), 0);
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
   // Show skeletons rather than a misleading ₹0 while data is still arriving.
@@ -321,19 +326,28 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Balances by person, netted across groups. Read-only: settling always
-            happens inside a group. */}
+        {/* Balances by person, netted across groups plus direct payments.
+            Group rows below stay group-only; direct lives here and in Reports. */}
         {peopleToShow.length > 0 && (
           <section className="mt-6">
             <div className="flex items-center justify-between mb-1">
               <h2 className="text-[20px] font-bold text-[var(--text-primary)]">By person</h2>
             </div>
             <p className="text-[13px] text-[var(--text-tertiary)] mb-3">
-              Balances netted across every group you share. Tap for the full statement.
+              Balances netted across every group you share, plus direct payments. Tap for the full statement.
             </p>
             <div className="space-y-2.5">
               {peopleToShow.map((person) => {
                 const iOweNet = !isSettled(person.net) && person.net > 0;
+                const hasDirect = !isSettled(person.directNet || 0);
+                const sub =
+                  person.groups.length > 0
+                    ? person.groups.map((g) => g.groupName).join(" · ") +
+                      (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
+                    : person.sharedGroupCount > 0
+                    ? `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}` +
+                      (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
+                    : "Direct payment";
                 return (
                   <button
                     key={person.uid}
@@ -356,9 +370,7 @@ export default function Home() {
                         {person.displayName}
                       </p>
                       <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                        {person.groups.length > 0
-                          ? person.groups.map((g) => g.groupName).join(" · ")
-                          : `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}`}
+                        {sub}
                       </p>
                     </div>
                     <div className="text-right shrink-0">

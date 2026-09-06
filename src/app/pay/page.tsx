@@ -82,8 +82,8 @@ export default function PayPage() {
   const uid = user?.uid;
 
   const counterparties = useMemo(
-    () => (uid ? computeCounterpartyBalances(uid, datasets) : []),
-    [uid, datasets]
+    () => (uid ? computeCounterpartyBalances(uid, datasets, transfers) : []),
+    [uid, datasets, transfers]
   );
 
   const nameOf = useMemo(() => {
@@ -113,6 +113,8 @@ export default function PayPage() {
             ? lastTransfer.fromUid === uid
               ? `You sent ${formatCurrency(lastTransfer.amount)}`
               : `Sent you ${formatCurrency(lastTransfer.amount)}`
+            : c.sharedGroupCount === 0
+            ? "Direct payment"
             : c.sharedGroupCount === 1
             ? "1 shared group"
             : `${c.sharedGroupCount} shared groups`;
@@ -205,11 +207,11 @@ export default function PayPage() {
                   className="w-full text-left rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] p-3.5 tap-shrink"
                 >
                   <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                    {formatCurrency(t.amount)} from {nameOf(t.fromUid)} isn&rsquo;t counted
-                    anywhere
+                    {formatCurrency(t.amount)} from {nameOf(t.fromUid)} isn&rsquo;t in any
+                    group
                   </p>
                   <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                    You confirmed it. Attach it to a group to settle a balance.
+                    You confirmed it — it counts as personal. Attach it to a group to settle a group balance.
                   </p>
                 </button>
               ))}

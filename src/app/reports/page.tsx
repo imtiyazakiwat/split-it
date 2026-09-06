@@ -3,6 +3,7 @@ import { Suspense, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
+import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances, GroupDataset } from "@/lib/global-balance";
 import { summariseSpending } from "@/lib/spending";
 import { buildPairStatement, describeNet, PairStatement, StatementRow } from "@/lib/statement";
@@ -31,6 +32,16 @@ function rowWording(row: StatementRow, otherName: string): string {
       return row.informationalOnly ? `You sent a payment · ${row.status}` : "You settled up";
     case "payment-they-sent":
       return row.informationalOnly ? `${otherName} sent a payment · ${row.status}` : `${otherName} settled up`;
+    case "direct-i-sent":
+      if (row.informationalOnly) return `You sent a direct payment · ${row.status}`;
+      if ((row.allocatedAmount || 0) > 0)
+        return `Direct payment · ${formatCurrency(row.allocatedAmount || 0)} counted in groups`;
+      return "Direct payment · personal";
+    case "direct-they-sent":
+      if (row.informationalOnly) return `${otherName} sent a direct payment · ${row.status}`;
+      if ((row.allocatedAmount || 0) > 0)
+        return `Direct payment · ${formatCurrency(row.allocatedAmount || 0)} counted in groups`;
+      return "Direct payment · personal";
   }
 }
 
@@ -316,6 +327,7 @@ function ReportsInner() {
   const params = useSearchParams();
   const { user, loading } = useAuth();
   const { groups, datasets, allLoaded, groupsLoaded } = useGroupData();
+  const { transfers } = usePayments();
   const showToast = useToast();
   const personParam = params.get("person");
   const groupParam = params.get("group");
@@ -331,8 +343,8 @@ function ReportsInner() {
 
   const uid = user?.uid;
   const counterparties = useMemo(
-    () => (uid ? computeCounterpartyBalances(uid, datasets) : []),
-    [uid, datasets]
+    () => (uid ? computeCounterpartyBalances(uid, datasets, transfers) : []),
+    [uid, datasets, transfers]
   );
 
   if (loading || (!groupsLoaded && user)) {
@@ -343,7 +355,9 @@ function ReportsInner() {
 
   // ── Person list ────────────────────────────────────────────
   if (!personParam) {
-    const people = counterparties.filter((c) => c.sharedGroupCount > 0);
+    const people = counterparties.filter(
+      (c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0)
+    );
     return (
       <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
         <main className="flex-1 max-w-md w-full mx-auto px-4 pt-6 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
@@ -407,9 +421,14 @@ function ReportsInner() {
                     </p>
                     <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
                       {describeNet(-p.net, p.displayName, formatCurrency)}
+                      {!isSettled(p.directNet || 0)
+                        ? ` (incl. ${formatCurrency(Math.abs(p.directNet))} direct)`
+                        : ""}
                     </p>
                     <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                      {p.sharedGroupCount} shared group{p.sharedGroupCount !== 1 ? "s" : ""}
+                      {p.sharedGroupCount > 0
+                        ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
+                        : "Direct payment"}
                     </p>
                   </div>
                   <span className="text-[var(--text-quaternary)] text-lg shrink-0">›</span>
@@ -444,7 +463,10 @@ function ReportsInner() {
     expenses.push(...d.expenses);
     settlements.push(...d.settlements);
   }
-  const stmt = buildPairStatement(meUid, personParam, expenses, settlements);
+  // Direct payments belong to no group: show them when viewing all shared
+  // groups, hide them when scoped to one group.
+  const scopedTransfers = effectiveScope === ALL ? transfers : [];
+  const stmt = buildPairStatement(meUid, personParam, expenses, settlements, scopedTransfers);
 
   async function handleDownload() {
     const rows: (string | number)[][] = [
@@ -505,6 +527,15 @@ function ReportsInner() {
             You covered {formatCurrency(stmt.iCoveredForThem)} of {otherName}&rsquo;s share.{" "}
             {otherName} covered {formatCurrency(stmt.theyCoveredForMe)} of yours.
           </p>
+          {!isSettled(stmt.directNet || 0) && (
+            <p className="text-[13px] text-[var(--text-secondary)] mt-1">
+              {formatCurrency(Math.abs(stmt.directNet))} is direct (not in any group)
+              {stmt.directNet > 0
+                ? ` ${otherName} owes you`
+                : ` you owe ${otherName}`}
+              .
+            </p>
+          )}
           {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
             <p className="text-[13px] text-[var(--warning)] mt-2">
               A payment is still waiting to be approved, so it isn&rsquo;t counted above.
