@@ -358,7 +358,7 @@ export default function AddExpenseModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Add a note (e.g. Lunch at the beach)"
-              className="w-full rounded-[var(--radius-inner)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
+              className="w-full rounded-[var(--radius-inner)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
             />
           </div>
 

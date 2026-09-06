@@ -32,6 +32,19 @@ export default function PwaBootstrap() {
     }
   }, []);
 
+  // Tracks the visible viewport (keyboard, Safari chrome) into --app-height so
+  // dvh-backed sheets size to what's actually on screen. Read-only: no layout
+  // writes besides the single CSS variable.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () =>
+      document.documentElement.style.setProperty("--app-height", `${vv.height}px`);
+    sync();
+    vv.addEventListener("resize", sync);
+    return () => vv.removeEventListener("resize", sync);
+  }, []);
+
   const { mounted, isIOS, isStandalone, dismissed } = state;
 
   if (!mounted || isStandalone || dismissed || !isIOS) return null;

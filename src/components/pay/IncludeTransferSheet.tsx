@@ -245,7 +245,7 @@ export default function IncludeTransferSheet({
                               setAmounts((prev) => ({ ...prev, [o.groupId]: e.target.value }))
                             }
                             aria-label={`Amount to count in ${o.groupName}`}
-                            className="w-24 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[14px] font-semibold text-right text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+                            className="w-24 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[16px] font-semibold text-right text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
                           />
                         </div>
                       )}

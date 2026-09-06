@@ -273,7 +273,7 @@ export default function SendMoneyModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="For Friday's dinner…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
           />
         </div>
 

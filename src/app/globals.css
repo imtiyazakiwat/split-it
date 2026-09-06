@@ -159,6 +159,16 @@
 html {
   background: var(--background);
   color-scheme: light dark;
+  /* Full-height chain for dvh-backed sheets; env() needs viewport-fit=cover
+     (set in layout viewport) to resolve to non-zero on iOS. */
+  height: 100%;
+}
+
+/* Synced from window.visualViewport by PwaBootstrap. Tracks the keyboard and
+   Safari chrome so fixed overlays (sheets, chat) size to what's actually
+   visible instead of what 100vh claims. Falls back to dynamic viewport. */
+:root {
+  --app-height: 100dvh;
 }
 
 body {
@@ -169,7 +179,22 @@ body {
     var(--font-sans), "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Stop rubber-band chaining the page behind sheets/modals on iOS. Inner
+     scrollers keep their own momentum via .scroll-momentum. */
+  overscroll-behavior-y: none;
 }
+
+/* iOS tap snappiness: no double-tap-zoom wait on controls. Inputs are
+   excluded so pinch-zoom and text selection keep working. */
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+/* iOS form controls are sized at 16px+ at the component level (auto-zoom
+   starts below 16px). No global guard here on purpose: one would also shrink
+   the large amount heroes. Keep every input/select/textarea ≥16px. */
 
 /* ==========================================================================
    Keyboard focus — a single, visible ring across every interactive control.
@@ -234,6 +259,15 @@ textarea:focus-visible,
   .glass-strong {
     background: var(--glass-bg-strong);
   }
+}
+
+/* Viewport-stable sheet cap: 88vh jumps when Safari chrome shows/hides;
+   dvh tracks it, and --app-height (visualViewport-synced) tracks the keyboard
+   too. Order matters — capable engines use the last declaration they parse. */
+.sheet-viewport {
+  max-height: 88vh;
+  max-height: 88dvh;
+  max-height: calc(var(--app-height, 100dvh) * 0.88);
 }
 
 /* Specular highlight sweep used on primary glass buttons/pills */
@@ -378,6 +412,12 @@ textarea:focus-visible,
   animation: splash-shimmer 1.6s ease-in-out 0.4s infinite;
 }
 
+/* Class version of the loader dots (was inline style, which bypassed the
+   reduced-motion guard below). Stagger via inline animation-delay only. */
+.animate-splash-dot {
+  animation: splash-dot 1.2s ease-in-out infinite;
+}
+
 /* Duration must match FADE_MS in components/SplashGate.tsx: the gate unmounts on
    a timer, so a longer animation here would be cut off mid-fade. */
 .animate-splash-out {
@@ -387,6 +427,7 @@ textarea:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   .animate-splash-logo,
   .animate-splash-shimmer,
+  .animate-splash-dot,
   .animate-splash-out {
     animation: none;
   }

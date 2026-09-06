@@ -36,7 +36,7 @@ export default function GlassModal({
   }, [onClose]);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <div
         className="absolute inset-0 bg-black/50 animate-fade-in"
         onClick={onClose}
@@ -46,7 +46,7 @@ export default function GlassModal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="sheet relative w-full sm:max-w-md rounded-t-[var(--radius-xl)] sm:rounded-[var(--radius-xl)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[88vh] overflow-y-auto scroll-momentum animate-modal-in"
+        className="sheet sheet-viewport relative w-full sm:max-w-md rounded-t-[var(--radius-xl)] sm:rounded-[var(--radius-xl)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto scroll-momentum animate-modal-in"
       >
         <div className="mx-auto mb-3 h-1.5 w-9 rounded-full bg-[var(--border-subtle)] sm:hidden" />
         <div className="flex items-center justify-between mb-4">

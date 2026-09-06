@@ -326,7 +326,7 @@ export default function ActivityPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tab === "settlements" ? "Search payments…" : "Search expenses, people…"}
-                className="flex-1 bg-transparent outline-none text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                className="flex-1 bg-transparent outline-none text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
               />
               {search && (
                 <button
