@@ -335,6 +335,7 @@ export default function PayPage() {
               value={pickerQuery}
               onChange={(e) => setPickerQuery(e.target.value)}
               placeholder="Search people"
+              aria-label="Search people"
               className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
             {pickerRows.length === 0 ? (

@@ -22,6 +22,7 @@ import {
   threadIdFor,
 } from "@/lib/chat";
 import { cancelTransfer, reconcileTransferAllocations } from "@/lib/transfers";
+import { hapticTap } from "@/lib/haptics";
 import { buildConversation, ConversationItem } from "@/lib/conversation";
 import { ChatMessage, DirectTransfer } from "@/lib/types";
 import { getUserProfile } from "@/lib/firestore";
@@ -505,6 +506,7 @@ function ChatPageInner() {
     setDraft("");
     try {
       await sendMessage(currentUser.uid, otherUid, text);
+      hapticTap();
     } catch (err) {
       setDraft(text);
       showToast({

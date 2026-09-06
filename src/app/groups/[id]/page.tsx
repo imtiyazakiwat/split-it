@@ -36,6 +36,7 @@ import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
+import { hapticSuccess } from "@/lib/haptics";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 import AddExpenseModal, { NewExpenseInput } from "@/components/AddExpenseModal";
 import SettleUpModal from "@/components/SettleUpModal";
@@ -485,6 +486,7 @@ function GroupPageInner() {
         category: input.category,
       });
       showToast({ message: `${categoryMeta(input.category).emoji} Expense added · ${formatCurrency(input.amount)}` });
+      hapticSuccess();
     } catch {
       showToast({ message: "Couldn't add expense — tap + to retry." });
     } finally {
@@ -532,6 +534,7 @@ function GroupPageInner() {
         currentUser.uid
       );
       showToast({ message: "Expense updated" });
+      hapticSuccess();
     } catch (err) {
       showToast({
         message: err instanceof Error ? `Couldn't save: ${err.message}` : "Couldn't save the changes",

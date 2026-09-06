@@ -18,6 +18,7 @@ import {
   declineTransfer,
   includeTransferInGroups,
 } from "@/lib/transfers";
+import { hapticSuccess } from "@/lib/haptics";
 import GlassModal from "@/components/ui/GlassModal";
 import { useToast } from "@/components/ui/Toast";
 
@@ -125,6 +126,7 @@ export default function IncludeTransferSheet({
     setError("");
     try {
       await action();
+      hapticSuccess();
       showToast({ message });
       onClose();
     } catch (err) {

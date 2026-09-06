@@ -7,6 +7,7 @@ import { uploadMultipleReceipts } from "@/lib/storage";
 import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
+import { hapticSuccess } from "@/lib/haptics";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 import { useSheetLayer } from "@/lib/sheet-layer";
 import { useOverlayBehavior } from "@/lib/overlay-stack";
@@ -153,6 +154,7 @@ export default function AddExpenseModal({
         category,
       });
       showToast({ message: `${categoryEmoji} Expense added · ${formatCurrency(parsedAmount)}` });
+      hapticSuccess();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add expense");

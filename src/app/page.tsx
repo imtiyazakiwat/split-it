@@ -435,6 +435,7 @@ export default function Home() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search groups..."
+              aria-label="Search groups"
               className="flex-1 bg-transparent outline-none text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
             />
           </div>

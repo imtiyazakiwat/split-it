@@ -21,6 +21,7 @@ import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import { hapticSuccess } from "@/lib/haptics";
 
 type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
 
@@ -351,6 +352,7 @@ export default function NotificationsPage() {
     setBusyId(s.id);
     try {
       await updateSettlementStatus(groupId, s.id, status);
+      hapticSuccess();
       showToast({
         message:
           status === "approved"

@@ -6,6 +6,7 @@ import { addSettlementRequest, resolveUpiId } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
 import { roundMoney } from "@/lib/money";
+import { hapticSuccess } from "@/lib/haptics";
 import {
   UPI_APPS,
   UpiApp,
@@ -168,6 +169,7 @@ export default function SettleUpModal({
         expenseIds: expenseIds.length > 0 ? expenseIds : undefined,
       });
       showToast({ message: `Settlement request sent to ${toName}` });
+      hapticSuccess();
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send settlement request");
