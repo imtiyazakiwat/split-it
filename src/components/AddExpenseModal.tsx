@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Expense, Group } from "@/lib/types";
 import { addExpense } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
@@ -63,6 +63,7 @@ export default function AddExpenseModal({
   expense?: Expense | null;
 }) {
   useSheetLayer();
+  const formRef = useRef<HTMLFormElement>(null);
   const isEdit = !!expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
   const [category, setCategory] = useState(expense?.category || "meal");
@@ -157,19 +158,35 @@ export default function AddExpenseModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-[var(--background)] flex flex-col animate-modal-in">
-      <form onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-36">
-          {/* Header */}
+      <form ref={formRef} onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(2.5rem,env(safe-area-inset-bottom))]">
+          {/* Header: the commit lives in the nav bar (Cancel leading, Save
+              trailing), never pinned to the bottom edge — the tab bar owns
+              that edge, and a second action bar there covers content rows. */}
           <div className="flex items-center justify-between pt-2">
-            <button type="button" onClick={onClose} aria-label="Close" className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-h-[44px] px-2 -ml-2 text-[17px] text-[var(--brand)] tap-shrink"
+            >
+              Cancel
             </button>
             <div className="text-center">
               <p className="text-[18px] font-bold text-[var(--text-primary)]">{isEdit ? "Edit Expense" : "Add Expense"}</p>
               <p className="text-[13px] text-[var(--text-tertiary)]">{group.name}</p>
             </div>
-            <div className="w-11 h-11" />
+            <button
+              type="button"
+              onClick={() => formRef.current?.requestSubmit()}
+              disabled={busy}
+              className="min-h-[44px] px-2 -mr-2 text-[17px] font-semibold text-[var(--brand)] tap-shrink disabled:opacity-40"
+            >
+              {busy ? "Saving…" : isEdit ? "Save" : "Add"}
+            </button>
           </div>
+          {/* Keyboard submission now that the visible commit sits outside any
+              implicit form flow. */}
+          <button type="submit" hidden aria-hidden tabIndex={-1} />
 
           {/* Amount hero */}
           <div className="relative mt-5">
@@ -387,17 +404,6 @@ export default function AddExpenseModal({
           </div>
 
           {error && <p className="text-sm text-[var(--danger)] mt-4">{error}</p>}
-        </div>
-
-        {/* Sticky save bar */}
-        <div className="max-w-md w-full mx-auto px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full flex items-center justify-center gap-2 rounded-full bg-[var(--brand-solid)] text-white py-4 text-[16px] font-semibold shadow-[0_12px_30px_-8px_rgba(79,70,229,0.6)] tap-shrink disabled:opacity-50"
-          >
-            {busy ? "Saving…" : isEdit ? "Save changes" : "Save Expense"}
-          </button>
         </div>
       </form>
     </div>

@@ -109,21 +109,42 @@ export default function ForwardModal({
             to someone you owe.
           </p>
 
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
+          {/* Option rows with checkmarks, not a <select>: recognition over
+              recall — every creditor and what you owe them stays visible, so
+              nothing has to be remembered to choose. */}
+          <div role="radiogroup" aria-label="Forward to">
+            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1.5">
               Forward to
-            </label>
-            <select
-              value={targetUid}
-              onChange={(e) => handleTargetChange(e.target.value)}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-            >
-              {creditors.map((c) => (
-                <option key={c.uid} value={c.uid}>
-                  {c.name} (you owe {formatCurrency(c.amount)})
-                </option>
-              ))}
-            </select>
+            </p>
+            <div className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] overflow-hidden">
+              {creditors.map((c) => {
+                const selected = c.uid === targetUid;
+                return (
+                  <button
+                    key={c.uid}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => handleTargetChange(c.uid)}
+                    className="w-full flex items-center gap-3 px-3.5 py-3 text-left tap-shrink min-h-[44px]"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[16px] text-[var(--text-primary)] truncate">
+                        {c.name}
+                      </span>
+                      <span className="block text-[13px] text-[var(--text-tertiary)]">
+                        you owe {formatCurrency(c.amount)}
+                      </span>
+                    </span>
+                    {selected && (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="m5 12.5 4.5 4.5L19 7.5" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div>

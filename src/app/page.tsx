@@ -497,7 +497,7 @@ export default function Home() {
         )}
 
         {/* Group list */}
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-3 stagger">
           {sortedRows.length === 0 && (
             <p className="text-center text-[var(--text-tertiary)] text-sm py-14">{emptyMessage}</p>
           )}

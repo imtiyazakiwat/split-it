@@ -262,7 +262,7 @@ export default function PayPage() {
             Nobody matches that search.
           </p>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 stagger">
             {rows.map((r) => {
               const iOwe = !isSettled(r.net) && r.net > 0;
               const theyOwe = !isSettled(r.net) && r.net < 0;

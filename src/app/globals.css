@@ -81,6 +81,17 @@
   /* Card radii — consolidated (inner 18 / card 22 / xl 28 = --radius-xl) */
   --radius-inner: 18px;
   --radius-card: 22px;
+
+  /* ── Motion tokens. Every animation in the app derives from these so timing
+     feels like one system, and Reduce Motion collapses them in one place.
+     Springs communicate travel (push/pop/sheets); fades communicate
+     appearance (tab switches, toasts, banners). ── */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-instant: 150ms;
+  --dur-fast: 250ms;
+  --dur-normal: 300ms;
+  --dur-route: 380ms;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -360,9 +371,10 @@ textarea:focus-visible,
   }
 }
 
-/* Press feedback matching iOS's springy scale-down on tap */
+/* Press feedback: instant scale + dim, never a colour change — the control
+   reacts the moment the finger lands, which is what makes it feel direct. */
 .tap-shrink {
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease;
+  transition: transform var(--dur-instant) cubic-bezier(0.34, 1.56, 0.64, 1), opacity var(--dur-instant) ease;
 }
 .tap-shrink:active {
   transform: scale(0.96);
@@ -386,7 +398,7 @@ textarea:focus-visible,
 }
 
 .animate-modal-in {
-  animation: glass-modal-in 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  animation: glass-modal-in var(--dur-normal) var(--ease-spring);
 }
 
 @keyframes glass-fade-in {
@@ -414,38 +426,102 @@ textarea:focus-visible,
   }
 }
 .animate-toast-in {
-  animation: toast-in 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+  animation: toast-in var(--dur-fast) var(--ease-spring);
 }
 
-/* Directional push/pop for routed content. Entering layer only (no exiting
-   snapshot), so the travel is short — a full-width slide with nothing behind
-   it would read as a pan, not a push. */
+/* Directional push/pop for routed content. Both layers stay mounted through
+   the transition — that continuity is what makes a push read as travel rather
+   than a pan: incoming full travel, outgoing a short parallax plus dim. */
 @keyframes page-push-in {
   from {
     opacity: 0.4;
-    transform: translateX(48px);
+    transform: translateX(100%);
   }
   to {
     opacity: 1;
     transform: translateX(0);
+  }
+}
+@keyframes page-push-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0.55;
+    transform: translateX(-32%);
   }
 }
 @keyframes page-pop-in {
   from {
-    opacity: 0.4;
-    transform: translateX(-48px);
+    opacity: 0.55;
+    transform: translateX(-32%);
   }
   to {
     opacity: 1;
     transform: translateX(0);
   }
 }
-.page-push {
-  animation: page-push-in 0.3s cubic-bezier(0.32, 0.72, 0, 1) backwards;
+@keyframes page-pop-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0.4;
+    transform: translateX(100%);
+  }
 }
-.page-pop {
-  animation: page-pop-in 0.3s cubic-bezier(0.32, 0.72, 0, 1) backwards;
+@keyframes page-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
 }
+.route-stage {
+  position: relative;
+}
+.route-incoming {
+  position: relative;
+  z-index: 1;
+}
+.route-outgoing {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.page-push-in {
+  animation: page-push-in var(--dur-route) var(--ease-spring) backwards;
+}
+.page-push-out {
+  animation: page-push-out var(--dur-route) var(--ease-spring) both;
+}
+.page-pop-in {
+  animation: page-pop-in var(--dur-route) var(--ease-spring) backwards;
+}
+.page-pop-out {
+  animation: page-pop-out var(--dur-route) var(--ease-spring) both;
+}
+.page-fade-out {
+  animation: page-fade-out var(--dur-fast) ease-out both;
+}
+
+/* Staggered list entrance: rows arrive in sequence so a long list reads as
+   flowing in, capped at 7 steps — beyond that everything just appears.
+   Pure CSS, no measuring, collapses under Reduce Motion with the rest. */
+.stagger > * {
+  animation: glass-fade-in var(--dur-fast) var(--ease-out) backwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 30ms; }
+.stagger > *:nth-child(3) { animation-delay: 60ms; }
+.stagger > *:nth-child(4) { animation-delay: 90ms; }
+.stagger > *:nth-child(5) { animation-delay: 120ms; }
+.stagger > *:nth-child(6) { animation-delay: 150ms; }
+.stagger > *:nth-child(7) { animation-delay: 180ms; }
 
 /* ==========================================================================
    Skeleton loaders — shaped placeholders that match final layout, so content
@@ -561,14 +637,21 @@ textarea:focus-visible,
   animation: page-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-/* Honor reduced-motion across every animated surface. */
+/* Honor reduced-motion across every animated surface: all travel becomes a
+   cross-fade, staggering disappears. */
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
-  .page-push,
-  .page-pop,
+  .page-push-in,
+  .page-push-out,
+  .page-pop-in,
+  .page-pop-out,
+  .page-fade-out,
   .animate-modal-in,
   .animate-toast-in,
   .animate-fade-in {
+    animation: glass-fade-in var(--dur-fast) ease-out !important;
+  }
+  .stagger > * {
     animation: none !important;
   }
   .tap-shrink {

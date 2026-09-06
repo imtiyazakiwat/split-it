@@ -6,44 +6,69 @@ import { ReactNode, useLayoutEffect, useEffect, useRef, useState } from "react";
 /** Top-level destinations: switching between them cross-fades (no push). */
 const TAB_ROOTS = new Set(["/", "/pay", "/activity", "/reports", "/settings"]);
 
+/** How long the outgoing layer stays mounted. Must exceed --dur-route. */
+const EXIT_MS = 450;
+
+type Direction = "push" | "pop" | "fade";
+
 /**
- * iOS-style routed transitions. Deeper routes slide in from the trailing
- * edge (push), going back slides from the leading edge (pop), tab switches
- * cross-fade. A left-edge drag also pops, like the system swipe-back — gated
- * to touches starting within 20px of the edge, moving mostly horizontally,
- * never while typing or while a sheet is open.
+ * iOS-style routed transitions with both views mounted through the move:
+ * incoming travels full width while outgoing parallaxes to -32% and dims —
+ * that continuity is what reads as a push rather than a pan. Tab switches
+ * cross-fade (same depth, no hierarchy). A left-edge drag also pops, like the
+ * system swipe-back — gated to touches starting within 20px of the edge,
+ * moving mostly horizontally, never while typing or while a sheet is open.
  */
 export default function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const stackRef = useRef<string[]>([]);
-  const prevRef = useRef(pathname);
-  const [direction, setDirection] = useState<"push" | "pop" | "fade">("fade");
+  const prevChildrenRef = useRef<ReactNode>(children);
+  const [direction, setDirection] = useState<Direction>("fade");
+  const [outgoing, setOutgoing] = useState<{ key: string; node: ReactNode } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gestureRef = useRef<{ startX: number; startY: number; active: boolean }>({
     startX: 0,
     startY: 0,
     active: false,
   });
 
+  const prevRef = useRef(pathname);
   // Layout effect so the correct animation class is set before paint — one
   // animation per navigation, never a flash of the wrong direction.
   useLayoutEffect(() => {
     const prev = prevRef.current;
-    if (prev === pathname) return;
+    if (prev === pathname) {
+      prevChildrenRef.current = children;
+      return;
+    }
     const stack = stackRef.current;
+    let dir: Direction;
     if (stack.length >= 2 && stack[stack.length - 2] === pathname) {
       stack.pop();
-      setDirection("pop");
+      dir = "pop";
     } else {
       if (stack[stack.length - 1] !== prev) stack.push(prev);
       stack.push(pathname);
       if (stack.length > 20) stack.splice(0, stack.length - 20);
       // Tab-to-tab switches never slide: same depth, no hierarchy.
-      setDirection(TAB_ROOTS.has(prev) && TAB_ROOTS.has(pathname) ? "fade" : "push");
+      dir = TAB_ROOTS.has(prev) && TAB_ROOTS.has(pathname) ? "fade" : "push";
     }
+    // Hold the departing view for the outgoing half of the move. Effects in
+    // the old tree stay alive for EXIT_MS — reads, not writes, so nothing
+    // fires twice that matters.
+    setOutgoing({ key: prev, node: prevChildrenRef.current });
+    prevChildrenRef.current = children;
     prevRef.current = pathname;
-  }, [pathname]);
+    setDirection(dir);
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    exitTimer.current = setTimeout(() => setOutgoing(null), EXIT_MS);
+  }, [pathname, children]);
+
+  useEffect(() => () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+  }, []);
 
   // Interactive edge-swipe back.
   useEffect(() => {
@@ -112,11 +137,20 @@ export default function PageTransition({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
-  const cls =
-    direction === "push" ? "page-push" : direction === "pop" ? "page-pop" : "page-enter";
+  const incomingCls =
+    direction === "push" ? "page-push-in" : direction === "pop" ? "page-pop-in" : "page-enter";
+  const outgoingCls =
+    direction === "push" ? "page-push-out" : direction === "pop" ? "page-pop-out" : "page-fade-out";
   return (
-    <div key={pathname} ref={wrapRef} className={`${cls} flex-1 flex flex-col min-h-full`}>
-      {children}
+    <div key={pathname} ref={wrapRef} className="route-stage flex-1 flex flex-col min-h-full">
+      <div className={`route-incoming flex-1 flex flex-col min-h-full ${incomingCls}`}>
+        {children}
+      </div>
+      {outgoing && (
+        <div key={outgoing.key} aria-hidden className={`route-outgoing ${outgoingCls}`}>
+          {outgoing.node}
+        </div>
+      )}
     </div>
   );
 }
