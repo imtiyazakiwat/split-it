@@ -28,8 +28,8 @@ import { activateFileInputOnKey } from "@/lib/keyboard";
  * The app doesn't move money — UPI, cash or a bank app does. So this screen has
  * two halves: hand off to a UPI app to actually pay, then record that you paid.
  * Recording is what the other person sees, and only they can decide whether it
- * settles a group balance (see IncludeTransferSheet). Nothing is written to any
- * ledger here, which is why the copy avoids promising that it will be.
+ * settles a group balance (see IncludeTransferSheet). Until they book it into
+ * a group it counts as a personal direct balance once they confirm it.
  */
 export default function SendMoneyModal({
   fromUid,
@@ -303,8 +303,8 @@ export default function SendMoneyModal({
 
         <p className="text-[13px] text-[var(--label-tertiary)]">
           This tells {toName} you sent the money. They confirm it, and they choose
-          whether it settles a group balance — so nothing changes in your groups
-          until they do.
+          whether it settles a group balance — until they book it into a group
+          it shows as a personal balance between you two.
         </p>
 
         {error && <p className="text-sm text-[var(--danger)]">{error}</p>}

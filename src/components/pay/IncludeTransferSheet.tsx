@@ -26,9 +26,8 @@ import { useToast } from "@/components/ui/Toast";
  *
  * The choice matters, which is why it's an explicit screen rather than a silent
  * default. Booking the payment into a group settles a real balance there;
- * confirming it without a group records that the money arrived and leaves every
- * balance alone. Guessing on the user's behalf would either leave a debt looking
- * unpaid or clear one that was never owed.
+ * confirming it without a group keeps it as a personal balance between the two
+ * of them (visible in Pay, Home and Reports) until it is attached later.
  *
  * One payment usually isn't one group's problem. It can cover a trip *and* the
  * rent, and it can be larger than either. So the receiver picks any number of
@@ -197,8 +196,8 @@ export default function IncludeTransferSheet({
           {settleable.length === 0 ? (
             <p className="text-[13px] text-[var(--label-tertiary)]">
               {fromName} doesn&rsquo;t owe you anything in the groups you share, so
-              there&rsquo;s no balance for this to settle. Confirm it below to record that
-              the money arrived.
+              there&rsquo;s no group balance for this to settle. Confirm it below —
+              it will count as a personal balance between you two.
             </p>
           ) : (
             <div className="space-y-1.5">
@@ -292,7 +291,7 @@ export default function IncludeTransferSheet({
             {!isSettled(plan.leftover) && (
               <p className="text-[12px] text-[var(--label-tertiary)] pt-1">
                 {formatCurrency(plan.leftover)} isn&rsquo;t going into any group. It stays
-                recorded as money you received, and you can assign it later from this
+                as a personal balance between you two, and you can assign it later from this
                 chat if a new balance comes up.
               </p>
             )}
@@ -328,7 +327,7 @@ export default function IncludeTransferSheet({
               run(
                 "ack",
                 () => acknowledgeTransfer(transfer),
-                "Payment confirmed — no group balance changed"
+                "Payment confirmed as personal balance"
               )
             }
             className="w-full rounded-full bg-[var(--fill)] px-4 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink disabled:opacity-50"

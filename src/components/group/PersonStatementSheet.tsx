@@ -25,6 +25,14 @@ function rowWords(row: StatementRow, otherName: string): { text: string; tone: "
       return row.informationalOnly
         ? { text: `${otherName} sent · ${row.status}`, tone: "flat" }
         : { text: `${otherName} settled`, tone: "owe" };
+    case "direct-i-sent":
+      return row.informationalOnly
+        ? { text: `You sent direct · ${row.status}`, tone: "flat" }
+        : { text: "You sent direct", tone: "get" };
+    case "direct-they-sent":
+      return row.informationalOnly
+        ? { text: `${otherName} sent direct · ${row.status}`, tone: "flat" }
+        : { text: `${otherName} sent direct`, tone: "owe" };
   }
 }
 

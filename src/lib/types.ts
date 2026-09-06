@@ -161,9 +161,12 @@ export type TransferStatus = "pending" | "accepted" | "declined" | "cancelled";
  * Nothing moves in any group until the receiver decides what it was:
  *
  *   declined  — "I never got this."
- *   accepted  — received, but purely personal: no group balance changes.
- *   accepted + allocations — received *and* split across one or more group
+ *   accepted  — received and counted as a personal (direct) balance. If it is
+ *               also booked into groups via `allocations`, only the unallocated
+ *               remainder stays personal — booked legs live in those groups.
+ *   accepted + allocations — received, split across one or more group
  *               ledgers, settling what the sender owed the receiver in each.
+ *               The remainder (if any) stays as a personal balance.
  *
  * Keeping the decision with the receiver is the same trust rule the group
  * settlement flow uses: the person who benefits from a balance moving is never
