@@ -1,7 +1,8 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useRef } from "react";
 import { useSheetLayer } from "@/lib/sheet-layer";
+import { useOverlayBehavior } from "@/lib/overlay-stack";
 
 /**
  * Bottom sheet on phones, centred dialog on wider screens.
@@ -29,11 +30,11 @@ export default function GlassModal({
 }) {
   useSheetLayer();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Topmost-owns-Escape, focus trap, and return-focus live in the shared
+  // overlay stack — sibling document listeners can't arbitrate this with
+  // stopPropagation, so ownership is checked at event time.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useOverlayBehavior(dialogRef, onClose);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
@@ -43,6 +44,7 @@ export default function GlassModal({
         aria-hidden
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}

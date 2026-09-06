@@ -9,6 +9,7 @@ import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 import { useSheetLayer } from "@/lib/sheet-layer";
+import { useOverlayBehavior } from "@/lib/overlay-stack";
 
 function CategoryIcon({ id, active }: { id: string; active: boolean }) {
   const stroke = active ? "var(--brand)" : "var(--text-secondary)";
@@ -64,6 +65,10 @@ export default function AddExpenseModal({
 }) {
   useSheetLayer();
   const formRef = useRef<HTMLFormElement>(null);
+  // Fullscreen form is an overlay root too: same topmost-Escape, trap and
+  // return-focus contract as GlassModal (see overlay-stack).
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useOverlayBehavior(dialogRef, onClose);
   const isEdit = !!expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
   const [category, setCategory] = useState(expense?.category || "meal");
@@ -157,7 +162,13 @@ export default function AddExpenseModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-[var(--background)] flex flex-col animate-modal-in">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-label={isEdit ? "Edit Expense" : "Add Expense"}
+      className="fixed inset-0 z-50 bg-[var(--background)] flex flex-col animate-modal-in"
+    >
       <form ref={formRef} onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(2.5rem,env(safe-area-inset-bottom))]">
           {/* Header: the commit lives in the nav bar (Cancel leading, Save
