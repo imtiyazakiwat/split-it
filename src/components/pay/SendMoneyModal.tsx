@@ -166,7 +166,7 @@ export default function SendMoneyModal({
         <div>
           <label
             htmlFor="send-amount"
-            className="text-sm font-medium text-[var(--label-secondary)] block mb-1"
+            className="text-sm font-medium text-[var(--text-secondary)] block mb-1"
           >
             Amount
           </label>
@@ -180,14 +180,14 @@ export default function SendMoneyModal({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[22px] font-semibold text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[22px] font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
           {contextLine && (
-            <p className="text-[12px] text-[var(--label-tertiary)] mt-1">{contextLine}</p>
+            <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{contextLine}</p>
           )}
           {overpayBy > 0 && (
             <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-              <p className="text-[13px] text-[var(--label-secondary)]">
+              <p className="text-[13px] text-[var(--text-secondary)]">
                 That&rsquo;s {formatCurrency(overpayBy)} more than the{" "}
                 {formatCurrency(suggestedAmount)} you owe. After this,{" "}
                 <span className="font-medium">
@@ -208,7 +208,7 @@ export default function SendMoneyModal({
 
         {upiUsable ? (
           <div>
-            <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
               Pay with UPI
             </p>
             <div className="grid grid-cols-2 gap-2">
@@ -217,7 +217,7 @@ export default function SendMoneyModal({
                   key={app.id}
                   type="button"
                   onClick={() => handlePayWithApp(app)}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink"
+                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
                 >
                   <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
                   <span className="truncate">{app.label}</span>
@@ -227,18 +227,18 @@ export default function SendMoneyModal({
             <button
               type="button"
               onClick={handleCopyUpi}
-              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--label-secondary)] tap-shrink"
+              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] tap-shrink"
             >
               Copy UPI ID · {resolvedUpiId}
             </button>
             {!canHandOff ? (
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
+              <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
                 UPI apps can only be opened from a phone. On desktop, copy{" "}
                 {toName}&rsquo;s UPI ID and pay from your bank app.
               </p>
             ) : (
               handedOff && (
-                <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
+                <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
                   Nothing opened? Copy the UPI ID above and pay from your bank app.
                 </p>
               )
@@ -246,14 +246,14 @@ export default function SendMoneyModal({
           </div>
         ) : resolvedUpiId ? (
           <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-            <p className="text-[13px] text-[var(--label-secondary)]">
+            <p className="text-[13px] text-[var(--text-secondary)]">
               {toName}&rsquo;s saved UPI ID (
               <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
               handle@bank address, so UPI apps can&rsquo;t open it.
             </p>
           </div>
         ) : (
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             {upiChecked
               ? `${toName} hasn't added a UPI ID. Pay them however you like (cash, UPI, bank transfer) and record it here.`
               : "Checking for a UPI ID…"}
@@ -263,7 +263,7 @@ export default function SendMoneyModal({
         <div>
           <label
             htmlFor="send-note"
-            className="text-sm font-medium text-[var(--label-secondary)] block mb-1"
+            className="text-sm font-medium text-[var(--text-secondary)] block mb-1"
           >
             Note (optional)
           </label>
@@ -273,12 +273,12 @@ export default function SendMoneyModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="For Friday's dinner…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
         </div>
 
         <div>
-          <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+          <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
             Payment screenshot (optional)
           </p>
           <label
@@ -286,7 +286,7 @@ export default function SendMoneyModal({
             tabIndex={0}
             aria-label="Add a payment screenshot"
             onKeyDown={activateFileInputOnKey}
-            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink"
+            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-tertiary)] tap-shrink"
           >
             {receiptFiles.length > 0
               ? `${receiptFiles.length} file(s) selected — tap to add more`
@@ -301,7 +301,7 @@ export default function SendMoneyModal({
           </label>
         </div>
 
-        <p className="text-[13px] text-[var(--label-tertiary)]">
+        <p className="text-[13px] text-[var(--text-tertiary)]">
           This tells {toName} you sent the money. They confirm it, and they choose
           whether it settles a group balance — until they book it into a group
           it shows as a personal balance between you two.

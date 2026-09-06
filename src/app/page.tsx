@@ -211,6 +211,34 @@ export default function Home() {
         <div className="flex items-start justify-between pt-3">
           <Logo className="h-9 w-auto" />
           <div className="flex items-center gap-2.5">
+            <div className="relative">
+              <button
+                onClick={() => setShowAdd((v) => !v)}
+                aria-label="Add"
+                aria-expanded={showAdd}
+                className="w-11 h-11 rounded-2xl bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
+              >
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              {showAdd && (
+                <div className="absolute right-0 top-full mt-2 w-44 bg-[var(--surface)] rounded-2xl p-1.5 shadow-[var(--shadow-float)] border border-[var(--border-subtle)] animate-modal-in z-30">
+                  <button
+                    onClick={() => { setShowAdd(false); setShowCreate(true); setFormError(""); }}
+                    className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
+                  >
+                    + New Group
+                  </button>
+                  <button
+                    onClick={() => { setShowAdd(false); setShowJoin(true); setFormError(""); }}
+                    className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
+                  >
+                    Join Group
+                  </button>
+                </div>
+              )}
+            </div>
             <button
               onClick={() => router.push("/notifications")}
               aria-label={
@@ -407,7 +435,8 @@ export default function Home() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Search groups..."
-              className="flex-1 bg-transparent outline-none text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+              aria-label="Search groups"
+              className="flex-1 bg-transparent outline-none text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
             />
           </div>
         </div>
@@ -469,7 +498,7 @@ export default function Home() {
         )}
 
         {/* Group list */}
-        <div className="mt-3 space-y-3">
+        <div className="mt-3 space-y-3 stagger">
           {sortedRows.length === 0 && (
             <p className="text-center text-[var(--text-tertiary)] text-sm py-14">{emptyMessage}</p>
           )}
@@ -528,41 +557,8 @@ export default function Home() {
 
       {/* Click-away layer to dismiss the Add popover on outside tap */}
       {showAdd && (
-        <div className="fixed inset-0 z-30" onClick={() => setShowAdd(false)} aria-hidden />
+        <div className="fixed inset-0 z-20" onClick={() => setShowAdd(false)} aria-hidden />
       )}
-
-      {/* Floating Add — pinned bottom-right, clearing the tab bar */}
-      <div className="fab-layer fixed z-40 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
-        <div className="max-w-md mx-auto px-4 flex justify-end">
-          <div className="relative pointer-events-auto">
-            {showAdd && (
-              <div className="absolute right-0 bottom-full mb-3 w-44 bg-[var(--surface)] rounded-2xl p-1.5 shadow-[var(--shadow-float)] border border-[var(--border-subtle)] animate-modal-in">
-                <button
-                  onClick={() => { setShowAdd(false); setShowCreate(true); setFormError(""); }}
-                  className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
-                >
-                  + New Group
-                </button>
-                <button
-                  onClick={() => { setShowAdd(false); setShowJoin(true); setFormError(""); }}
-                  className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
-                >
-                  Join Group
-                </button>
-              </div>
-            )}
-            <button
-              onClick={() => setShowAdd((v) => !v)}
-              className="flex items-center gap-2 bg-[var(--surface)] text-[var(--brand)] rounded-full pl-5 pr-6 py-4 shadow-[0_10px_30px_-6px_rgba(79,70,229,0.35)] tap-shrink"
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              <span className="text-[16px] font-semibold">Add</span>
-            </button>
-          </div>
-        </div>
-      </div>
 
       <BottomNav active="groups" />
 

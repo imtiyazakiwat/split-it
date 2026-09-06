@@ -21,10 +21,9 @@
   --danger: #ff3b30;
   --warning: #ff9500;
 
-  /* Text hierarchy (iOS label opacities) */
-  --label-primary: rgba(0, 0, 0, 0.94);
-  --label-secondary: rgba(60, 60, 67, 0.6);
-  --label-tertiary: rgba(60, 60, 67, 0.3);
+  /* Text hierarchy — iOS label ramp (primary 94% / secondary 60% /
+     tertiary 30% / quaternary 18%). The single text scale for the whole app;
+     fills, tints and pos/neg below complete the system. */
 
   /* Liquid Glass material tokens */
   --glass-bg: rgba(255, 255, 255, 0.55);
@@ -47,14 +46,13 @@
   --nav-h: 5.25rem;
   --radius-pill: 999px;
 
-  /* ── Canonical semantic scale (used by content screens).
-     Light values match the previous hardcoded Tailwind colors 1:1 so light
-     mode is unchanged; dark values adapt for legibility on dark surfaces.
-     Fix #6 will consolidate the label and accent tokens onto these. ── */
-  --text-primary: #1e293b;      /* was slate-800 */
-  --text-secondary: #64748b;    /* was slate-500/600 */
-  --text-tertiary: #94a3b8;     /* was slate-400 */
-  --text-quaternary: #cbd5e1;   /* was slate-300 */
+  /* ── Canonical semantic scale (used by every screen).
+     Light values are the iOS label ramp; dark values adapt for legibility
+     on dark surfaces. ── */
+  --text-primary: rgba(0, 0, 0, 0.94);
+  --text-secondary: rgba(60, 60, 67, 0.6);
+  --text-tertiary: rgba(60, 60, 67, 0.3);
+  --text-quaternary: rgba(60, 60, 67, 0.18);
 
   --fill: #f1f5f9;              /* was slate-100 */
   --fill-soft: #f8fafc;        /* was slate-50 */
@@ -83,6 +81,17 @@
   /* Card radii — consolidated (inner 18 / card 22 / xl 28 = --radius-xl) */
   --radius-inner: 18px;
   --radius-card: 22px;
+
+  /* ── Motion tokens. Every animation in the app derives from these so timing
+     feels like one system, and Reduce Motion collapses them in one place.
+     Springs communicate travel (push/pop/sheets); fades communicate
+     appearance (tab switches, toasts, banners). ── */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-instant: 150ms;
+  --dur-fast: 250ms;
+  --dur-normal: 300ms;
+  --dur-route: 380ms;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -100,21 +109,17 @@
     --danger: #ff453a;
     --warning: #ff9f0a;
 
-    --label-primary: rgba(255, 255, 255, 0.95);
-    --label-secondary: rgba(235, 235, 245, 0.6);
-    --label-tertiary: rgba(235, 235, 245, 0.3);
-
     --glass-bg: rgba(28, 28, 30, 0.55);
     --glass-bg-strong: rgba(28, 28, 30, 0.75);
     --glass-border: rgba(255, 255, 255, 0.14);
     --glass-highlight: rgba(255, 255, 255, 0.16);
     --glass-shadow: rgba(0, 0, 0, 0.4);
 
-    /* Canonical semantic scale — dark */
-    --text-primary: #f2f2f7;
-    --text-secondary: rgba(235, 235, 245, 0.62);
-    --text-tertiary: rgba(235, 235, 245, 0.42);
-    --text-quaternary: rgba(235, 235, 245, 0.28);
+    /* Canonical semantic scale — dark (iOS ramp, white base) */
+    --text-primary: rgba(255, 255, 255, 0.95);
+    --text-secondary: rgba(235, 235, 245, 0.6);
+    --text-tertiary: rgba(235, 235, 245, 0.3);
+    --text-quaternary: rgba(235, 235, 245, 0.18);
 
     --fill: rgba(255, 255, 255, 0.09);
     --fill-soft: rgba(255, 255, 255, 0.05);
@@ -159,6 +164,16 @@
 html {
   background: var(--background);
   color-scheme: light dark;
+  /* Full-height chain for dvh-backed sheets; env() needs viewport-fit=cover
+     (set in layout viewport) to resolve to non-zero on iOS. */
+  height: 100%;
+}
+
+/* Synced from window.visualViewport by PwaBootstrap. Tracks the keyboard and
+   Safari chrome so fixed overlays (sheets, chat) size to what's actually
+   visible instead of what 100vh claims. Falls back to dynamic viewport. */
+:root {
+  --app-height: 100dvh;
 }
 
 body {
@@ -169,7 +184,25 @@ body {
     var(--font-sans), "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
+  /* Tabular numerals app-wide: amounts never shift width while scrolling or
+     typing, the way currency figures behave on iOS. */
+  font-variant-numeric: tabular-nums;
+  /* Stop rubber-band chaining the page behind sheets/modals on iOS. Inner
+     scrollers keep their own momentum via .scroll-momentum. */
+  overscroll-behavior-y: none;
 }
+
+/* iOS tap snappiness: no double-tap-zoom wait on controls. Inputs are
+   excluded so pinch-zoom and text selection keep working. */
+button,
+a,
+[role="button"] {
+  touch-action: manipulation;
+}
+
+/* iOS form controls are sized at 16px+ at the component level (auto-zoom
+   starts below 16px). No global guard here on purpose: one would also shrink
+   the large amount heroes. Keep every input/select/textarea ≥16px. */
 
 /* ==========================================================================
    Keyboard focus — a single, visible ring across every interactive control.
@@ -236,6 +269,83 @@ textarea:focus-visible,
   }
 }
 
+/* ==========================================================================
+   Liquid Glass tab capsule (iOS 26 floating tab bar).
+   Frost + refractive rim + top sheen, pure CSS: SVG-displacement refraction
+   only works in Chromium, and this app's audience is Safari — so the depth
+   comes from the rim light, not a displacement filter. The blur is fenced
+   with contain+isolate so it never repaints the page (INP-safe).
+   ========================================================================== */
+.liquid-tab {
+  position: relative;
+  isolation: isolate;
+  contain: layout paint;
+  border-radius: 999px;
+  /* Frosted, not clear: Apple moved bars more opaque in the iOS 26 betas
+     because translucent bars wash out over content. */
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
+  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.18),
+    inset 1px 0 1px rgba(255, 255, 255, 0.12),
+    inset -1px 0 1px rgba(255, 255, 255, 0.12),
+    0 20px 44px -20px rgba(0, 0, 0, 0.5);
+}
+.liquid-tab::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.28) 0%,
+    rgba(255, 255, 255, 0.05) 30%,
+    transparent 55%
+  );
+  mix-blend-mode: screen;
+}
+@media (prefers-color-scheme: dark) {
+  .liquid-tab {
+    background: rgba(28, 28, 30, 0.66);
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+      0 20px 44px -20px rgba(0, 0, 0, 0.8);
+  }
+  .liquid-tab::after {
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.12) 0%,
+      rgba(255, 255, 255, 0.02) 30%,
+      transparent 55%
+    );
+  }
+}
+/* Solid when transparency is reduced or blur is unavailable. */
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-tab {
+    background: var(--surface);
+  }
+  .liquid-tab::after {
+    display: none;
+  }
+}
+
+/* Viewport-stable sheet cap: 88vh jumps when Safari chrome shows/hides;
+   dvh tracks it, and --app-height (visualViewport-synced) tracks the keyboard
+   too. Order matters — capable engines use the last declaration they parse. */
+.sheet-viewport {
+  max-height: 88vh;
+  max-height: 88dvh;
+  max-height: calc(var(--app-height, 100dvh) * 0.88);
+}
+
 /* Specular highlight sweep used on primary glass buttons/pills */
 .glass-specular {
   position: absolute;
@@ -261,9 +371,10 @@ textarea:focus-visible,
   }
 }
 
-/* Press feedback matching iOS's springy scale-down on tap */
+/* Press feedback: instant scale + dim, never a colour change — the control
+   reacts the moment the finger lands, which is what makes it feel direct. */
 .tap-shrink {
-  transition: transform 0.15s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease;
+  transition: transform var(--dur-instant) cubic-bezier(0.34, 1.56, 0.64, 1), opacity var(--dur-instant) ease;
 }
 .tap-shrink:active {
   transform: scale(0.96);
@@ -278,16 +389,16 @@ textarea:focus-visible,
 @keyframes glass-modal-in {
   from {
     opacity: 0;
-    transform: translateY(24px) scale(0.98);
+    transform: translateY(16px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: translateY(0);
   }
 }
 
 .animate-modal-in {
-  animation: glass-modal-in 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: glass-modal-in var(--dur-normal) var(--ease-spring);
 }
 
 @keyframes glass-fade-in {
@@ -302,6 +413,115 @@ textarea:focus-visible,
 .animate-fade-in {
   animation: glass-fade-in 0.2s ease-out;
 }
+
+/* iOS banner toast: short rise, no scale — quieter than a sheet entrance. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-toast-in {
+  animation: toast-in var(--dur-fast) var(--ease-spring);
+}
+
+/* Directional push/pop for routed content. Both layers stay mounted through
+   the transition — that continuity is what makes a push read as travel rather
+   than a pan: incoming full travel, outgoing a short parallax plus dim. */
+@keyframes page-push-in {
+  from {
+    opacity: 0.4;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes page-push-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0.55;
+    transform: translateX(-32%);
+  }
+}
+@keyframes page-pop-in {
+  from {
+    opacity: 0.55;
+    transform: translateX(-32%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes page-pop-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0.4;
+    transform: translateX(100%);
+  }
+}
+@keyframes page-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+.route-stage {
+  position: relative;
+}
+.route-incoming {
+  position: relative;
+  z-index: 1;
+}
+.route-outgoing {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.page-push-in {
+  animation: page-push-in var(--dur-route) var(--ease-spring) backwards;
+}
+.page-push-out {
+  animation: page-push-out var(--dur-route) var(--ease-spring) both;
+}
+.page-pop-in {
+  animation: page-pop-in var(--dur-route) var(--ease-spring) backwards;
+}
+.page-pop-out {
+  animation: page-pop-out var(--dur-route) var(--ease-spring) both;
+}
+.page-fade-out {
+  animation: page-fade-out var(--dur-fast) ease-out both;
+}
+
+/* Staggered list entrance: rows arrive in sequence so a long list reads as
+   flowing in, capped at 7 steps — beyond that everything just appears.
+   Pure CSS, no measuring, collapses under Reduce Motion with the rest. */
+.stagger > * {
+  animation: glass-fade-in var(--dur-fast) var(--ease-out) backwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 30ms; }
+.stagger > *:nth-child(3) { animation-delay: 60ms; }
+.stagger > *:nth-child(4) { animation-delay: 90ms; }
+.stagger > *:nth-child(5) { animation-delay: 120ms; }
+.stagger > *:nth-child(6) { animation-delay: 150ms; }
+.stagger > *:nth-child(7) { animation-delay: 180ms; }
 
 /* ==========================================================================
    Skeleton loaders — shaped placeholders that match final layout, so content
@@ -378,6 +598,12 @@ textarea:focus-visible,
   animation: splash-shimmer 1.6s ease-in-out 0.4s infinite;
 }
 
+/* Class version of the loader dots (was inline style, which bypassed the
+   reduced-motion guard below). Stagger via inline animation-delay only. */
+.animate-splash-dot {
+  animation: splash-dot 1.2s ease-in-out infinite;
+}
+
 /* Duration must match FADE_MS in components/SplashGate.tsx: the gate unmounts on
    a timer, so a longer animation here would be cut off mid-fade. */
 .animate-splash-out {
@@ -387,6 +613,7 @@ textarea:focus-visible,
 @media (prefers-reduced-motion: reduce) {
   .animate-splash-logo,
   .animate-splash-shimmer,
+  .animate-splash-dot,
   .animate-splash-out {
     animation: none;
   }
@@ -410,36 +637,24 @@ textarea:focus-visible,
   animation: page-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
-/* Honor reduced-motion across every animated surface. */
+/* Honor reduced-motion across every animated surface: all travel becomes a
+   cross-fade, staggering disappears. */
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
+  .page-push-in,
+  .page-push-out,
+  .page-pop-in,
+  .page-pop-out,
+  .page-fade-out,
   .animate-modal-in,
+  .animate-toast-in,
   .animate-fade-in {
+    animation: glass-fade-in var(--dur-fast) ease-out !important;
+  }
+  .stagger > * {
     animation: none !important;
   }
   .tap-shrink {
     transition: none !important;
-  }
-}
-
-/* ==========================================================================
-   Floating action button layer.
-
-   The FAB floats over scrolling content, so it must never float over a sheet:
-   opening an expense used to leave the "+" button sitting on top of the sheet,
-   dimmed by the backdrop but still tappable. Sheets now own z-50 and mark the
-   document while they're up, which retires the FAB until they close.
-   ========================================================================== */
-.fab-layer {
-  transition: opacity 0.2s ease, transform 0.2s ease;
-}
-body[data-sheet-open] .fab-layer {
-  opacity: 0;
-  transform: translateY(0.75rem);
-  pointer-events: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .fab-layer {
-    transition: none;
   }
 }
