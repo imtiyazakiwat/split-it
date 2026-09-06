@@ -29,7 +29,7 @@ export default function GlassButton({
 }: GlassButtonProps) {
   return (
     <button
-      className={`relative overflow-hidden rounded-full font-medium tap-shrink disabled:opacity-40 disabled:pointer-events-none ${sizeClasses[size]} ${variantClasses[variant]} ${className}`}
+      className={`relative overflow-hidden rounded-full font-medium tap-shrink disabled:opacity-40 disabled:pointer-events-none inline-flex min-h-[44px] ${sizeClasses[size]} ${variantClasses[variant]} ${className}`}
       {...props}
     >
       {variant === "glass" && <span className="glass-specular" aria-hidden />}

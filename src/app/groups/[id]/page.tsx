@@ -34,7 +34,6 @@ import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
-import CollapsibleFab from "@/components/ui/CollapsibleFab";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
@@ -595,15 +594,26 @@ function GroupPageInner() {
               <path d="m15 18-6-6 6-6" />
             </svg>
           </button>
-          <button
-            onClick={() => setShowGroupInfo(true)}
-            aria-label="Group menu"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
-              <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setShowAddExpense(true)}
+              aria-label="Add expense"
+              className="w-11 h-11 rounded-2xl bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            <button
+              onClick={() => setShowGroupInfo(true)}
+              aria-label="Group menu"
+              className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
+                <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
+              </svg>
+            </button>
+          </div>
         </div>
       </header>
       <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum space-y-5">
@@ -822,13 +832,6 @@ function GroupPageInner() {
           />
         </section>
       </main>
-
-      {/* Floating Add Expense */}
-      <div className="fab-layer fixed z-40 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
-        <div className="max-w-md mx-auto px-4 flex justify-end">
-          <CollapsibleFab label="Add expense" onClick={() => setShowAddExpense(true)} />
-        </div>
-      </div>
 
       <BottomNav active="groups" />
 

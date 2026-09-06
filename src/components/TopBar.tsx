@@ -21,9 +21,11 @@ export default function TopBar({
             <button
               onClick={onBack}
               aria-label="Back"
-              className="grid place-items-center w-8 h-8 -ml-1.5 rounded-full text-[var(--accent)] text-xl tap-shrink"
+              className="grid place-items-center w-11 h-11 -ml-2.5 rounded-full text-[var(--accent)] tap-shrink"
             >
-              ‹
+              <svg width="14" height="22" viewBox="0 0 14 22" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m11 2-8 9 8 9" />
+              </svg>
             </button>
           )}
           <h1 className="font-semibold text-[var(--label-primary)] truncate text-[17px]">
@@ -35,7 +37,7 @@ export default function TopBar({
             <button
               onClick={() => router.push("/settings")}
               aria-label="Settings"
-              className="grid place-items-center w-7 h-7 rounded-full text-[var(--label-secondary)] tap-shrink"
+              className="grid place-items-center w-11 h-11 -mr-2 rounded-full text-[var(--label-secondary)] tap-shrink"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
