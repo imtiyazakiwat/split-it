@@ -896,9 +896,9 @@ function GroupPageInner() {
                   <span className="text-[32px] font-semibold text-[var(--accent)]">{group.name.charAt(0).toUpperCase()}</span>
                 </div>
               )}
-              <p className="text-[20px] font-semibold text-[var(--label-primary)] mt-3">{group.name}</p>
-              {group.description && <p className="text-[14px] text-[var(--label-secondary)] mt-1">{group.description}</p>}
-              <p className="text-[13px] text-[var(--label-tertiary)] mt-1">
+              <p className="text-[20px] font-semibold text-[var(--text-primary)] mt-3">{group.name}</p>
+              {group.description && <p className="text-[14px] text-[var(--text-secondary)] mt-1">{group.description}</p>}
+              <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
                 {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
               </p>
             </div>
@@ -916,7 +916,7 @@ function GroupPageInner() {
 
             <div className="border-t border-[var(--border-subtle)] pt-3">
               <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-[var(--label-secondary)]">Members</p>
+                <p className="text-sm font-medium text-[var(--text-secondary)]">Members</p>
                 {isAdmin && (
                   <button
                     onClick={() => { setShowGroupInfo(false); setShowAddMember(true); }}
@@ -940,10 +940,10 @@ function GroupPageInner() {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--label-primary)] truncate">
-                        {memberName(uid)}{uid === group.createdBy && <span className="text-[11px] text-[var(--label-tertiary)] ml-1">(Admin)</span>}
+                      <p className="text-[14px] text-[var(--text-primary)] truncate">
+                        {memberName(uid)}{uid === group.createdBy && <span className="text-[11px] text-[var(--text-tertiary)] ml-1">(Admin)</span>}
                       </p>
-                      <p className="text-[12px] text-[var(--label-tertiary)] truncate">{group.members[uid]?.email || ""}</p>
+                      <p className="text-[12px] text-[var(--text-tertiary)] truncate">{group.members[uid]?.email || ""}</p>
                     </div>
                     {isAdmin && uid !== group.createdBy && (
                       <button
@@ -962,11 +962,11 @@ function GroupPageInner() {
                 and leaves it exactly where it is for everyone else. */}
             <button
               onClick={handleToggleArchive}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
             >
               {iArchived ? "Restore to active groups" : "Archive this group"}
             </button>
-            <p className="text-[12px] text-[var(--label-tertiary)] -mt-1">
+            <p className="text-[12px] text-[var(--text-tertiary)] -mt-1">
               {iArchived
                 ? "It will show up under Your Groups again."
                 : "Hides it from your home screen without changing any balance. Only you see this."}
@@ -1042,10 +1042,10 @@ function GroupPageInner() {
                   className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-solid)]"
                 />
                 <span className="min-w-0">
-                  <span className="block text-[15px] font-semibold text-[var(--label-primary)]">
+                  <span className="block text-[15px] font-semibold text-[var(--text-primary)]">
                     Combine payments
                   </span>
-                  <span className="block text-[13px] text-[var(--label-secondary)] mt-0.5">
+                  <span className="block text-[13px] text-[var(--text-secondary)] mt-0.5">
                     Off: you settle directly with each person you shared expenses
                     with. On: the app reshuffles who pays whom so there are fewer
                     transfers — which can ask you to pay someone you never shared
@@ -1067,7 +1067,7 @@ function GroupPageInner() {
               >
                 Delete Group
               </button>
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-1.5 text-center">
+              <p className="text-[12px] text-[var(--text-tertiary)] mt-1.5 text-center">
                 Permanently removes this group for everyone. This can&apos;t be undone.
               </p>
             </div>

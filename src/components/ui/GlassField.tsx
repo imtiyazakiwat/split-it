@@ -8,10 +8,10 @@ interface GlassFieldProps extends InputHTMLAttributes<HTMLInputElement> {
 
 export function GlassField({ label, className = "", ...props }: GlassFieldProps) {
   return (
-    <label className="block text-sm font-medium text-[var(--label-secondary)]">
+    <label className="block text-sm font-medium text-[var(--text-secondary)]">
       {label}
       <input
-        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] placeholder:text-[var(--label-tertiary)] transition ${className}`}
+        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] transition ${className}`}
         {...props}
       />
     </label>
@@ -25,10 +25,10 @@ interface GlassSelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
 
 export function GlassSelect({ label, children, className = "", ...props }: GlassSelectProps) {
   return (
-    <label className="block text-sm font-medium text-[var(--label-secondary)]">
+    <label className="block text-sm font-medium text-[var(--text-secondary)]">
       {label}
       <select
-        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] transition ${className}`}
+        className={`mt-1.5 w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] transition ${className}`}
         {...props}
       >
         {children}

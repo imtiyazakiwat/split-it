@@ -50,13 +50,13 @@ export default function GlassModal({
       >
         <div className="mx-auto mb-3 h-[5px] w-9 rounded-full bg-[var(--border-subtle)] sm:hidden" />
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-[var(--label-primary)]">{title}</h2>
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
             className="grid place-items-center w-11 h-11 -m-2 rounded-full tap-shrink"
           >
-            <span className="grid place-items-center w-8 h-8 rounded-full bg-[var(--label-tertiary)]/20 text-[var(--label-secondary)] text-lg">
+            <span className="grid place-items-center w-8 h-8 rounded-full bg-[var(--text-tertiary)]/20 text-[var(--text-secondary)] text-lg">
               ×
             </span>
           </button>

@@ -335,10 +335,10 @@ export default function PayPage() {
               value={pickerQuery}
               onChange={(e) => setPickerQuery(e.target.value)}
               placeholder="Search people"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
             {pickerRows.length === 0 ? (
-              <p className="text-[13px] text-[var(--label-tertiary)] py-4 text-center">
+              <p className="text-[13px] text-[var(--text-tertiary)] py-4 text-center">
                 {counterparties.length === 0
                   ? "You can pay anyone you share a group with. Join a group first."
                   : "Nobody matches that search."}
@@ -358,10 +358,10 @@ export default function PayPage() {
                   >
                     <Avatar name={c.displayName} photoURL={c.photoURL} size={36} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-[var(--label-primary)] truncate">
+                      <p className="text-[15px] font-medium text-[var(--text-primary)] truncate">
                         {c.displayName}
                       </p>
-                      <p className="text-[12px] text-[var(--label-tertiary)]">
+                      <p className="text-[12px] text-[var(--text-tertiary)]">
                         {!isSettled(c.net) && c.net > 0
                           ? `You owe ${formatCurrency(c.net)}`
                           : !isSettled(c.net) && c.net < 0

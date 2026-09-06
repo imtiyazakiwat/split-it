@@ -172,7 +172,7 @@ export default function IncludeTransferSheet({
 
         {alreadyBooked.length > 0 && (
           <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3">
-            <p className="text-[13px] text-[var(--label-secondary)]">
+            <p className="text-[13px] text-[var(--text-secondary)]">
               {formatCurrency(roundMoney(transfer.amount - available))} of this payment is
               already counted in {alreadyBooked.length}{" "}
               {alreadyBooked.length === 1 ? "group" : "groups"}.{" "}
@@ -184,17 +184,17 @@ export default function IncludeTransferSheet({
         )}
 
         <div>
-          <p className="text-sm font-medium text-[var(--label-secondary)] mb-1">
+          <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">
             Settle group balances with it
           </p>
-          <p className="text-[12px] text-[var(--label-tertiary)] mb-2">
+          <p className="text-[12px] text-[var(--text-tertiary)] mb-2">
             Pick every group this payment was for. Each one takes at most what{" "}
             {fromName} owes there — anything left over stays unassigned rather than
             tipping a group into the red.
           </p>
 
           {settleable.length === 0 ? (
-            <p className="text-[13px] text-[var(--label-tertiary)]">
+            <p className="text-[13px] text-[var(--text-tertiary)]">
               {fromName} doesn&rsquo;t owe you anything in the groups you share, so
               there&rsquo;s no group balance for this to settle. Confirm it below —
               it will count as a personal balance between you two.
@@ -232,7 +232,7 @@ export default function IncludeTransferSheet({
                       </div>
                       {on && (
                         <div className="shrink-0 flex items-center gap-1">
-                          <span className="text-[14px] text-[var(--label-tertiary)]">₹</span>
+                          <span className="text-[14px] text-[var(--text-tertiary)]">₹</span>
                           <input
                             type="number"
                             step="0.01"
@@ -245,7 +245,7 @@ export default function IncludeTransferSheet({
                               setAmounts((prev) => ({ ...prev, [o.groupId]: e.target.value }))
                             }
                             aria-label={`Amount to count in ${o.groupName}`}
-                            className="w-24 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[16px] font-semibold text-right text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+                            className="w-24 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[16px] font-semibold text-right text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
                           />
                         </div>
                       )}
@@ -271,17 +271,17 @@ export default function IncludeTransferSheet({
         {settleable.length > 0 && (
           <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3 space-y-1">
             <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--label-secondary)]">Counted in groups</span>
-              <span className="font-semibold text-[var(--label-primary)]">
+              <span className="text-[var(--text-secondary)]">Counted in groups</span>
+              <span className="font-semibold text-[var(--text-primary)]">
                 {formatCurrency(plan.allocated)}
               </span>
             </div>
             <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--label-secondary)]">Left unassigned</span>
+              <span className="text-[var(--text-secondary)]">Left unassigned</span>
               <span
                 className={`font-semibold ${
                   isSettled(plan.leftover)
-                    ? "text-[var(--label-tertiary)]"
+                    ? "text-[var(--text-tertiary)]"
                     : "text-[var(--warning)]"
                 }`}
               >
@@ -289,7 +289,7 @@ export default function IncludeTransferSheet({
               </span>
             </div>
             {!isSettled(plan.leftover) && (
-              <p className="text-[12px] text-[var(--label-tertiary)] pt-1">
+              <p className="text-[12px] text-[var(--text-tertiary)] pt-1">
                 {formatCurrency(plan.leftover)} isn&rsquo;t going into any group. It stays
                 as a personal balance between you two, and you can assign it later from this
                 chat if a new balance comes up.
@@ -346,7 +346,7 @@ export default function IncludeTransferSheet({
               {busy === "decline" ? "Saving…" : "I didn't receive this"}
             </button>
           )}
-          <p className="text-[12px] text-[var(--label-tertiary)]">
+          <p className="text-[12px] text-[var(--text-tertiary)]">
             You can confirm now and attach it to a group later, from this chat.
           </p>
         </div>

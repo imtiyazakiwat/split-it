@@ -34,7 +34,7 @@ export default function ShareReceiptPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)] text-sm">Loading…</p>
+        <p className="text-[var(--text-tertiary)] text-sm">Loading…</p>
       </div>
     );
   }
@@ -46,7 +46,7 @@ export default function ShareReceiptPage() {
     <div className="flex-1 flex flex-col">
       <TopBar title="Add Receipt" onBack={() => router.push("/")} />
       <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 scroll-momentum">
-        <p className="text-sm text-[var(--label-secondary)]">
+        <p className="text-sm text-[var(--text-secondary)]">
           Received a shared image. Pick a group to attach it to a new expense.
         </p>
 
@@ -56,7 +56,7 @@ export default function ShareReceiptPage() {
             tabIndex={0}
             aria-label="Select an image to attach"
             onKeyDown={activateFileInputOnKey}
-            className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--label-tertiary)] cursor-pointer tap-shrink"
+            className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--text-tertiary)] cursor-pointer tap-shrink"
           >
             No image detected. Tap to select one manually.
             <input

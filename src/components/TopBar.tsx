@@ -28,7 +28,7 @@ export default function TopBar({
               </svg>
             </button>
           )}
-          <h1 className="font-semibold text-[var(--label-primary)] truncate text-[17px]">
+          <h1 className="font-semibold text-[var(--text-primary)] truncate text-[17px]">
             {title}
           </h1>
         </div>
@@ -37,7 +37,7 @@ export default function TopBar({
             <button
               onClick={() => router.push("/settings")}
               aria-label="Settings"
-              className="grid place-items-center w-11 h-11 -mr-2 rounded-full text-[var(--label-secondary)] tap-shrink"
+              className="grid place-items-center w-11 h-11 -mr-2 rounded-full text-[var(--text-secondary)] tap-shrink"
             >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
                 <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />

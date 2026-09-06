@@ -45,7 +45,7 @@ export default function ConfirmDialog({
     <GlassModal title={title} onClose={busy ? () => {} : onClose}>
       <div className="space-y-4">
         {message && (
-          <p className="text-[14px] leading-relaxed text-[var(--label-secondary)] whitespace-pre-line">
+          <p className="text-[14px] leading-relaxed text-[var(--text-secondary)] whitespace-pre-line">
             {message}
           </p>
         )}
@@ -55,7 +55,7 @@ export default function ConfirmDialog({
             type="button"
             onClick={onClose}
             disabled={busy}
-            className="flex-1 rounded-full bg-[var(--label-tertiary)]/15 px-4 py-2.5 text-[15px] font-medium text-[var(--label-primary)] tap-shrink disabled:opacity-50"
+            className="flex-1 rounded-full bg-[var(--text-tertiary)]/15 px-4 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink disabled:opacity-50"
           >
             {cancelLabel}
           </button>

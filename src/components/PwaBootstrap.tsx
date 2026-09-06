@@ -51,7 +51,7 @@ export default function PwaBootstrap() {
 
   return (
     <div className="glass glass-strong fixed bottom-4 left-4 right-4 max-w-md mx-auto rounded-[var(--radius-lg)] p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] text-sm flex items-center justify-between gap-3 z-30 animate-modal-in">
-      <p className="text-[var(--label-primary)]">
+      <p className="text-[var(--text-primary)]">
         Install SplitIt: tap Share <span aria-hidden>⎋</span> then &ldquo;Add to Home Screen&rdquo;.
       </p>
       <button
@@ -59,7 +59,7 @@ export default function PwaBootstrap() {
           sessionStorage.setItem("pwa-install-dismissed", "1");
           setState((s) => ({ ...s, dismissed: true }));
         }}
-        className="text-[var(--label-tertiary)] text-lg leading-none tap-shrink shrink-0"
+        className="text-[var(--text-tertiary)] text-lg leading-none tap-shrink shrink-0"
         aria-label="Dismiss"
       >
         ×

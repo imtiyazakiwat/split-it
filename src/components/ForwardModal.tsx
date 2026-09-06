@@ -94,7 +94,7 @@ export default function ForwardModal({
     <GlassModal title="Forward payment" onClose={onClose}>
       {creditors.length === 0 ? (
         <div className="space-y-4">
-          <p className="text-sm text-[var(--label-secondary)]">
+          <p className="text-sm text-[var(--text-secondary)]">
             You don&apos;t owe anyone in this group, so there&apos;s no one to
             forward this payment to.
           </p>
@@ -104,19 +104,19 @@ export default function ForwardModal({
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             {fromName} is paying you {formatCurrency(incomingAmount)}. Pass it on
             to someone you owe.
           </p>
 
           <div>
-            <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
               Forward to
             </label>
             <select
               value={targetUid}
               onChange={(e) => handleTargetChange(e.target.value)}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             >
               {creditors.map((c) => (
                 <option key={c.uid} value={c.uid}>
@@ -127,7 +127,7 @@ export default function ForwardModal({
           </div>
 
           <div>
-            <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
               Amount
             </label>
             <input
@@ -137,11 +137,11 @@ export default function ForwardModal({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
           </div>
 
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             This approves {fromName}&apos;s payment and sends a settlement request
             to {target?.name}, who will need to approve it.
           </p>

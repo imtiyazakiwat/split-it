@@ -333,7 +333,7 @@ export default function NotificationsPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)]">Loading…</p>
+        <p className="text-[var(--text-tertiary)]">Loading…</p>
       </div>
     );
   }

@@ -15,7 +15,7 @@ const sizeClasses: Record<string, string> = {
 const variantClasses: Record<string, string> = {
   primary:
     "bg-[var(--accent)] text-[var(--accent-foreground)] shadow-[0_4px_16px_-4px_var(--accent)]",
-  glass: "glass text-[var(--label-primary)]",
+  glass: "glass text-[var(--text-primary)]",
   ghost: "bg-transparent text-[var(--accent)]",
   danger: "bg-[var(--danger)] text-white shadow-[0_4px_16px_-4px_var(--danger)]",
 };

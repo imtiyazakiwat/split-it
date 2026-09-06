@@ -39,10 +39,10 @@ export default function LoginScreen() {
           <Image src="/icon-512.png" alt="" width={96} height={96} priority className="w-full h-full" />
         </div>
 
-        <h1 className="text-[34px] font-semibold text-[var(--label-primary)] mb-2 tracking-tight leading-none">
+        <h1 className="text-[34px] font-semibold text-[var(--text-primary)] mb-2 tracking-tight leading-none">
           SplitIt
         </h1>
-        <p className="text-[var(--label-secondary)] mb-10 max-w-xs text-[15px] leading-relaxed">
+        <p className="text-[var(--text-secondary)] mb-10 max-w-xs text-[15px] leading-relaxed">
           Split bills with friends. Track who paid, who owes, and settle up —
           together.
         </p>
@@ -65,7 +65,7 @@ export default function LoginScreen() {
 
         {error && <p className="text-sm text-[var(--danger)] mt-4">{error}</p>}
 
-        <p className="text-[12px] text-[var(--label-tertiary)] mt-8 leading-relaxed">
+        <p className="text-[12px] text-[var(--text-tertiary)] mt-8 leading-relaxed">
           By continuing, you agree to share your name, email, and photo with
           your group members.
         </p>

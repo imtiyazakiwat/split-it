@@ -180,7 +180,7 @@ export default function SettleUpModal({
     <GlassModal title={`Settle with ${toName}`} onClose={onClose}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
             Amount
           </label>
           <input
@@ -190,16 +190,16 @@ export default function SettleUpModal({
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             placeholder="0.00"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
           {suggestedAmount > 0 && (
-            <p className="text-[12px] text-[var(--label-tertiary)] mt-1">
+            <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
               You owe {toName} {formatCurrency(suggestedAmount)}
             </p>
           )}
           {overpayBy > 0 && (
             <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-              <p className="text-[13px] text-[var(--label-secondary)]">
+              <p className="text-[13px] text-[var(--text-secondary)]">
                 That&rsquo;s {formatCurrency(overpayBy)} more than you owe. Once{" "}
                 {toName} approves it,{" "}
                 <span className="font-medium">
@@ -220,7 +220,7 @@ export default function SettleUpModal({
 
         {items.length > 0 && (
           <div>
-            <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
               What this covers
             </p>
             <div className="space-y-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-1 max-h-52 overflow-y-auto">
@@ -238,14 +238,14 @@ export default function SettleUpModal({
                       className="rounded accent-[var(--accent)] w-4 h-4 shrink-0"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--label-primary)] truncate font-medium">
+                      <p className="text-[14px] text-[var(--text-primary)] truncate font-medium">
                         {item.expense.description}
                       </p>
-                      <p className="text-[12px] text-[var(--label-tertiary)]">
+                      <p className="text-[12px] text-[var(--text-tertiary)]">
                         {formatCurrency(myShare)} of {formatCurrency(item.expense.amount)}
                       </p>
                     </div>
-                    <span className="text-[14px] font-medium text-[var(--label-primary)] shrink-0">
+                    <span className="text-[14px] font-medium text-[var(--text-primary)] shrink-0">
                       {formatCurrency(myShare)}
                     </span>
                   </label>
@@ -257,7 +257,7 @@ export default function SettleUpModal({
 
         {upiUsable ? (
           <div>
-            <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
               Pay with UPI
             </p>
             <div className="grid grid-cols-2 gap-2">
@@ -266,7 +266,7 @@ export default function SettleUpModal({
                   key={app.id}
                   type="button"
                   onClick={() => handlePayWithApp(app)}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--label-primary)] tap-shrink"
+                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
                 >
                   <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
                   <span className="truncate">{app.label}</span>
@@ -276,12 +276,12 @@ export default function SettleUpModal({
             <button
               type="button"
               onClick={handleCopyUpi}
-              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--label-secondary)] tap-shrink"
+              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] tap-shrink"
             >
               Copy UPI ID · {resolvedUpiId}
             </button>
             {!canHandOff ? (
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
+              <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
                 UPI apps can only be opened from a phone. On desktop, copy{" "}
                 {toName}&rsquo;s UPI ID above and pay from your bank app.
               </p>
@@ -289,7 +289,7 @@ export default function SettleUpModal({
               paidExternally && (
                 // The browser can't tell us whether the hand-off worked, so
                 // always offer the manual route once we've tried.
-                <p className="text-[12px] text-[var(--label-tertiary)] mt-2">
+                <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
                   Nothing opened? Copy the UPI ID above and pay from your bank app.
                 </p>
               )
@@ -297,7 +297,7 @@ export default function SettleUpModal({
           </div>
         ) : resolvedUpiId ? (
           <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-            <p className="text-[13px] text-[var(--label-secondary)]">
+            <p className="text-[13px] text-[var(--text-secondary)]">
               {toName}&rsquo;s saved UPI ID (
               <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
               handle@bank address, so UPI apps can&rsquo;t open it. Ask them to fix it in
@@ -305,7 +305,7 @@ export default function SettleUpModal({
             </p>
           </div>
         ) : (
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             {upiChecked
               ? `${toName} hasn't added a UPI ID, so pay them directly (cash, UPI, etc.) and record it here.`
               : "Checking for a UPI ID…"}
@@ -313,7 +313,7 @@ export default function SettleUpModal({
         )}
 
         <div>
-          <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
             Note (optional)
           </label>
           <input
@@ -321,12 +321,12 @@ export default function SettleUpModal({
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="For: dinner on Friday…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
           />
         </div>
 
         <div>
-          <p className="text-sm font-medium text-[var(--label-secondary)] mb-2">
+          <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
             Payment screenshots (optional)
           </p>
           <label
@@ -334,7 +334,7 @@ export default function SettleUpModal({
             tabIndex={0}
             aria-label="Add payment screenshots"
             onKeyDown={activateFileInputOnKey}
-            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--label-tertiary)] tap-shrink"
+            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-tertiary)] tap-shrink"
           >
             {receiptFiles.length > 0
               ? `${receiptFiles.length} file(s) selected — tap to add more`
@@ -352,7 +352,7 @@ export default function SettleUpModal({
           {receiptFiles.length > 0 && (
             <div className="mt-2 space-y-1">
               {receiptFiles.map((f, i) => (
-                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--label-secondary)]">
+                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--text-secondary)]">
                   <span className="truncate">{f.name}</span>
                   <button
                     type="button"
@@ -367,7 +367,7 @@ export default function SettleUpModal({
           )}
         </div>
 
-        <p className="text-[13px] text-[var(--label-tertiary)]">
+        <p className="text-[13px] text-[var(--text-tertiary)]">
           This sends a settlement request to {toName}. They will need to approve
           it for it to be reflected in the group balance.
         </p>
