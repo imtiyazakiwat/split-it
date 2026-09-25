@@ -10,12 +10,10 @@ import {
   ReactNode,
 } from "react";
 import { useAuth } from "./auth-context";
-import {
-  subscribeToUserGroups,
-  subscribeToGroup,
-  subscribeToExpenses,
-  subscribeToSettlements,
-} from "./firestore";
+// NOTE: `./firestore` is deliberately NOT imported at module scope. This provider
+// lives in the root layout, so a static import here puts the 641 kB Firestore
+// chunk in front of first interaction on every route. Every use site below does
+// `await import("./firestore")`.
 import { Expense, Group, Settlement } from "./types";
 import { GroupDataset } from "./global-balance";
 
@@ -113,17 +111,34 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!uid) return;
-    return subscribeToUserGroups(
-      uid,
-      (groups) => {
-        setErrorState(null);
-        setGroupsState({ uid, groups, loaded: true });
-      },
-      (err) => {
-        setGroupsState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
-        setErrorState({ uid, message: err.message });
-      }
-    );
+    // `./firestore` is imported dynamically so the 641 kB Firestore chunk is not
+    // in the critical path of every route (this provider lives in the root
+    // layout). The extra cost is one already-cached chunk fetch after hydration,
+    // against 46% of the JavaScript the phone had to parse before it could paint
+    // anything real.
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { subscribeToUserGroups } = await import("./firestore");
+      // The uid may have changed (or unmounted) while the chunk loaded; attaching
+      // now would leak a listener the cleanup below has already run past.
+      if (cancelled) return;
+      stop = subscribeToUserGroups(
+        uid,
+        (groups) => {
+          setErrorState(null);
+          setGroupsState({ uid, groups, loaded: true });
+        },
+        (err) => {
+          setGroupsState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
+          setErrorState({ uid, message: err.message });
+        }
+      );
+    })();
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, [uid, retryGen]);
 
   const groups = groupsState.uid === uid ? groupsState.groups : NO_GROUPS;
@@ -146,7 +161,26 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
     }
     const ids = uid && groupIdsKey ? groupIdsKey.split(",") : [];
 
-    ids.forEach((groupId) => {
+    // Detaching happens first and synchronously: it needs no import, and a group
+    // the user has just left should stop streaming immediately rather than after
+    // a chunk load.
+    Array.from(live.keys())
+      .filter((groupId) => !ids.includes(groupId))
+      .forEach((groupId) => {
+        live.get(groupId)?.();
+        live.delete(groupId);
+      });
+
+    if (ids.length === 0) return;
+
+    // Attaching needs `./firestore`, which is dynamically imported to keep the
+    // 641 kB Firestore chunk off the critical path. See the groups effect above.
+    let cancelled = false;
+    void (async () => {
+      const { subscribeToExpenses, subscribeToSettlements } = await import("./firestore");
+      if (cancelled) return;
+
+      ids.forEach((groupId) => {
       if (live.has(groupId)) return;
       let gotExpenses = false;
       let gotSettlements = false;
@@ -207,16 +241,16 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
         unsubExpenses();
         unsubSettlements();
       });
-    });
-
-    // Stop listening to groups the user has left. Their cached entry is simply
-    // never read again, because everything is derived from `groups`.
-    Array.from(live.keys())
-      .filter((groupId) => !ids.includes(groupId))
-      .forEach((groupId) => {
-        live.get(groupId)?.();
-        live.delete(groupId);
       });
+    })();
+
+    // Only cancels the pending attach. Live listeners are owned by
+    // `listenersRef` and torn down either by the detach pass above when a group
+    // departs, or wholesale by the unmount effect below — the same lifetime the
+    // synchronous version had.
+    return () => {
+      cancelled = true;
+    };
   }, [uid, groupIdsKey, retryGen]);
 
   useEffect(() => {
@@ -325,24 +359,39 @@ export function useSingleGroup(groupId: string | undefined): SingleGroupData {
     // Both collections must report in before this counts as loaded — treating
     // whichever answered first as "done" would render balances with the
     // settlements still missing.
-    const unsubs = [
-      subscribeToGroup(
-        groupId,
-        (group) => patch({ group, resolved: true }),
-        () => patch({ resolved: true })
-      ),
-      subscribeToExpenses(
-        groupId,
-        (expenses) => patch({ expenses, gotExpenses: true }),
-        () => patch({ gotExpenses: true })
-      ),
-      subscribeToSettlements(
-        groupId,
-        (settlements) => patch({ settlements, gotSettlements: true }),
-        () => patch({ gotSettlements: true })
-      ),
-    ];
-    return () => unsubs.forEach((u) => u());
+    //
+    // Dynamically imported for the same reason as the provider's own effects.
+    // By the time a deep link reaches this path the chunk is usually already
+    // fetched, so the await is typically a resolved microtask.
+    let unsubs: (() => void)[] = [];
+    let cancelled = false;
+    void (async () => {
+      const { subscribeToGroup, subscribeToExpenses, subscribeToSettlements } = await import(
+        "./firestore"
+      );
+      if (cancelled) return;
+      unsubs = [
+        subscribeToGroup(
+          groupId,
+          (group) => patch({ group, resolved: true }),
+          () => patch({ resolved: true })
+        ),
+        subscribeToExpenses(
+          groupId,
+          (expenses) => patch({ expenses, gotExpenses: true }),
+          () => patch({ gotExpenses: true })
+        ),
+        subscribeToSettlements(
+          groupId,
+          (settlements) => patch({ settlements, gotSettlements: true }),
+          () => patch({ gotSettlements: true })
+        ),
+      ];
+    })();
+    return () => {
+      cancelled = true;
+      unsubs.forEach((u) => u());
+    };
   }, [needsFallback, groupId]);
 
   if (cachedGroup) {

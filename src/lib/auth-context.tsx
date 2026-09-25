@@ -17,8 +17,7 @@ import {
   signOut as firebaseSignOut,
   User,
 } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { auth, googleProvider, db } from "./firebase";
+import { auth, googleProvider } from "./firebase";
 import { clearAuthHint, readAuthHint, writeAuthHint } from "./auth-hint";
 
 interface AuthContextValue {
@@ -75,9 +74,21 @@ const redirectPending = {
   },
 };
 
-/** Keeps `users/{uid}` in step with the Google account, for member lookups. */
+/**
+ * Keeps `users/{uid}` in step with the Google account, for member lookups.
+ *
+ * Firestore is imported dynamically here rather than at module scope. This module
+ * is in the root layout's import graph (via AuthProvider), so a static
+ * `from "firebase/firestore"` dragged the entire 641 kB SDK onto the critical
+ * path of every route — for three functions called once per session, in a
+ * fire-and-forget write nobody waits on.
+ */
 async function upsertUserDoc(u: User): Promise<void> {
   try {
+    const [{ doc, setDoc, serverTimestamp }, { db }] = await Promise.all([
+      import("firebase/firestore"),
+      import("./firebase-db"),
+    ]);
     await setDoc(
       doc(db, "users", u.uid),
       {

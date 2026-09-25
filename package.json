@@ -10,6 +10,7 @@
     "report": "node scripts/export-report.mjs",
     "rollback": "node scripts/rollback-settlements.mjs",
     "audit": "node scripts/audit-balances.mjs",
+    "analyze:critical": "node scripts/trace-critical-imports.mjs",
     "inspect-group": "node scripts/inspect-group.mjs",
     "trace-pair": "node scripts/trace-pair.mjs"
   },

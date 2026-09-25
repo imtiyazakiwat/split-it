@@ -6,7 +6,9 @@ import { useRouter } from "next/navigation";
 import NavHint from "@/components/NavHint";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import { createGroup, joinGroupByCode, setGroupArchived } from "@/lib/firestore";
+// Write functions are dynamically imported at the point of use, not here: this is
+// the entry route, and a static import puts the 641 kB Firestore chunk in front of
+// first interaction for the sake of three handlers the user may never trigger.
 import {
   canRespondToSettlement,
   computeBalances,
@@ -112,6 +114,7 @@ export default function Home() {
     setBusy(true);
     setFormError("");
     try {
+      const { createGroup } = await import("@/lib/firestore");
       const id = await createGroup(groupName.trim(), currentUser.uid, {
         displayName: currentUser.displayName || currentUser.email || "User",
         email: (currentUser.email || "").toLowerCase(),
@@ -134,6 +137,7 @@ export default function Home() {
     setBusy(true);
     setFormError("");
     try {
+      const { joinGroupByCode } = await import("@/lib/firestore");
       const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, {
         displayName: currentUser.displayName || currentUser.email || "User",
         email: (currentUser.email || "").toLowerCase(),
@@ -205,6 +209,7 @@ export default function Home() {
 
   async function handleToggleArchive(groupId: string, archived: boolean) {
     try {
+      const { setGroupArchived } = await import("@/lib/firestore");
       await setGroupArchived(groupId, currentUser.uid, archived);
       showToast({ message: archived ? "Group archived" : "Group restored" });
     } catch (err) {

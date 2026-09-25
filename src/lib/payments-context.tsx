@@ -9,8 +9,10 @@ import {
   ReactNode,
 } from "react";
 import { useAuth } from "./auth-context";
-import { subscribeToMyTransfers, pendingForMe, unappliedForMe } from "./transfers";
-import { subscribeToMyThreads, hasUnread, threadIdFor } from "./chat";
+// Pure selectors only — the subscribe functions are dynamically imported in the
+// effects below so Firestore stays off the critical path.
+import { pendingForMe, unappliedForMe } from "./transfer-queries";
+import { hasUnread, threadIdFor } from "./chat-thread";
 import { ChatThread, DirectTransfer } from "./types";
 
 /**
@@ -82,33 +84,57 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     null
   );
 
+  // Both subscriptions import their module dynamically: this provider is in the
+  // root layout, and `./transfers` / `./chat` both reach Firestore, whose client
+  // SDK is a 641 kB chunk — 46% of the JavaScript the phone parsed before it
+  // could show anything real.
   useEffect(() => {
     if (!uid) return;
-    return subscribeToMyTransfers(
-      uid,
-      (items) => {
-        setErrorState(null);
-        setTransferState({ uid, items, loaded: true });
-      },
-      (err) => {
-        // A failed listener still has to settle `loaded`, or the Pay tab sits
-        // on a skeleton for the rest of the session.
-        setTransferState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
-        setErrorState({ uid, message: err.message });
-      }
-    );
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { subscribeToMyTransfers } = await import("./transfers");
+      if (cancelled) return;
+      stop = subscribeToMyTransfers(
+        uid,
+        (items) => {
+          setErrorState(null);
+          setTransferState({ uid, items, loaded: true });
+        },
+        (err) => {
+          // A failed listener still has to settle `loaded`, or the Pay tab sits
+          // on a skeleton for the rest of the session.
+          setTransferState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
+          setErrorState({ uid, message: err.message });
+        }
+      );
+    })();
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, [uid]);
 
   useEffect(() => {
     if (!uid) return;
-    return subscribeToMyThreads(
-      uid,
-      (items) => setThreadState({ uid, items, loaded: true }),
-      (err) => {
-        setThreadState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
-        setErrorState({ uid, message: err.message });
-      }
-    );
+    let stop: (() => void) | undefined;
+    let cancelled = false;
+    void (async () => {
+      const { subscribeToMyThreads } = await import("./chat");
+      if (cancelled) return;
+      stop = subscribeToMyThreads(
+        uid,
+        (items) => setThreadState({ uid, items, loaded: true }),
+        (err) => {
+          setThreadState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
+          setErrorState({ uid, message: err.message });
+        }
+      );
+    })();
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
   }, [uid]);
 
   // Only report a failure belonging to the uid currently in play.

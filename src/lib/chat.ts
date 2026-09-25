@@ -9,8 +9,14 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
-import { db } from "./firebase";
+import { db } from "./firebase-db";
 import { ChatMessage, ChatThread } from "./types";
+import { threadIdFor } from "./chat-thread";
+
+// Re-exported so this module keeps its public surface; the implementations live
+// in ./chat-thread because they are pure and the root layout needs them without
+// pulling Firestore. See lib/chat-thread.ts.
+export { threadIdFor, hasUnread } from "./chat-thread";
 import { notifyUsers } from "./send-notification";
 
 /**
@@ -32,9 +38,6 @@ const MESSAGE_WINDOW = 200;
  * Deterministic thread id, so both people derive the same one without a lookup
  * or a round trip to create it.
  */
-export function threadIdFor(uidA: string, uidB: string): string {
-  return [uidA, uidB].sort().join("_");
-}
 
 function toThread(id: string, data: Record<string, unknown>): ChatThread {
   return {
@@ -160,8 +163,3 @@ export async function markThreadRead(
 }
 
 /** True when the other person's newest message hasn't been seen yet. */
-export function hasUnread(thread: ChatThread | undefined, meUid: string): boolean {
-  if (!thread?.lastMessageAt) return false;
-  if (thread.lastMessageFrom === meUid) return false;
-  return thread.lastMessageAt > (thread.lastRead?.[meUid] ?? 0);
-}
