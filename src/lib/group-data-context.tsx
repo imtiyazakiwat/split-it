@@ -64,8 +64,32 @@ interface GroupsState {
 }
 
 export function GroupDataProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
-  const uid = user?.uid ?? null;
+  // `dataUid`, not `user.uid`: the remembered uid from the last confirmed
+  // session, so listeners attach in the first render instead of waiting on the
+  // auth network round trip. Firestore serves a listener's first callback from
+  // its on-device cache, so this is what lets known data paint immediately.
+  //
+  // Safety rests on the uid tagging already used below: every piece of state
+  // records which uid it belongs to and is discarded on mismatch, so if the hint
+  // turns out to be stale nothing from it is ever shown. See lib/auth-hint.ts.
+  const { dataUid, loading: authLoading } = useAuth();
+  const uid = dataUid;
+  const authSettled = !authLoading;
+  /**
+   * Bumped to re-establish the listeners exactly once, if they failed while the
+   * uid was still speculative.
+   *
+   * A Firestore permission error is terminal — the SDK does not retry it. So if a
+   * listener attached on a remembered uid were ever rejected because the auth
+   * token had not arrived yet, the screen would sit on empty data forever with
+   * nothing to trigger a repair. That is a severe failure for a money app, so it
+   * gets a safety net even though the SDK is expected to hold requests until
+   * auth resolves rather than send them unauthenticated.
+   *
+   * One shot only: the effect below depends on `authSettled` and `uid`, neither
+   * of which changes again, so a genuine permission failure cannot loop.
+   */
+  const [retryGen, setRetryGen] = useState(0);
   // Tagged with the uid it belongs to, so a sign-out or account switch can
   // never surface the previous user's groups while the new listener warms up.
   const [groupsState, setGroupsState] = useState<GroupsState>({
@@ -74,22 +98,33 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
     loaded: false,
   });
   const [byGroup, setByGroup] = useState<Record<string, GroupData>>(NO_DATA);
-  const [error, setError] = useState<string | null>(null);
+  /**
+   * Tagged with the uid it came from, for the same reason the data is.
+   *
+   * Listeners can now start on a speculative uid, and a stale one fails the
+   * security rules. Untagged, that would surface "Couldn't load the latest data
+   * (Missing or insufficient permissions)" on the home screen even though the
+   * app had simply guessed wrong and already recovered. An error only belongs to
+   * the uid that produced it.
+   */
+  const [errorState, setErrorState] = useState<{ uid: string | null; message: string } | null>(
+    null
+  );
 
   useEffect(() => {
     if (!uid) return;
     return subscribeToUserGroups(
       uid,
       (groups) => {
-        setError(null);
+        setErrorState(null);
         setGroupsState({ uid, groups, loaded: true });
       },
       (err) => {
         setGroupsState((prev) => (prev.uid === uid ? { ...prev, loaded: true } : prev));
-        setError(err.message);
+        setErrorState({ uid, message: err.message });
       }
     );
-  }, [uid]);
+  }, [uid, retryGen]);
 
   const groups = groupsState.uid === uid ? groupsState.groups : NO_GROUPS;
   const groupsLoaded = groupsState.uid === uid && groupsState.loaded;
@@ -98,9 +133,17 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
   // Keep exactly one expenses + settlements listener per group, adding and
   // tearing them down only as group membership actually changes.
   const listenersRef = useRef(new Map<string, () => void>());
+  const lastRetryRef = useRef(retryGen);
 
   useEffect(() => {
     const live = listenersRef.current;
+    // On a repair pass, drop everything first — otherwise the `live.has()` guard
+    // below would skip re-attaching the very listeners that failed.
+    if (lastRetryRef.current !== retryGen) {
+      lastRetryRef.current = retryGen;
+      live.forEach((stop) => stop());
+      live.clear();
+    }
     const ids = uid && groupIdsKey ? groupIdsKey.split(",") : [];
 
     ids.forEach((groupId) => {
@@ -137,7 +180,7 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
           }));
         },
         (err) => {
-          setError(err.message);
+          setErrorState({ uid, message: err.message });
           markSettled("expenses");
         }
       );
@@ -155,7 +198,7 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
           }));
         },
         (err) => {
-          setError(err.message);
+          setErrorState({ uid, message: err.message });
           markSettled("settlements");
         }
       );
@@ -174,7 +217,7 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
         live.get(groupId)?.();
         live.delete(groupId);
       });
-  }, [uid, groupIdsKey]);
+  }, [uid, groupIdsKey, retryGen]);
 
   useEffect(() => {
     const live = listenersRef.current;
@@ -183,6 +226,26 @@ export function GroupDataProvider({ children }: { children: ReactNode }) {
       live.clear();
     };
   }, []);
+
+  // Only report a failure that belongs to the uid currently being displayed.
+  const error = errorState && errorState.uid === uid ? errorState.message : null;
+
+  // The one-shot repair described on `retryGen`.
+  //
+  // Guarded by a ref keyed on the uid rather than by omitting `errorState` from
+  // the deps: a ref written during render is not safe under concurrent
+  // rendering, and the linter is right to reject it. Written inside the effect
+  // it is fine, and it makes the retry exactly once per uid — so a genuine
+  // permission failure re-erroring cannot start a loop.
+  const repairedForRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!authSettled || !uid) return;
+    if (!errorState || errorState.uid !== uid) return;
+    if (repairedForRef.current === uid) return;
+    repairedForRef.current = uid;
+    setErrorState(null);
+    setRetryGen((n) => n + 1);
+  }, [authSettled, uid, errorState]);
 
   const value = useMemo<GroupDataContextValue>(() => {
     const datasets: GroupDataset[] = groups.map((group) => ({

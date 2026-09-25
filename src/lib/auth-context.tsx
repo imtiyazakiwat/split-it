@@ -19,10 +19,25 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, googleProvider, db } from "./firebase";
+import { clearAuthHint, readAuthHint, writeAuthHint } from "./auth-hint";
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
+  /**
+   * Whose data to load, available before `onAuthStateChanged` has resolved.
+   *
+   * `onAuthStateChanged` costs a network round trip on cold start (it revalidates
+   * the refresh token), and until it returned, every data provider sat behind
+   * `if (!uid) return;` — so Firestore's on-device cache, which serves a
+   * listener's first callback locally, was never even consulted. This is the
+   * remembered uid from the last confirmed session, so loading can start
+   * immediately and the two waits overlap.
+   *
+   * Use this ONLY to fetch. Never use it to decide whether someone is signed in:
+   * that stays `user`, which is authoritative. See lib/auth-hint.ts.
+   */
+  dataUid: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -115,6 +130,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const syncedUidRef = useRef<string | null>(null);
+  /**
+   * Seeded synchronously on first render so the data providers can attach their
+   * listeners in the same tick, rather than waiting on the auth round trip.
+   * Read via an initialiser (not an effect) precisely because an effect would
+   * cost a render and give back the head start we are trying to win.
+   */
+  const [hintUid, setHintUid] = useState<string | null>(() => readAuthHint());
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +157,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
+
+      // Reconcile the speculative uid against the real one. A mismatch means the
+      // hint was stale (signed out elsewhere, or a different account), so the
+      // data providers must drop what they loaded on its behalf — which they do
+      // automatically, because their state is tagged with the uid it belongs to.
+      if (u) {
+        writeAuthHint(u.uid);
+        setHintUid(u.uid);
+      } else {
+        clearAuthHint();
+        setHintUid(null);
+      }
+
       // Runs for redirect sign-ins too, where there's no popup result to hook
       // the profile write onto.
       if (u && syncedUidRef.current !== u.uid) {
@@ -186,11 +221,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signOut() {
     redirectPending.clear();
+    // Cleared before the sign-out resolves so a reload racing it cannot start
+    // speculative listeners for an account that is on its way out.
+    clearAuthHint();
+    setHintUid(null);
     await firebaseSignOut(auth);
   }
 
+  // Prefer the confirmed uid the moment it exists; fall back to the hint only
+  // while auth is still in flight.
+  const dataUid = user?.uid ?? (loading ? hintUid : null);
+
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut }}>
+    <AuthContext.Provider value={{ user, loading, dataUid, signInWithGoogle, signOut }}>
       {children}
     </AuthContext.Provider>
   );
