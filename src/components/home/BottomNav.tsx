@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import NavHint from "@/components/NavHint";
 
 type Tab = "groups" | "pay" | "activity" | "reports" | "profile";
 
@@ -70,8 +71,6 @@ export default function BottomNav({
   active: Tab;
   payBadge?: boolean;
 }) {
-  const router = useRouter();
-
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
     { id: "pay", label: "Pay", href: "/pay", Icon: PayIcon },
@@ -86,9 +85,15 @@ export default function BottomNav({
         {items.map(({ id, label, href, Icon }) => {
           const isActive = id === active;
           return (
-            <button
+            // <Link> rather than an onClick router.push: Link is what prefetches
+            // the route (on viewport entry in production) and what populates the
+            // client router cache. An imperative push does neither, so every tab
+            // switch started from a cold cache — five screens, all reachable from
+            // every screen, all previously unprefetched.
+            <Link
               key={id}
-              onClick={() => router.push(href)}
+              href={href}
+              aria-current={isActive ? "page" : undefined}
               className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-[var(--radius-inner)] tap-shrink ${
                 isActive ? "bg-[var(--tint-accent)]" : ""
               }`}
@@ -101,6 +106,9 @@ export default function BottomNav({
                     aria-label="Unread"
                   />
                 )}
+                {/* Pending dot sits on the icon that was actually tapped, so the
+                    feedback is unambiguous about which tab is loading. */}
+                <NavHint variant="dot" />
               </span>
               <span
                 className={`text-[11px] font-medium ${
@@ -112,7 +120,7 @@ export default function BottomNav({
               <span
                 className={`h-1 w-1 rounded-full ${isActive ? "bg-[var(--brand)]" : "bg-transparent"}`}
               />
-            </button>
+            </Link>
           );
         })}
       </div>

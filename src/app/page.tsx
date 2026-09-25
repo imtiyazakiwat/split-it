@@ -482,7 +482,7 @@ export default function Home() {
               loaded={row.loaded}
               lastActivityTs={row.lastActivityTs}
               pendingCount={row.pendingCount}
-              onOpen={() => router.push(`/groups/${row.group.id}`)}
+              href={`/groups/${row.group.id}`}
               action={
                 tab === "archived"
                   ? {

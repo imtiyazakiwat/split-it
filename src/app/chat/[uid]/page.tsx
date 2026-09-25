@@ -26,7 +26,7 @@ import { buildConversation, ConversationItem } from "@/lib/conversation";
 import { ChatMessage, DirectTransfer } from "@/lib/types";
 import { getUserProfile } from "@/lib/firestore";
 import LoginScreen from "@/components/LoginScreen";
-import Skeleton from "@/components/ui/Skeleton";
+import ChatSkeleton from "@/components/chat/ChatSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import SendMoneyModal from "@/components/pay/SendMoneyModal";
 import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
@@ -55,17 +55,8 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-function ChatSkeleton() {
-  return (
-    <div className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] space-y-3">
-      <Skeleton className="h-14 w-full" />
-      <Skeleton className="h-20 w-full" />
-      {[0, 1, 2, 3].map((i) => (
-        <Skeleton key={i} className={`h-12 ${i % 2 ? "w-2/3 ml-auto" : "w-3/5"}`} />
-      ))}
-    </div>
-  );
-}
+// ChatSkeleton now lives in components/chat so this screen and the route's
+// loading.tsx render the same shape. See app/chat/[uid]/loading.tsx.
 
 /**
  * Rows are hoisted out of the screen component on purpose. Declared inside it,

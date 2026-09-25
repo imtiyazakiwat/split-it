@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import NavHint from "@/components/NavHint";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { Group } from "@/lib/types";
@@ -50,7 +52,7 @@ export default function GroupRow({
   loaded,
   lastActivityTs,
   pendingCount = 0,
-  onOpen,
+  href,
   action,
 }: {
   group: Group;
@@ -59,7 +61,17 @@ export default function GroupRow({
   loaded: boolean;
   lastActivityTs: number;
   pendingCount?: number;
-  onOpen: () => void;
+  /**
+   * Where the row goes, rather than a callback that goes there.
+   *
+   * This was `onOpen: () => void` wired to `router.push`, which meant the
+   * destination was invisible to the framework: no prefetch, no client cache
+   * entry, and no real anchor for the browser or a screen reader. A row that
+   * knows its own href lets `<Link>` warm `/groups/[id]` before the tap — and
+   * that route is the heaviest screen in the app, so it is the one that most
+   * needed warming.
+   */
+  href: string;
   /**
    * Optional row-level action, e.g. Archive or Restore.
    *
@@ -82,10 +94,13 @@ export default function GroupRow({
 
   return (
     <div className="bg-[var(--surface)] rounded-[var(--radius-card)] shadow-[var(--shadow-card)]">
-      <button
-        onClick={onOpen}
+      <Link
+        href={href}
         className="w-full text-left p-4 flex items-center gap-3.5 tap-shrink"
       >
+        {/* Fixed-position sweep at the top of the viewport; only becomes visible
+            if this navigation takes longer than 100ms. */}
+        <NavHint />
           {/* Group icon */}
         {group.photoURL ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -188,7 +203,7 @@ export default function GroupRow({
             </>
           )}
         </div>
-      </button>
+      </Link>
       {action && (
         <div className="px-4 pb-3 -mt-1">
           <button

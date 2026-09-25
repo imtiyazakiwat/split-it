@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
@@ -14,6 +15,7 @@ import BottomNav from "@/components/home/BottomNav";
 import CollapsibleFab from "@/components/ui/CollapsibleFab";
 import GlassModal from "@/components/ui/GlassModal";
 import Skeleton from "@/components/ui/Skeleton";
+import NavHint from "@/components/NavHint";
 import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
 
 /**
@@ -257,11 +259,15 @@ export default function PayPage() {
               const iOwe = !isSettled(r.net) && r.net > 0;
               const theyOwe = !isSettled(r.net) && r.net < 0;
               return (
-                <button
+                // Link, not router.push: /chat/[uid] is a dynamic route, so
+                // without a prefetched shell every tap paid a cold server round
+                // trip while this screen stayed frozen on top.
+                <Link
                   key={r.uid}
-                  onClick={() => router.push(`/chat/${r.uid}`)}
+                  href={`/chat/${r.uid}`}
                   className="w-full text-left flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] px-3.5 py-3 tap-shrink"
                 >
+                  <NavHint />
                   <Avatar name={r.displayName} photoURL={r.photoURL} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
@@ -307,7 +313,7 @@ export default function PayPage() {
                         : ""}
                     </p>
                   </div>
-                </button>
+                </Link>
               );
             })}
           </div>
