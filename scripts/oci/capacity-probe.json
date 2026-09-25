@@ -1,0 +1,13 @@
+[
+  {
+    "instanceShape": "VM.Standard.A1.Flex",
+    "instanceShapeConfig": { "ocpus": 2, "memoryInGBs": 12 }
+  },
+  {
+    "instanceShape": "VM.Standard.A1.Flex",
+    "instanceShapeConfig": { "ocpus": 1, "memoryInGBs": 6 }
+  },
+  {
+    "instanceShape": "VM.Standard.E2.1.Micro"
+  }
+]
