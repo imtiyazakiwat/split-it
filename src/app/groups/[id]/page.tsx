@@ -38,13 +38,28 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { hapticSuccess } from "@/lib/haptics";
 import { activateFileInputOnKey } from "@/lib/keyboard";
-import AddExpenseModal, { NewExpenseInput } from "@/components/AddExpenseModal";
-import SettleUpModal from "@/components/SettleUpModal";
-import ForwardModal from "@/components/ForwardModal";
-import AddMemberModal from "@/components/group/AddMemberModal";
-import ActivityDetailModal from "@/components/group/ActivityDetailModal";
-import PersonStatementSheet from "@/components/group/PersonStatementSheet";
-import InviteQrSheet from "@/components/group/InviteQrSheet";
+import dynamic from "next/dynamic";
+import type { NewExpenseInput } from "@/components/AddExpenseModal";
+
+/**
+ * Sheets are loaded on demand, not with the screen.
+ *
+ * Every one of these sits behind a boolean or a null check and is closed when
+ * the screen opens, yet all seven were statically imported — so opening a group
+ * downloaded and parsed the code for all of them, plus `qrcode` (pulled in by
+ * InviteQrSheet), before anything could paint. This is the heaviest route in the
+ * app, so it is the one where that mattered most.
+ *
+ * `ssr: false` because these are client-only surfaces; there is nothing useful
+ * to render for them on the server, and it keeps them out of the SSR pass.
+ */
+const AddExpenseModal = dynamic(() => import("@/components/AddExpenseModal"), { ssr: false });
+const SettleUpModal = dynamic(() => import("@/components/SettleUpModal"), { ssr: false });
+const ForwardModal = dynamic(() => import("@/components/ForwardModal"), { ssr: false });
+const AddMemberModal = dynamic(() => import("@/components/group/AddMemberModal"), { ssr: false });
+const ActivityDetailModal = dynamic(() => import("@/components/group/ActivityDetailModal"), { ssr: false });
+const PersonStatementSheet = dynamic(() => import("@/components/group/PersonStatementSheet"), { ssr: false });
+const InviteQrSheet = dynamic(() => import("@/components/group/InviteQrSheet"), { ssr: false });
 import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";

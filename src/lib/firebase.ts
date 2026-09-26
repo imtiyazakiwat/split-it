@@ -1,11 +1,26 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider } from "firebase/auth";
-import {
-  getFirestore,
-  initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
-} from "firebase/firestore";
+
+/**
+ * Firebase app + auth only. Firestore deliberately lives in `./firebase-db`.
+ *
+ * Measured: `@firebase/firestore` compiles to a 641 kB client chunk — 46% of the
+ * 1386 kB this app parses before the home screen can become interactive, and more
+ * than react-dom and every line of application code combined. Turbopack already
+ * isolates it into its own chunk; it was only loaded eagerly because this module
+ * created `db` at import time and sat in the root layout's import graph via
+ * AuthProvider.
+ *
+ * Splitting it out means nothing on the critical path mentions
+ * `firebase/firestore` statically, so that chunk is fetched after hydration
+ * instead of blocking it. Auth stays here because the login decision genuinely is
+ * needed immediately.
+ *
+ * Anything needing `db` must `await import("./firebase-db")`. That is enforced by
+ * construction rather than convention: importing it statically from a module the
+ * layout reaches would pull the chunk straight back onto the critical path, and
+ * `npm run analyze:critical` will say so.
+ */
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -22,24 +37,9 @@ export const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const isFirebaseConfigReady = !!firebaseConfig.apiKey;
 
 export const auth = getAuth(app);
-
-// Enable an on-device (IndexedDB) cache so onSnapshot listeners return the
-// last-known data synchronously on reload — no flashing from empty/0 to real
-// values, plus offline support. Falls back to the default in-memory Firestore
-// on the server or if the cache can't be initialized (e.g. HMR re-init).
-function createDb() {
-  if (typeof window === "undefined") return getFirestore(app);
-  try {
-    return initializeFirestore(app, {
-      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
-    });
-  } catch {
-    return getFirestore(app);
-  }
-}
-
-export const db = createDb();
 export const googleProvider = new GoogleAuthProvider();
+
+export { firebaseConfig };
 
 // Analytics only works in the browser (relies on window), and is optional —
 // don't let it break server rendering or environments without measurementId.

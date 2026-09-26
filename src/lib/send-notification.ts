@@ -1,5 +1,6 @@
 import { doc, getDoc } from "firebase/firestore";
-import { auth, db } from "./firebase";
+import { auth } from "./firebase";
+import { db } from "./firebase-db";
 
 interface NotifyParams {
   title: string;

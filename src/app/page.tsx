@@ -1,10 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import NavHint from "@/components/NavHint";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import { createGroup, joinGroupByCode, setGroupArchived } from "@/lib/firestore";
+// Write functions are dynamically imported at the point of use, not here: this is
+// the entry route, and a static import puts the 641 kB Firestore chunk in front of
+// first interaction for the sake of three handlers the user may never trigger.
 import {
   canRespondToSettlement,
   computeBalances,
@@ -42,7 +46,10 @@ function greeting(): string {
 export default function Home() {
   const { user, loading } = useAuth();
   const router = useRouter();
-  const { groups, groupsLoaded, byGroup, datasets, allLoaded, error } = useGroupData();
+  // `allLoaded` deliberately not consumed here any more: gating this screen on
+  // every group having reported was the cause of the blanked hero and the
+  // unresponsive people rows. Progress is now tracked per group below.
+  const { groups, groupsLoaded, byGroup, datasets, error } = useGroupData();
   const { transfers } = usePayments();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
@@ -107,6 +114,7 @@ export default function Home() {
     setBusy(true);
     setFormError("");
     try {
+      const { createGroup } = await import("@/lib/firestore");
       const id = await createGroup(groupName.trim(), currentUser.uid, {
         displayName: currentUser.displayName || currentUser.email || "User",
         email: (currentUser.email || "").toLowerCase(),
@@ -129,6 +137,7 @@ export default function Home() {
     setBusy(true);
     setFormError("");
     try {
+      const { joinGroupByCode } = await import("@/lib/firestore");
       const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, {
         displayName: currentUser.displayName || currentUser.email || "User",
         email: (currentUser.email || "").toLowerCase(),
@@ -158,8 +167,23 @@ export default function Home() {
   const totalReceive = counterparties.reduce((s, c) => s + (c.net < 0 ? -c.net : 0), 0);
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
-  // Show skeletons rather than a misleading ₹0 while data is still arriving.
-  const balancesPending = groups.length > 0 && !allLoaded;
+  /**
+   * Two different states, previously conflated into one.
+   *
+   * The original gate was `groups.length > 0 && !allLoaded`, and `allLoaded`
+   * requires *every* group's expenses AND settlements to have arrived — ten
+   * snapshots for five groups. So one slow or failed listener blanked the
+   * headline figure and disabled the entire people list indefinitely, which is
+   * the worst of both worlds: a number the user already knew is replaced by a
+   * skeleton, and rows they can see refuse to respond to a tap.
+   *
+   * Hiding a total computed from zero groups is right — that really is a
+   * misleading ₹0. But a total from four groups out of five is a real number
+   * that only needs a quiet note that it is still settling.
+   */
+  const loadedGroupCount = groups.filter((g) => byGroup[g.id]?.loaded).length;
+  const noBalancesYet = groups.length > 0 && loadedGroupCount === 0;
+  const balancesSettling = loadedGroupCount > 0 && loadedGroupCount < groups.length;
 
   const peopleToShow = counterparties.filter((c) => !isSettled(c.net));
 
@@ -185,6 +209,7 @@ export default function Home() {
 
   async function handleToggleArchive(groupId: string, archived: boolean) {
     try {
+      const { setGroupArchived } = await import("@/lib/firestore");
       await setGroupArchived(groupId, currentUser.uid, archived);
       showToast({ message: archived ? "Group archived" : "Group restored" });
     } catch (err) {
@@ -296,7 +321,7 @@ export default function Home() {
 
         {/* Summary card — leads with the actionable balance (owe first) */}
         <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-xl)] p-5 shadow-[var(--shadow-card)]">
-          {balancesPending ? (
+          {noBalancesYet ? (
             <div>
               <Skeleton className="h-4 w-24 rounded-md" />
               <Skeleton className="h-10 w-40 mt-2 rounded-lg" />
@@ -327,6 +352,21 @@ export default function Home() {
               <p className="text-[22px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled 🎉</p>
               <p className="text-[14px] text-[var(--text-tertiary)] mt-0.5">No outstanding balances</p>
             </div>
+          )}
+
+          {/* Honest about provisional numbers instead of hiding them. A live
+              figure with a caveat beats a skeleton where a figure used to be. */}
+          {balancesSettling && (
+            <p
+              role="status"
+              className="mt-2 flex items-center gap-1.5 text-[12px] text-[var(--text-tertiary)]"
+            >
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 rounded-full bg-[var(--brand)] animate-pulse"
+              />
+              Still adding up {groups.length - loadedGroupCount} of {groups.length} groups
+            </p>
           )}
 
           <div className="h-px bg-[var(--border-subtle)] my-4" />
@@ -377,14 +417,20 @@ export default function Home() {
                       (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
                     : "Direct payment";
                 return (
-                  <button
+                  // Was a <button> with `disabled={!allLoaded}`, which meant a row
+                  // showing a real balance silently ignored taps until every
+                  // group in the account had reported in — indistinguishable to
+                  // the user from the app being broken. The partial-ledger
+                  // concern it was guarding is now handled honestly by the
+                  // "still adding up" note on the summary above, and the
+                  // statement screen this opens recomputes from live data anyway.
+                  // As a <Link> it also prefetches /reports.
+                  <Link
                     key={person.uid}
-                    onClick={() => router.push(`/reports?person=${person.uid}`)}
-                    // Cross-group figures are only meaningful once every group
-                    // has loaded, so don't invite a tap into a partial ledger.
-                    disabled={!allLoaded}
-                    className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-3.5 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink disabled:opacity-60"
+                    href={`/reports?person=${person.uid}`}
+                    className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-3.5 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink"
                   >
+                    <NavHint />
                     {person.photoURL ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img src={person.photoURL} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" />
@@ -417,7 +463,7 @@ export default function Home() {
                         {isSettled(person.net) ? "₹0" : formatCurrency(Math.abs(person.net))}
                       </p>
                     </div>
-                  </button>
+                  </Link>
                 );
               })}
             </div>
@@ -511,7 +557,7 @@ export default function Home() {
               loaded={row.loaded}
               lastActivityTs={row.lastActivityTs}
               pendingCount={row.pendingCount}
-              onOpen={() => router.push(`/groups/${row.group.id}`)}
+              href={`/groups/${row.group.id}`}
               action={
                 tab === "archived"
                   ? {

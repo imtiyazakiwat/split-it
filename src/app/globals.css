@@ -637,6 +637,59 @@ textarea:focus-visible,
   animation: page-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
+/* ==========================================================================
+   Navigation pending indicator (see components/NavHint.tsx).
+
+   `tap-shrink` only responds to :active, so all press feedback ended the instant
+   the finger lifted — after which a slow navigation gave the user nothing at all
+   and read as "the tap did nothing".
+
+   The indicator starts fully transparent and fades in only after a delay, so a
+   fast navigation never flashes a spinner: if the route is already prefetched
+   and commits in ~20ms, this is removed from the tree before its animation-delay
+   has even elapsed and the user sees nothing. It only ever appears when the
+   navigation is genuinely slow enough to need explaining.
+   ========================================================================== */
+@keyframes nav-hint-in {
+  to {
+    opacity: 1;
+  }
+}
+.nav-hint {
+  opacity: 0;
+  animation: nav-hint-in 0.15s ease-out 0.1s forwards;
+}
+/* Sweeping bar pinned under the status bar — the conventional mobile idiom for
+   "a screen is on its way", and it costs no layout space. */
+.nav-hint-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  z-index: 60;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--brand-solid, var(--brand)) 40%,
+    var(--brand-solid, var(--brand)) 60%,
+    transparent
+  );
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: nav-hint-in 0.15s ease-out 0.1s forwards,
+    nav-hint-sweep 1s ease-in-out 0.1s infinite;
+  pointer-events: none;
+}
+@keyframes nav-hint-sweep {
+  from {
+    background-position: -40% 0;
+  }
+  to {
+    background-position: 140% 0;
+  }
+}
+
 /* Honor reduced-motion across every animated surface: all travel becomes a
    cross-fade, staggering disappears. */
 @media (prefers-reduced-motion: reduce) {
@@ -656,5 +709,12 @@ textarea:focus-visible,
   }
   .tap-shrink {
     transition: none !important;
+  }
+  /* Keep the indicator visible but still: it carries information, so it must not
+     be animated away entirely the way decorative motion is. */
+  .nav-hint,
+  .nav-hint-bar {
+    opacity: 1;
+    animation: none !important;
   }
 }

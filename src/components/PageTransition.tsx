@@ -18,6 +18,26 @@ type Direction = "push" | "pop" | "fade";
  * cross-fade (same depth, no hierarchy). A left-edge drag also pops, like the
  * system swipe-back — gated to touches starting within 20px of the edge,
  * moving mostly horizontally, never while typing or while a sheet is open.
+ *
+ * ── Cost, recorded deliberately ────────────────────────────────────────────
+ * `key={pathname}` remounts the routed tree on every navigation, and `outgoing`
+ * keeps the departing tree mounted for a further EXIT_MS. So a navigation does
+ * strictly more work here than a plain swap would: two trees live at once, and
+ * all derived state in the new one is rebuilt from scratch on arrival.
+ *
+ * That is accepted rather than overlooked. The measured cost of rebuilding this
+ * app's derived state is small — the four ledger passes on the heaviest screen
+ * benchmark at 0.52 ms against a 50 ms budget (`scripts/bench-render.mjs`) — so
+ * the remount buys the animation cheaply. What actually made navigation feel
+ * broken was never the remount; it was that dynamic routes were not prefetched
+ * and had no loading boundary, so the router sat on the old screen waiting for a
+ * server round trip with nothing to show. That is fixed separately by the
+ * `loading.tsx` files, `<Link>`, and `staleTimes`.
+ *
+ * Revisit if `bench-render.mjs` ever reports the per-render figure approaching
+ * the budget (it scales linearly, and crosses it somewhere past ~1,500 expenses
+ * on a mid-range phone). At that point the remount stops being free and this
+ * should hold the tree instead of rebuilding it.
  */
 export default function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();

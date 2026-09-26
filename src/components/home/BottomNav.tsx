@@ -1,6 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import Link from "next/link";
+import NavHint from "@/components/NavHint";
 
 type Tab = "groups" | "pay" | "activity" | "reports" | "profile";
 
@@ -76,7 +77,6 @@ export default function BottomNav({
   active: Tab;
   payBadge?: boolean;
 }) {
-  const router = useRouter();
 
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
@@ -95,9 +95,14 @@ export default function BottomNav({
         {items.map(({ id, label, href, Icon }) => {
           const isActive = id === active;
           return (
-            <button
+            // <Link>, not an onClick router.push: Link is what prefetches the
+            // route (on viewport entry, production only) and what populates the
+            // client router cache. An imperative push does neither, so every tab
+            // switch started from a cold cache — five destinations, reachable
+            // from every screen, none of them warmed.
+            <Link
               key={id}
-              onClick={() => router.push(href)}
+              href={href}
               aria-current={isActive ? "page" : undefined}
               className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 rounded-full min-h-[52px] px-1 py-1 transition-colors duration-200 ${
                 isActive ? "bg-[var(--tint-accent)] text-[var(--brand)]" : "text-[var(--text-secondary)]"
@@ -111,11 +116,15 @@ export default function BottomNav({
                     aria-label="Unread"
                   />
                 )}
+                {/* Pending dot on the icon actually tapped, so the feedback is
+                    unambiguous about which tab is loading. Only becomes visible
+                    if the navigation outlasts its CSS delay. */}
+                <NavHint variant="dot" />
               </span>
               <span className="w-full truncate text-center text-[10px] font-medium leading-none">
                 {label}
               </span>
-            </button>
+            </Link>
           );
         })}
       </div>
