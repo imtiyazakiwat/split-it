@@ -27,7 +27,7 @@ export const metadata: Metadata = {
   applicationName: "SplitIt",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "default",
+    statusBarStyle: "black-translucent",
     title: "SplitIt",
   },
   icons: {
@@ -42,6 +42,9 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
+  // Keyboard resizes the layout viewport instead of overlaying it, so sticky
+  // save/send bars above the fold stay reachable. Ignored where unsupported.
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f2f2f7" },
     { media: "(prefers-color-scheme: dark)", color: "#000000" },

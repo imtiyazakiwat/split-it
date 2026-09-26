@@ -22,6 +22,7 @@ import {
   threadIdFor,
 } from "@/lib/chat";
 import { cancelTransfer, reconcileTransferAllocations } from "@/lib/transfers";
+import { hapticTap } from "@/lib/haptics";
 import { buildConversation, ConversationItem } from "@/lib/conversation";
 import { ChatMessage, DirectTransfer } from "@/lib/types";
 import { getUserProfile } from "@/lib/firestore";
@@ -505,6 +506,7 @@ function ChatPageInner() {
     setDraft("");
     try {
       await sendMessage(currentUser.uid, otherUid, text);
+      hapticTap();
     } catch (err) {
       setDraft(text);
       showToast({
@@ -656,7 +658,7 @@ function ChatPageInner() {
                 }
               }}
               placeholder="Message"
-              className="w-full max-h-28 resize-none rounded-[var(--radius-xl)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+              className="w-full max-h-28 resize-none rounded-[var(--radius-xl)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
             />
           </label>
           <button

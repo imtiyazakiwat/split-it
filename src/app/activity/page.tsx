@@ -213,7 +213,7 @@ export default function ActivityPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)]">Loading…</p>
+        <p className="text-[var(--text-tertiary)]">Loading…</p>
       </div>
     );
   }
@@ -326,7 +326,8 @@ export default function ActivityPage() {
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder={tab === "settlements" ? "Search payments…" : "Search expenses, people…"}
-                className="flex-1 bg-transparent outline-none text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                aria-label="Search activity"
+                className="flex-1 bg-transparent outline-none text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
               />
               {search && (
                 <button

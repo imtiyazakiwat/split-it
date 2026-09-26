@@ -21,6 +21,7 @@ import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import { hapticSuccess } from "@/lib/haptics";
 
 type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
 
@@ -333,7 +334,7 @@ export default function NotificationsPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)]">Loading…</p>
+        <p className="text-[var(--text-tertiary)]">Loading…</p>
       </div>
     );
   }
@@ -351,6 +352,7 @@ export default function NotificationsPage() {
     setBusyId(s.id);
     try {
       await updateSettlementStatus(groupId, s.id, status);
+      hapticSuccess();
       showToast({
         message:
           status === "approved"

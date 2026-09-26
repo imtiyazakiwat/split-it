@@ -94,7 +94,7 @@ export default function ForwardModal({
     <GlassModal title="Forward payment" onClose={onClose}>
       {creditors.length === 0 ? (
         <div className="space-y-4">
-          <p className="text-sm text-[var(--label-secondary)]">
+          <p className="text-sm text-[var(--text-secondary)]">
             You don&apos;t owe anyone in this group, so there&apos;s no one to
             forward this payment to.
           </p>
@@ -104,30 +104,51 @@ export default function ForwardModal({
         </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             {fromName} is paying you {formatCurrency(incomingAmount)}. Pass it on
             to someone you owe.
           </p>
 
-          <div>
-            <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+          {/* Option rows with checkmarks, not a <select>: recognition over
+              recall — every creditor and what you owe them stays visible, so
+              nothing has to be remembered to choose. */}
+          <div role="radiogroup" aria-label="Forward to">
+            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1.5">
               Forward to
-            </label>
-            <select
-              value={targetUid}
-              onChange={(e) => handleTargetChange(e.target.value)}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
-            >
-              {creditors.map((c) => (
-                <option key={c.uid} value={c.uid}>
-                  {c.name} (you owe {formatCurrency(c.amount)})
-                </option>
-              ))}
-            </select>
+            </p>
+            <div className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] overflow-hidden">
+              {creditors.map((c) => {
+                const selected = c.uid === targetUid;
+                return (
+                  <button
+                    key={c.uid}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => handleTargetChange(c.uid)}
+                    className="w-full flex items-center gap-3 px-3.5 py-3 text-left tap-shrink min-h-[44px]"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[16px] text-[var(--text-primary)] truncate">
+                        {c.name}
+                      </span>
+                      <span className="block text-[13px] text-[var(--text-tertiary)]">
+                        you owe {formatCurrency(c.amount)}
+                      </span>
+                    </span>
+                    {selected && (
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="m5 12.5 4.5 4.5L19 7.5" />
+                      </svg>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div>
-            <label className="text-sm font-medium text-[var(--label-secondary)] block mb-1">
+            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
               Amount
             </label>
             <input
@@ -137,11 +158,11 @@ export default function ForwardModal({
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
               placeholder="0.00"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
           </div>
 
-          <p className="text-[13px] text-[var(--label-tertiary)]">
+          <p className="text-[13px] text-[var(--text-tertiary)]">
             This approves {fromName}&apos;s payment and sends a settlement request
             to {target?.name}, who will need to approve it.
           </p>

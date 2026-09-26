@@ -400,7 +400,7 @@ function ReportsInner() {
               No shared expenses yet. Add one in a group and it&rsquo;ll show up here.
             </p>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-2.5 stagger">
               {people.map((p) => (
                 <button
                   key={p.uid}

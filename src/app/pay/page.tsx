@@ -11,7 +11,6 @@ import { isSettled } from "@/lib/money";
 import { DirectTransfer } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import BottomNav from "@/components/home/BottomNav";
-import CollapsibleFab from "@/components/ui/CollapsibleFab";
 import GlassModal from "@/components/ui/GlassModal";
 import Skeleton from "@/components/ui/Skeleton";
 import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
@@ -166,11 +165,22 @@ export default function PayPage() {
       <main className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum">
         <div className="flex items-center justify-between pt-2">
           <h1 className="text-[28px] font-extrabold text-[var(--text-primary)]">Pay</h1>
-          {unreadCount > 0 && (
-            <span className="rounded-full bg-[var(--tint-accent)] px-3 py-1 text-[12px] font-semibold text-[var(--brand)]">
-              {unreadCount} unread
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {unreadCount > 0 && (
+              <span className="rounded-full bg-[var(--tint-accent)] px-3 py-1 text-[12px] font-semibold text-[var(--brand)]">
+                {unreadCount} unread
+              </span>
+            )}
+            <button
+              onClick={() => setShowPicker(true)}
+              aria-label="Send money"
+              className="grid place-items-center w-11 h-11 rounded-full bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] tap-shrink"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          </div>
         </div>
         <p className="text-[15px] text-[var(--text-tertiary)] mt-1 mb-4">
           Send money straight to someone, and see everything you&rsquo;ve settled.
@@ -227,7 +237,7 @@ export default function PayPage() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search people"
-              className="w-full rounded-full border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[15px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+              className="w-full rounded-full border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
             />
           </label>
         )}
@@ -252,7 +262,7 @@ export default function PayPage() {
             Nobody matches that search.
           </p>
         ) : (
-          <div className="space-y-1.5">
+          <div className="space-y-1.5 stagger">
             {rows.map((r) => {
               const iOwe = !isSettled(r.net) && r.net > 0;
               const theyOwe = !isSettled(r.net) && r.net < 0;
@@ -314,12 +324,6 @@ export default function PayPage() {
         )}
       </main>
 
-      <div className="fab-layer fixed z-40 inset-x-0 bottom-[calc(var(--nav-h)+env(safe-area-inset-bottom)+0.75rem)] pointer-events-none">
-        <div className="max-w-md mx-auto px-4 flex justify-end">
-          <CollapsibleFab label="Send money" onClick={() => setShowPicker(true)} />
-        </div>
-      </div>
-
       <BottomNav active="pay" payBadge={unreadCount > 0 || needsDecision > 0} />
 
       {showPicker && (
@@ -331,10 +335,11 @@ export default function PayPage() {
               value={pickerQuery}
               onChange={(e) => setPickerQuery(e.target.value)}
               placeholder="Search people"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[15px] text-[var(--label-primary)] outline-none focus:border-[var(--accent)]"
+              aria-label="Search people"
+              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
             />
             {pickerRows.length === 0 ? (
-              <p className="text-[13px] text-[var(--label-tertiary)] py-4 text-center">
+              <p className="text-[13px] text-[var(--text-tertiary)] py-4 text-center">
                 {counterparties.length === 0
                   ? "You can pay anyone you share a group with. Join a group first."
                   : "Nobody matches that search."}
@@ -354,10 +359,10 @@ export default function PayPage() {
                   >
                     <Avatar name={c.displayName} photoURL={c.photoURL} size={36} />
                     <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-[var(--label-primary)] truncate">
+                      <p className="text-[15px] font-medium text-[var(--text-primary)] truncate">
                         {c.displayName}
                       </p>
-                      <p className="text-[12px] text-[var(--label-tertiary)]">
+                      <p className="text-[12px] text-[var(--text-tertiary)]">
                         {!isSettled(c.net) && c.net > 0
                           ? `You owe ${formatCurrency(c.net)}`
                           : !isSettled(c.net) && c.net < 0

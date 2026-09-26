@@ -1,7 +1,8 @@
 "use client";
 
-import { ReactNode, useEffect } from "react";
+import { ReactNode, useRef } from "react";
 import { useSheetLayer } from "@/lib/sheet-layer";
+import { useOverlayBehavior } from "@/lib/overlay-stack";
 
 /**
  * Bottom sheet on phones, centred dialog on wider screens.
@@ -29,34 +30,37 @@ export default function GlassModal({
 }) {
   useSheetLayer();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  // Topmost-owns-Escape, focus trap, and return-focus live in the shared
+  // overlay stack — sibling document listeners can't arbitrate this with
+  // stopPropagation, so ownership is checked at event time.
+  const dialogRef = useRef<HTMLDivElement | null>(null);
+  useOverlayBehavior(dialogRef, onClose);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]">
       <div
-        className="absolute inset-0 bg-black/50 animate-fade-in"
+        className="absolute inset-0 bg-black/40 backdrop-blur-[2px] [-webkit-backdrop-filter:blur(2px)] animate-fade-in"
         onClick={onClose}
         aria-hidden
       />
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="sheet relative w-full sm:max-w-md rounded-t-[var(--radius-xl)] sm:rounded-[var(--radius-xl)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[88vh] overflow-y-auto scroll-momentum animate-modal-in"
+        className="sheet sheet-viewport relative w-full sm:max-w-md rounded-t-[var(--radius-xl)] sm:rounded-[var(--radius-xl)] p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto scroll-momentum animate-modal-in"
       >
-        <div className="mx-auto mb-3 h-1.5 w-9 rounded-full bg-[var(--border-subtle)] sm:hidden" />
+        <div className="mx-auto mb-3 h-[5px] w-9 rounded-full bg-[var(--border-subtle)] sm:hidden" />
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-[var(--label-primary)]">{title}</h2>
+          <h2 className="text-lg font-semibold text-[var(--text-primary)]">{title}</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="grid place-items-center w-8 h-8 rounded-full bg-[var(--label-tertiary)]/20 text-[var(--label-secondary)] text-lg tap-shrink"
+            className="grid place-items-center w-11 h-11 -m-2 rounded-full tap-shrink"
           >
-            ×
+            <span className="grid place-items-center w-8 h-8 rounded-full bg-[var(--text-tertiary)]/20 text-[var(--text-secondary)] text-lg">
+              ×
+            </span>
           </button>
         </div>
         {children}

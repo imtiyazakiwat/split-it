@@ -57,7 +57,7 @@ export default function JoinPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)]">Loading…</p>
+        <p className="text-[var(--text-tertiary)]">Loading…</p>
       </div>
     );
   }
@@ -65,12 +65,12 @@ export default function JoinPage() {
   if (!user) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
-        <p className="text-[var(--label-secondary)] text-center">
+        <p className="text-[var(--text-secondary)] text-center">
           Sign in to join this group
         </p>
         <button
           onClick={signInWithGoogle}
-          className="glass rounded-full px-6 py-2.5 text-[15px] font-medium text-[var(--label-primary)] tap-shrink"
+          className="glass rounded-full px-6 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink"
         >
           Sign in with Google
         </button>
@@ -84,7 +84,7 @@ export default function JoinPage() {
         {busy ? (
           <>
             <div className="w-12 h-12 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin mx-auto mb-3" />
-            <p className="text-[var(--label-secondary)]">
+            <p className="text-[var(--text-secondary)]">
               {groupName ? `Joining ${groupName}…` : "Looking up group…"}
             </p>
           </>
