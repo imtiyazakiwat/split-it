@@ -53,3 +53,8 @@ next-env.d.ts
 firestore-debug.log
 firebase-debug.log
 ui-debug.log
+
+# Unrelated Swift project living inside this checkout. Ignored rather than
+# committed so it can't be pulled into this repo's history by a stray `git add -A`.
+# Better still, move it out of the working tree.
+/mac-facelock/
