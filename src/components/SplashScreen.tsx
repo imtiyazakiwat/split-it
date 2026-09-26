@@ -6,7 +6,7 @@ import Logo from "@/components/Logo";
  */
 export default function SplashScreen() {
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-white to-indigo-50">
+    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-white to-indigo-50 dark:from-black dark:to-indigo-950">
       <div className="relative animate-splash-logo">
         <Logo className="h-16 w-auto" />
         {/* shimmer sweep clipped to the logo area */}
@@ -19,8 +19,8 @@ export default function SplashScreen() {
         {[0, 1, 2].map((i) => (
           <span
             key={i}
-            className="w-2 h-2 rounded-full bg-indigo-500"
-            style={{ animation: `splash-dot 1.2s ease-in-out ${i * 0.16}s infinite` }}
+            className="w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-splash-dot"
+            style={{ animationDelay: `${i * 0.16}s` }}
           />
         ))}
       </div>

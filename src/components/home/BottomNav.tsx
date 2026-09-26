@@ -10,7 +10,7 @@ const INDIGO = "var(--brand)";
 function GroupsIcon({ active }: { active: boolean }) {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-      stroke={active ? INDIGO : "currentColor"} strokeWidth="1.8"
+      stroke={active ? INDIGO : "currentColor"} strokeWidth={active ? 2 : 1.8}
       strokeLinecap="round" strokeLinejoin="round">
       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
@@ -23,7 +23,7 @@ function GroupsIcon({ active }: { active: boolean }) {
 function ActivityIcon({ active }: { active: boolean }) {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-      stroke={active ? INDIGO : "currentColor"} strokeWidth="1.8"
+      stroke={active ? INDIGO : "currentColor"} strokeWidth={active ? 2 : 1.8}
       strokeLinecap="round" strokeLinejoin="round">
       <circle cx="12" cy="12" r="9" />
       <path d="M12 7v5l3 2" />
@@ -32,9 +32,9 @@ function ActivityIcon({ active }: { active: boolean }) {
 }
 
 function ReportsIcon({ active }: { active: boolean }) {
-  const stroke = active ? "var(--brand)" : "var(--label-secondary)";
+  const stroke = active ? "var(--brand)" : "currentColor";
   return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={active ? 2 : 1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M4 4h16v16H4zM8 4v16M8 9h12M8 14h12" />
     </svg>
   );
@@ -42,7 +42,7 @@ function ReportsIcon({ active }: { active: boolean }) {
 function ProfileIcon({ active }: { active: boolean }) {
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-      stroke={active ? INDIGO : "currentColor"} strokeWidth="1.8"
+      stroke={active ? INDIGO : "currentColor"} strokeWidth={active ? 2 : 1.8}
       strokeLinecap="round" strokeLinejoin="round">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
@@ -54,7 +54,7 @@ function PayIcon({ active }: { active: boolean }) {
   const stroke = active ? INDIGO : "currentColor";
   return (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none"
-      stroke={stroke} strokeWidth="1.8"
+      stroke={stroke} strokeWidth={active ? 2 : 1.8}
       strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       {/* Speech bubble with a rupee inside: the tab is a conversation about money. */}
       <path d="M21 11.5a8 8 0 0 1-8 8H8l-4 3v-4.6A8 8 0 0 1 13 3.5a8 8 0 0 1 8 8Z" />
@@ -63,14 +63,21 @@ function PayIcon({ active }: { active: boolean }) {
   );
 }
 
+/**
+ * iOS 26 floating tab bar: a frosted Liquid Glass capsule hovering above
+ * content. Deliberately static — no shrink/collapse animation. Apple's own
+ * beta cycle made bars more opaque (readability over translucency), and a
+ * collapsing bar hides labels mid-scroll, which strands navigation.
+ */
 export default function BottomNav({
   active,
-  /** Small dot on the Pay tab: unseen messages, or money awaiting a decision. */
+  /** Red badge on the Pay tab: unseen messages, or money awaiting a decision. */
   payBadge = false,
 }: {
   active: Tab;
   payBadge?: boolean;
 }) {
+
   const items: { id: Tab; label: string; href: string; Icon: (p: { active: boolean }) => React.ReactElement }[] = [
     { id: "groups", label: "Groups", href: "/", Icon: GroupsIcon },
     { id: "pay", label: "Pay", href: "/pay", Icon: PayIcon },
@@ -80,46 +87,43 @@ export default function BottomNav({
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-20 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 pointer-events-none">
-      <div className="pointer-events-auto max-w-md mx-auto glass-strong rounded-[var(--radius-xl)] px-2 py-2 flex items-center shadow-[var(--shadow-float)]">
+    <nav
+      aria-label="Primary"
+      className="fixed inset-x-0 bottom-0 z-20 pointer-events-none flex justify-center px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+    >
+      <div className="liquid-tab pointer-events-auto flex items-center gap-0.5 w-full max-w-md px-2 py-1.5">
         {items.map(({ id, label, href, Icon }) => {
           const isActive = id === active;
           return (
-            // <Link> rather than an onClick router.push: Link is what prefetches
-            // the route (on viewport entry in production) and what populates the
+            // <Link>, not an onClick router.push: Link is what prefetches the
+            // route (on viewport entry, production only) and what populates the
             // client router cache. An imperative push does neither, so every tab
-            // switch started from a cold cache — five screens, all reachable from
-            // every screen, all previously unprefetched.
+            // switch started from a cold cache — five destinations, reachable
+            // from every screen, none of them warmed.
             <Link
               key={id}
               href={href}
               aria-current={isActive ? "page" : undefined}
-              className={`flex-1 flex flex-col items-center gap-1 py-1.5 rounded-[var(--radius-inner)] tap-shrink ${
-                isActive ? "bg-[var(--tint-accent)]" : ""
+              className={`flex-1 min-w-0 flex flex-col items-center justify-center gap-1 rounded-full min-h-[52px] px-1 py-1 transition-colors duration-200 ${
+                isActive ? "bg-[var(--tint-accent)] text-[var(--brand)]" : "text-[var(--text-secondary)]"
               }`}
             >
-              <span className="relative">
+              <span className="relative shrink-0">
                 <Icon active={isActive} />
                 {id === "pay" && payBadge && (
                   <span
-                    className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-[var(--neg)] ring-2 ring-[var(--surface)]"
+                    className="absolute top-0 right-0 h-2.5 w-2.5 rounded-full bg-[var(--neg)]"
                     aria-label="Unread"
                   />
                 )}
-                {/* Pending dot sits on the icon that was actually tapped, so the
-                    feedback is unambiguous about which tab is loading. */}
+                {/* Pending dot on the icon actually tapped, so the feedback is
+                    unambiguous about which tab is loading. Only becomes visible
+                    if the navigation outlasts its CSS delay. */}
                 <NavHint variant="dot" />
               </span>
-              <span
-                className={`text-[11px] font-medium ${
-                  isActive ? "text-[var(--brand)]" : "text-[var(--label-secondary)]"
-                }`}
-              >
+              <span className="w-full truncate text-center text-[10px] font-medium leading-none">
                 {label}
               </span>
-              <span
-                className={`h-1 w-1 rounded-full ${isActive ? "bg-[var(--brand)]" : "bg-transparent"}`}
-              />
             </Link>
           );
         })}

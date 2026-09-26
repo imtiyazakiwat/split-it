@@ -1,27 +1,176 @@
-import { ReactNode } from "react";
+"use client";
+
+import { usePathname, useRouter } from "next/navigation";
+import { ReactNode, useLayoutEffect, useEffect, useRef, useState } from "react";
+
+/** Top-level destinations: switching between them cross-fades (no push). */
+const TAB_ROOTS = new Set(["/", "/pay", "/activity", "/reports", "/settings"]);
+
+/** How long the outgoing layer stays mounted. Must exceed --dur-route. */
+const EXIT_MS = 450;
+
+type Direction = "push" | "pop" | "fade";
 
 /**
- * Wrapper for the routed content.
+ * iOS-style routed transitions with both views mounted through the move:
+ * incoming travels full width while outgoing parallaxes to -32% and dims —
+ * that continuity is what reads as a push rather than a pan. Tab switches
+ * cross-fade (same depth, no hierarchy). A left-edge drag also pops, like the
+ * system swipe-back — gated to touches starting within 20px of the edge,
+ * moving mostly horizontally, never while typing or while a sheet is open.
  *
- * This used to be `<div key={pathname} className="page-enter">`, which was
- * actively harmful on two counts:
+ * ── Cost, recorded deliberately ────────────────────────────────────────────
+ * `key={pathname}` remounts the routed tree on every navigation, and `outgoing`
+ * keeps the departing tree mounted for a further EXIT_MS. So a navigation does
+ * strictly more work here than a plain swap would: two trees live at once, and
+ * all derived state in the new one is rebuilt from scratch on arrival.
  *
- * 1. `key={pathname}` made React unmount the entire previous screen and mount a
- *    brand-new tree on every navigation. All page-level state was discarded and
- *    every derived value recomputed from scratch on arrival — the most expensive
- *    possible way to change screens.
+ * That is accepted rather than overlooked. The measured cost of rebuilding this
+ * app's derived state is small — the four ledger passes on the heaviest screen
+ * benchmark at 0.52 ms against a 50 ms budget (`scripts/bench-render.mjs`) — so
+ * the remount buys the animation cheaply. What actually made navigation feel
+ * broken was never the remount; it was that dynamic routes were not prefetched
+ * and had no loading boundary, so the router sat on the old screen waiting for a
+ * server round trip with nothing to show. That is fixed separately by the
+ * `loading.tsx` files, `<Link>`, and `staleTimes`.
  *
- * 2. The `page-enter` animation could only start *after* the router committed
- *    the new route. So during the wait nothing moved at all, and the fade played
- *    once the delay was already over — decorating the end of the stall rather
- *    than covering it. Perceived responsiveness now comes from the route-level
- *    `loading.tsx` boundaries and the `<NavHint />` pending indicator, both of
- *    which appear *during* the navigation, which is when feedback is worth
- *    anything.
- *
- * With no pathname dependency left this no longer needs to be a Client
- * Component, so it drops out of the client bundle entirely.
+ * Revisit if `bench-render.mjs` ever reports the per-render figure approaching
+ * the budget (it scales linearly, and crosses it somewhere past ~1,500 expenses
+ * on a mid-range phone). At that point the remount stops being free and this
+ * should hold the tree instead of rebuilding it.
  */
 export default function PageTransition({ children }: { children: ReactNode }) {
-  return <div className="flex-1 flex flex-col min-h-full">{children}</div>;
+  const pathname = usePathname();
+  const router = useRouter();
+  const stackRef = useRef<string[]>([]);
+  const prevChildrenRef = useRef<ReactNode>(children);
+  const [direction, setDirection] = useState<Direction>("fade");
+  const [outgoing, setOutgoing] = useState<{ key: string; node: ReactNode } | null>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const gestureRef = useRef<{ startX: number; startY: number; active: boolean }>({
+    startX: 0,
+    startY: 0,
+    active: false,
+  });
+
+  const prevRef = useRef(pathname);
+  // Layout effect so the correct animation class is set before paint — one
+  // animation per navigation, never a flash of the wrong direction.
+  useLayoutEffect(() => {
+    const prev = prevRef.current;
+    if (prev === pathname) {
+      prevChildrenRef.current = children;
+      return;
+    }
+    const stack = stackRef.current;
+    let dir: Direction;
+    if (stack.length >= 2 && stack[stack.length - 2] === pathname) {
+      stack.pop();
+      dir = "pop";
+    } else {
+      if (stack[stack.length - 1] !== prev) stack.push(prev);
+      stack.push(pathname);
+      if (stack.length > 20) stack.splice(0, stack.length - 20);
+      // Tab-to-tab switches never slide: same depth, no hierarchy.
+      dir = TAB_ROOTS.has(prev) && TAB_ROOTS.has(pathname) ? "fade" : "push";
+    }
+    // Hold the departing view for the outgoing half of the move. Effects in
+    // the old tree stay alive for EXIT_MS — reads, not writes, so nothing
+    // fires twice that matters.
+    setOutgoing({ key: prev, node: prevChildrenRef.current });
+    prevChildrenRef.current = children;
+    prevRef.current = pathname;
+    setDirection(dir);
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+    exitTimer.current = setTimeout(() => setOutgoing(null), EXIT_MS);
+  }, [pathname, children]);
+
+  useEffect(() => () => {
+    if (exitTimer.current) clearTimeout(exitTimer.current);
+  }, []);
+
+  // Interactive edge-swipe back.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let raf = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      const t = e.touches[0];
+      if (!t || t.clientX > 20) return;
+      const target = e.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable]")) return;
+      if (document.body.hasAttribute("data-sheet-open")) return;
+      if (TAB_ROOTS.has(window.location.pathname)) return;
+      gestureRef.current = { startX: t.clientX, startY: t.clientY, active: true };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const g = gestureRef.current;
+      if (!g.active || !el) return;
+      const t = e.touches[0];
+      if (!t) return;
+      const dx = t.clientX - g.startX;
+      const dy = Math.abs(t.clientY - g.startY);
+      if (dx < 0 || dy > dx * 0.6) {
+        g.active = false;
+        el.style.transform = "";
+        return;
+      }
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        if (el) el.style.transform = `translateX(${Math.min(dx, 120)}px)`;
+      });
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      const g = gestureRef.current;
+      if (!g.active || !el) return;
+      g.active = false;
+      cancelAnimationFrame(raf);
+      const t = e.changedTouches[0];
+      const dx = t ? t.clientX - g.startX : 0;
+      el.style.transition = "transform 0.25s cubic-bezier(0.32,0.72,0,1)";
+      if (dx > 96) {
+        el.style.transform = "translateX(40px)";
+        el.style.opacity = "0.4";
+        setTimeout(() => router.back(), 60);
+      } else {
+        el.style.transform = "";
+      }
+      setTimeout(() => {
+        if (el) {
+          el.style.transition = "";
+          el.style.transform = "";
+          el.style.opacity = "";
+        }
+      }, 300);
+    };
+
+    document.addEventListener("touchstart", onTouchStart, { passive: true });
+    document.addEventListener("touchmove", onTouchMove, { passive: true });
+    document.addEventListener("touchend", onTouchEnd, { passive: true });
+    return () => {
+      document.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+      cancelAnimationFrame(raf);
+    };
+  }, [router]);
+
+  const incomingCls =
+    direction === "push" ? "page-push-in" : direction === "pop" ? "page-pop-in" : "page-enter";
+  const outgoingCls =
+    direction === "push" ? "page-push-out" : direction === "pop" ? "page-pop-out" : "page-fade-out";
+  return (
+    <div key={pathname} ref={wrapRef} className="route-stage flex-1 flex flex-col min-h-full">
+      <div className={`route-incoming flex-1 flex flex-col min-h-full ${incomingCls}`}>
+        {children}
+      </div>
+      {outgoing && (
+        <div key={outgoing.key} aria-hidden className={`route-outgoing ${outgoingCls}`}>
+          {outgoing.node}
+        </div>
+      )}
+    </div>
+  );
 }

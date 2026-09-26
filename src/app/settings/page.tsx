@@ -54,7 +54,7 @@ export default function SettingsPage() {
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--label-tertiary)]">Loading…</p>
+        <p className="text-[var(--text-tertiary)]">Loading…</p>
       </div>
     );
   }
@@ -186,7 +186,7 @@ export default function SettingsPage() {
                 autoCorrect="off"
                 spellCheck={false}
               />
-              <p className="text-[12px] text-[var(--label-tertiary)] mt-1">
+              <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
                 Shared with your groups so they can pay you in one tap.
                 {upiId.trim() && !isValidUpiId(upiId.trim()) && (
                   <span className="block text-[var(--danger)] mt-0.5">
@@ -208,10 +208,10 @@ export default function SettingsPage() {
         <Card className="p-4">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-[15px] font-medium text-[var(--label-primary)]">
+              <p className="text-[15px] font-medium text-[var(--text-primary)]">
                 Push notifications
               </p>
-              <p className="text-[13px] text-[var(--label-tertiary)]">
+              <p className="text-[13px] text-[var(--text-tertiary)]">
                 Get notified when someone sends a settlement request or adds an expense
               </p>
             </div>
