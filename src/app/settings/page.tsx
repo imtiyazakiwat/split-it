@@ -5,17 +5,17 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import {
   updateUserProfile,
-  saveFcmToken,
-  removeFcmToken,
   getUserProfile,
 } from "@/lib/firestore";
 import { isValidUpiId } from "@/lib/upi";
 import LoginScreen from "@/components/LoginScreen";
 import { uploadImage } from "@/lib/storage";
 import {
-  requestNotificationPermission,
-  getFcmToken,
+  describePushFailure,
+  disablePushForUser,
+  enablePushForUser,
 } from "@/lib/notifications";
+import { usePushStatus } from "@/lib/use-push";
 import TopBar from "@/components/TopBar";
 import Card from "@/components/ui/Card";
 import { GlassField } from "@/components/ui/GlassField";
@@ -29,7 +29,12 @@ export default function SettingsPage() {
   const [upiId, setUpiId] = useState("");
   const [photoFile, setPhotoFile] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState("");
-  const [notificationsOn, setNotificationsOn] = useState(false);
+  // Per device, read from the browser — not `!!users/{uid}.fcmToken`, which
+  // reported "on" on every device once any one of them had a token.
+  const pushStatus = usePushStatus(user?.uid);
+  const notificationsOn = pushStatus === "on";
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
@@ -42,7 +47,6 @@ export default function SettingsPage() {
         setDisplayName(data?.displayName || fallbackName);
         setUpiId(data?.upiId || "");
         setPhotoPreview(data?.photoURL || user.photoURL || "");
-        setNotificationsOn(!!data?.fcmToken);
       })
       .catch(() => {
         // Offline or blocked read: still let the user edit and save.
@@ -108,23 +112,18 @@ export default function SettingsPage() {
   }
 
   async function toggleNotifications() {
-    if (notificationsOn) {
-      await removeFcmToken(currentUser.uid);
-      setNotificationsOn(false);
-      return;
-    }
-    const granted = await requestNotificationPermission();
-    if (!granted) {
-      setError("Notification permission denied.");
-      return;
-    }
-    const token = await getFcmToken();
-    if (token) {
-      await saveFcmToken(currentUser.uid, token);
-      setNotificationsOn(true);
-      setError("");
-    } else {
-      setError("Could not get notification token. Check FCM VAPID key config.");
+    if (pushBusy) return;
+    setPushBusy(true);
+    setPushMessage("");
+    try {
+      if (notificationsOn) {
+        await disablePushForUser(currentUser.uid);
+        return;
+      }
+      const result = await enablePushForUser(currentUser.uid);
+      if (!result.ok) setPushMessage(describePushFailure(result.reason));
+    } finally {
+      setPushBusy(false);
     }
   }
 
@@ -217,8 +216,13 @@ export default function SettingsPage() {
             </div>
             <button
               type="button"
+              role="switch"
+              aria-checked={notificationsOn}
+              aria-label="Push notifications"
+              aria-busy={pushBusy}
+              disabled={pushBusy || pushStatus === "needs-install" || pushStatus === "unsupported" || pushStatus === "unavailable"}
               onClick={toggleNotifications}
-              className={`relative w-12 h-7 rounded-full transition-colors ${
+              className={`relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${
                 notificationsOn ? "bg-[var(--accent)]" : "bg-[var(--border-subtle)]"
               }`}
             >
@@ -229,6 +233,12 @@ export default function SettingsPage() {
               />
             </button>
           </div>
+          {(pushMessage || pushStatus === "denied" || pushStatus === "needs-install") && (
+            <p role="status" className="text-[13px] text-[var(--text-secondary)] mt-2">
+              {pushMessage ||
+                describePushFailure(pushStatus === "denied" ? "denied" : "needs-install")}
+            </p>
+          )}
         </Card>
 
         <button

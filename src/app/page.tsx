@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import NavHint from "@/components/NavHint";
+import NotificationPrompt from "@/components/home/NotificationPrompt";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 // Write functions are dynamically imported at the point of use, not here: this is
@@ -393,6 +394,8 @@ export default function Home() {
             <span className="text-[var(--text-quaternary)] text-lg">›</span>
           </button>
         </div>
+
+        <NotificationPrompt uid={currentUser.uid} hasGroups={groups.length > 0} />
 
         {/* Balances by person, netted across groups plus direct payments.
             Group rows below stay group-only; direct lives here and in Reports. */}

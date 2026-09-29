@@ -30,7 +30,6 @@ import { isArchivedFor } from "@/lib/group-filters";
 import { groupItemLink } from "@/lib/statement";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
 import { categoryMeta } from "@/lib/categories";
-import { showLocalNotification } from "@/lib/notifications";
 import GlassButton from "@/components/ui/GlassButton";
 import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
@@ -268,14 +267,12 @@ function GroupPageInner() {
     if (!group) return;
     try {
       await respondToSettlement(s, "approved");
+      // The toast is the confirmation. This used to also raise a system
+      // notification telling the user about the tap they had just made — noise
+      // on desktop, and on Android `new Notification()` throws outright.
       showToast({
         message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
       });
-      showLocalNotification(
-        "Settlement approved",
-        `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
-        `/groups/${group.id}`
-      );
     } catch (err) {
       showToast({
         message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve",
@@ -440,14 +437,18 @@ function GroupPageInner() {
     // Hide immediately; commit to Firestore only after the undo window.
     setPendingDeleteIds((prev) => new Set(prev).add(id));
     const timer = setTimeout(() => {
-      deleteExpense(gid, id, deletedBy);
-      showLocalNotification(
-        "Expense deleted",
-        `${expense.description} was deleted by admin`,
-        `/groups/${gid}`
-      );
-      // Leave the id in pendingDeleteIds: the incoming editAction:"deleted"
-      // will keep it hidden, so removing here would only risk a reappear flash.
+      // Leave the id in pendingDeleteIds on success: the incoming
+      // editAction:"deleted" keeps it hidden, and removing it here would only
+      // risk a reappear flash. On failure it must come back, or the expense
+      // looks deleted while still counting towards every balance.
+      deleteExpense(gid, id, deletedBy).catch(() => {
+        setPendingDeleteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        showToast({ message: `Couldn't delete “${expense.description}” — it's back.` });
+      });
     }, 5000);
     showToast({
       message: `“${expense.description}” deleted`,

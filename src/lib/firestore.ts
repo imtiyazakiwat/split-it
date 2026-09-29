@@ -640,12 +640,66 @@ export async function resolveUpiId(
   }
 }
 
-// ── FCM / Notifications ─────────────────────────────────────
+// ── Push devices ────────────────────────────────────────────
+//
+// One document per install at users/{uid}/devices/{deviceId}. This replaces the
+// single users/{uid}.fcmToken field, where the last device to open the app
+// overwrote every other device's token and those devices silently stopped
+// receiving anything.
+//
+// The legacy field is still honoured in both directions until the new rules are
+// deployed: the server reads it alongside the device documents, and a device
+// whose write to devices/ is rejected by old rules falls back to it. Shipping
+// this code before the rules therefore degrades to the old behaviour instead of
+// breaking notifications.
 
-export async function saveFcmToken(uid: string, token: string): Promise<void> {
-  await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
+function isPermissionDenied(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "permission-denied";
 }
 
-export async function removeFcmToken(uid: string): Promise<void> {
-  await setDoc(doc(db, "users", uid), { fcmToken: "" }, { merge: true });
+export type PushPlatform = "ios" | "android" | "desktop";
+
+export async function registerPushDevice(
+  uid: string,
+  deviceId: string,
+  token: string,
+  platform: PushPlatform
+): Promise<"device" | "legacy"> {
+  try {
+    // A full overwrite, not a merge: the rules accept exactly these four fields.
+    await setDoc(doc(db, "users", uid, "devices", deviceId), {
+      token,
+      platform,
+      enabled: true,
+      updatedAt: Date.now(),
+    });
+    return "device";
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+    await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
+    return "legacy";
+  }
+}
+
+export async function disablePushDevice(uid: string, deviceId: string): Promise<void> {
+  const deviceRef = doc(db, "users", uid, "devices", deviceId);
+  let deviceToken: string | undefined;
+  try {
+    const snap = await getDoc(deviceRef);
+    if (snap.exists()) {
+      deviceToken = snap.get("token") as string | undefined;
+      await updateDoc(deviceRef, { enabled: false, updatedAt: Date.now() });
+    }
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+  }
+
+  // Clear the legacy field when it points at this device — or when there's no
+  // device document to compare against, which is the only way "off" can work
+  // while the old rules are still deployed.
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const legacy = userSnap.get("fcmToken") as string | undefined;
+  if (legacy && (!deviceToken || legacy === deviceToken)) {
+    await setDoc(doc(db, "users", uid), { fcmToken: "" }, { merge: true });
+  }
 }

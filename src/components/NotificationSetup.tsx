@@ -2,56 +2,31 @@
 
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
-import { getFcmToken, onForegroundMessage } from "@/lib/notifications";
+import { refreshPushForUser } from "@/lib/notifications";
 
 /**
- * `saveFcmToken` is imported dynamically below rather than here.
+ * Keeps this device's push registration fresh on launch.
  *
- * This component is rendered by the root layout, so a static
- * `import { saveFcmToken } from "@/lib/firestore"` put the 641 kB Firestore chunk
- * on the critical path of every route — for a single token write that happens
- * after permission has already been granted. It was the last edge keeping that
- * chunk in the initial script set after every other path had been made async,
- * and it was found by `scripts/trace-critical-imports.mjs` rather than by
- * reading, because one missed edge is invisible in the bundle output.
+ * It never prompts for permission (that only happens from a tap, which iOS
+ * requires), and it does nothing when the user turned notifications off on this
+ * device. The old version re-saved the token on every launch whenever
+ * permission was granted, so switching notifications off in Settings was
+ * silently undone the next time the app opened.
+ *
+ * The old foreground `onMessage` handler is gone too: it only ever fired when
+ * the Firebase messaging worker was the active one, and the app now has a
+ * single worker (public/sw.js) that shows every push itself.
+ *
+ * Firestore and firebase/messaging are both reached through dynamic imports
+ * inside `refreshPushForUser`, so this component — rendered by the root layout —
+ * adds nothing to the critical path.
  */
-
 export default function NotificationSetup() {
   const { user } = useAuth();
 
   useEffect(() => {
     if (!user) return;
-
-    const unsubMessage = onForegroundMessage((payload) => {
-      if (payload.title && "Notification" in window && Notification.permission === "granted") {
-        // Tagging means the same message can't appear twice, whichever path
-        // renders it (this handler, or the service worker mid-transition).
-        new Notification(payload.title, {
-          body: payload.body,
-          icon: "/icon-192.png",
-          tag: payload.tag,
-        });
-      }
-    });
-
-    return () => {
-      unsubMessage?.();
-    };
-  }, [user]);
-
-  // Refresh token on user change
-  useEffect(() => {
-    if (!user) return;
-    if (!("Notification" in window)) return;
-
-    if (Notification.permission === "granted") {
-      void (async () => {
-        const token = await getFcmToken();
-        if (!token) return;
-        const { saveFcmToken } = await import("@/lib/firestore");
-        await saveFcmToken(user.uid, token);
-      })();
-    }
+    void refreshPushForUser(user.uid);
   }, [user]);
 
   return null;
