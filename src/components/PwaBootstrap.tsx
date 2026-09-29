@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { getAppServiceWorker } from "@/lib/sw-registration";
 
 export default function PwaBootstrap() {
   const [state, setState] = useState({
@@ -39,12 +40,10 @@ export default function PwaBootstrap() {
       });
     }
 
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
-        // Non-fatal: app still works without the service worker,
-        // just loses share-target file capture and offline caching.
-      });
-    }
+    // Through the shared helper so this and push-token acquisition always
+    // register the same worker at the same scope. Non-fatal on failure: the app
+    // still works, it just loses share-target capture, offline caching and push.
+    void getAppServiceWorker();
   }, []);
 
   // Tracks the visible viewport (keyboard, Safari chrome) into --app-height so
