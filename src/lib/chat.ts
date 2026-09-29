@@ -17,7 +17,7 @@ import { threadIdFor } from "./chat-thread";
 // in ./chat-thread because they are pure and the root layout needs them without
 // pulling Firestore. See lib/chat-thread.ts.
 export { threadIdFor, hasUnread } from "./chat-thread";
-import { notifyUsers } from "./send-notification";
+import { actorName, notifyUsers } from "./send-notification";
 
 /**
  * Two-person chat threads.
@@ -130,15 +130,13 @@ export async function sendMessage(
   batch.set(messageRef, { fromUid, text, createdAt: now });
   await batch.commit();
 
-  try {
-    notifyUsers([toUid], {
-      title: "New message",
-      body: text.length > 120 ? `${text.slice(0, 117)}…` : text,
-      link: `/chat/${fromUid}`,
-    });
-  } catch {
-    // best-effort
-  }
+  // Titled with the sender, the way messaging apps do, rather than "New
+  // message". Best-effort and never throws.
+  notifyUsers([toUid], {
+    title: actorName(),
+    body: text.length > 120 ? `${text.slice(0, 117)}…` : text,
+    link: `/chat/${fromUid}`,
+  });
 }
 
 /** Marks everything up to now as seen by `uid`. */

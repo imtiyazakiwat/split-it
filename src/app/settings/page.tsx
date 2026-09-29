@@ -16,6 +16,7 @@ import {
   enablePushForUser,
 } from "@/lib/notifications";
 import { usePushStatus } from "@/lib/use-push";
+import { sendTestNotification } from "@/lib/send-notification";
 import TopBar from "@/components/TopBar";
 import Card from "@/components/ui/Card";
 import { GlassField } from "@/components/ui/GlassField";
@@ -122,6 +123,28 @@ export default function SettingsPage() {
       }
       const result = await enablePushForUser(currentUser.uid);
       if (!result.ok) setPushMessage(describePushFailure(result.reason));
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  // Proves the whole pipeline — this device's token, the server, FCM and the
+  // service worker — in one tap, which is the fastest way to answer
+  // "are notifications working?" for a user or for us.
+  async function handleTestPush() {
+    setPushBusy(true);
+    setPushMessage("");
+    try {
+      const result = await sendTestNotification();
+      setPushMessage(
+        result.ok
+          ? "Sent. It should arrive in a few seconds."
+          : result.reason === "rate-limited"
+          ? "Too many tests in a row. Try again in a few minutes."
+          : result.reason === "no-device"
+          ? "This device isn't registered yet. Turn notifications off and on again."
+          : "Couldn't send a test. Check your connection and try again."
+      );
     } finally {
       setPushBusy(false);
     }
@@ -238,6 +261,16 @@ export default function SettingsPage() {
               {pushMessage ||
                 describePushFailure(pushStatus === "denied" ? "denied" : "needs-install")}
             </p>
+          )}
+          {notificationsOn && (
+            <button
+              type="button"
+              onClick={handleTestPush}
+              disabled={pushBusy}
+              className="mt-3 min-h-11 text-[15px] font-medium text-[var(--brand)] tap-shrink disabled:opacity-50"
+            >
+              Send a test notification
+            </button>
           )}
         </Card>
 

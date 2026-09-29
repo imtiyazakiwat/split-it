@@ -21,7 +21,7 @@ import {
   Group, Expense, Settlement, SettlementStatus, SettlementKind,
   SplitType, ExpenseSplit, UserProfile,
 } from "./types";
-import { notifyGroupMembers, notifyUsers } from "./send-notification";
+import { actorName, notifyGroupMembers, notifyUsers, rupees } from "./send-notification";
 import { groupItemLink } from "./statement";
 import { normaliseSplits } from "./balance";
 import { roundMoney, sumMoney } from "./money";
@@ -313,17 +313,12 @@ export async function addExpense(
     createdAt: Date.now(),
   });
 
-  try {
-    const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const groupName = groupSnap.data()?.name || "Group";
-    notifyGroupMembers(groupId, data.createdBy, {
-      title: groupName,
-      body: `New expense: ${data.description} — ₹${data.amount}`,
-      link: groupItemLink(groupId, { kind: "expense", id: ref.id }),
-    });
-  } catch {
-    // notification is best-effort
-  }
+  // Best-effort and not awaited. The server resolves the members and titles it
+  // with the group name, so there's no group read here any more.
+  notifyGroupMembers(groupId, {
+    body: `${actorName()} added ${data.description} · ${rupees(amount)}`,
+    link: groupItemLink(groupId, { kind: "expense", id: ref.id }),
+  });
 
   return ref.id;
 }
@@ -380,18 +375,10 @@ export async function updateExpense(
   });
 
   if (editedBy) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Group";
-      const desc = data.description || "Expense";
-      notifyGroupMembers(groupId, editedBy, {
-        title: groupName,
-        body: `${desc} was updated`,
-        link: groupItemLink(groupId, { kind: "expense", id: expenseId }),
-      });
-    } catch {
-      // best-effort
-    }
+    notifyGroupMembers(groupId, {
+      body: `${actorName()} updated ${data.description || "an expense"}`,
+      link: groupItemLink(groupId, { kind: "expense", id: expenseId }),
+    });
   }
 }
 
@@ -409,17 +396,10 @@ export async function deleteExpense(
   });
 
   if (deletedBy) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Group";
-      notifyGroupMembers(groupId, deletedBy, {
-        title: groupName,
-        body: `${desc} was removed`,
-        link: `/groups/${groupId}`,
-      });
-    } catch {
-      // best-effort
-    }
+    notifyGroupMembers(groupId, {
+      body: `${actorName()} removed ${desc}`,
+      link: `/groups/${groupId}`,
+    });
   }
 }
 
@@ -493,24 +473,18 @@ export async function addSettlementRequest(
   );
 
   // The person who did NOT raise the record is the one who has to act on it.
+  // `createdBy` is always the signed-in user, so they name themselves here and
+  // the server titles the push with the group name.
   const approver = data.createdBy === data.fromUid ? data.toUid : data.fromUid;
-  try {
-    const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const group = groupSnap.data();
-    const creatorName =
-      (group?.members as Record<string, { displayName: string }>)?.[data.createdBy]
-        ?.displayName || "Someone";
-    notifyUsers([approver], {
-      title: group?.name || "Settlement request",
-      body:
-        data.createdBy === data.fromUid
-          ? `${creatorName} says they paid you ₹${data.amount}`
-          : `${creatorName} recorded a ₹${data.amount} payment from you`,
-      link: groupItemLink(groupId, { kind: "settlement", id: ref.id }),
-    });
-  } catch {
-    // best-effort
-  }
+  const amount = rupees(roundMoney(data.amount));
+  notifyUsers([approver], {
+    groupId,
+    body:
+      data.createdBy === data.fromUid
+        ? `${actorName()} says they paid you ${amount}. Tap to confirm.`
+        : `${actorName()} recorded a ${amount} payment from you`,
+    link: groupItemLink(groupId, { kind: "settlement", id: ref.id }),
+  });
 
   return ref.id;
 }
@@ -540,17 +514,11 @@ export async function updateSettlementStatus(
   });
 
   if (creator) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Settlement";
-      notifyUsers([creator], {
-        title: groupName,
-        body: `Your settlement request of ₹${amount} was ${status}`,
-        link: groupItemLink(groupId, { kind: "settlement", id: settlementId }),
-      });
-    } catch {
-      // best-effort
-    }
+    notifyUsers([creator], {
+      groupId,
+      body: `${actorName()} ${status === "approved" ? "confirmed" : "declined"} your ${rupees(amount)} payment`,
+      link: groupItemLink(groupId, { kind: "settlement", id: settlementId }),
+    });
   }
 }
 
