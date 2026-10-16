@@ -1,12 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { addSettlementRequest, updateSettlementStatus } from "@/lib/firestore";
 import { formatCurrency } from "@/lib/balance";
 import { toPaise } from "@/lib/money";
-import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
+import { hapticTap } from "@/lib/haptics";
 import { useToast } from "@/components/ui/Toast";
+import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
+import { AmountField } from "@/components/kit/AmountField";
+import { Button, EmptyState } from "@/components/kit/Controls";
+import { List, Section, sepInset } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { Icon } from "@/components/kit/Icon";
 
 interface Creditor {
   uid: string;
@@ -15,9 +20,9 @@ interface Creditor {
 }
 
 /**
- * Forwarding (option b): when a payment is coming in to you, pass it onward to
- * someone you owe. This approves the incoming settlement and raises a new
- * settlement request from you to the chosen creditor.
+ * Forwarding: when a payment is coming in to you, pass it on to someone you
+ * owe. Approves the incoming settlement and raises a new request from you to
+ * the chosen creditor.
  */
 export default function ForwardModal({
   groupId,
@@ -38,22 +43,21 @@ export default function ForwardModal({
 }) {
   const [targetUid, setTargetUid] = useState(creditors[0]?.uid || "");
   const target = creditors.find((c) => c.uid === targetUid);
-  const defaultAmount = target
-    ? Math.min(incomingAmount, target.amount)
-    : incomingAmount;
+  const defaultAmount = target ? Math.min(incomingAmount, target.amount) : incomingAmount;
   const [amount, setAmount] = useState(String(defaultAmount));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
 
   function handleTargetChange(uid: string) {
+    hapticTap();
     setTargetUid(uid);
     const c = creditors.find((x) => x.uid === uid);
     if (c) setAmount(String(Math.min(incomingAmount, c.amount)));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit() {
     const amt = parseFloat(amount) || 0;
     if (!target) {
       setError("Select who to forward to.");
@@ -82,7 +86,7 @@ export default function ForwardModal({
         forwardedFromSettlementId: incomingId,
       });
       showToast({ message: `Payment forwarded to ${target.name}` });
-      onClose();
+      sheetRef.current?.dismiss();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to forward payment");
     } finally {
@@ -91,89 +95,68 @@ export default function ForwardModal({
   }
 
   return (
-    <GlassModal title="Forward payment" onClose={onClose}>
-      {creditors.length === 0 ? (
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--text-secondary)]">
-            You don&apos;t owe anyone in this group, so there&apos;s no one to
-            forward this payment to.
-          </p>
-          <GlassButton type="button" variant="ghost" onClick={onClose} className="w-full">
-            Close
-          </GlassButton>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            {fromName} is paying you {formatCurrency(incomingAmount)}. Pass it on
-            to someone you owe.
-          </p>
-
-          {/* Option rows with checkmarks, not a <select>: recognition over
-              recall — every creditor and what you owe them stays visible, so
-              nothing has to be remembered to choose. */}
-          <div role="radiogroup" aria-label="Forward to">
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1.5">
-              Forward to
+    <Sheet
+      ref={sheetRef}
+      title="Forward Payment"
+      subtitle={`${formatCurrency(incomingAmount)} from ${fromName}`}
+      onClose={onClose}
+      footer={
+        creditors.length > 0 ? (
+          <>
+            <Button block busy={busy} onClick={() => void handleSubmit()}>
+              Forward to {target?.name ?? "…"}
+            </Button>
+            <p className="t-caption mt-2 text-center text-label-2">
+              Approves {fromName}&rsquo;s payment and sends {target?.name ?? "them"} a request to approve.
             </p>
-            <div className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] overflow-hidden">
-              {creditors.map((c) => {
-                const selected = c.uid === targetUid;
-                return (
-                  <button
-                    key={c.uid}
-                    type="button"
-                    role="radio"
-                    aria-checked={selected}
-                    onClick={() => handleTargetChange(c.uid)}
-                    className="w-full flex items-center gap-3 px-3.5 py-3 text-left tap-shrink min-h-[44px]"
-                  >
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-[16px] text-[var(--text-primary)] truncate">
-                        {c.name}
+          </>
+        ) : undefined
+      }
+    >
+      {creditors.length === 0 ? (
+        <EmptyState
+          compact
+          icon="forward"
+          title="No One to Forward To"
+          message="You don't owe anyone in this group, so there's no one to pass this payment on to."
+        />
+      ) : (
+        <>
+          <AmountField id="forward-amount" value={amount} onChange={setAmount} size={48} />
+          <Section header="Forward to" tight>
+            <List>
+              <div role="radiogroup" aria-label="Forward to" className="contents">
+                {creditors.map((c) => {
+                  const selected = c.uid === targetUid;
+                  return (
+                    <button
+                      key={c.uid}
+                      type="button"
+                      role="radio"
+                      aria-checked={selected}
+                      onClick={() => handleTargetChange(c.uid)}
+                      className="row is-pressable is-tall"
+                      style={sepInset(68)}
+                    >
+                      <Avatar name={c.name} size={40} />
+                      <span className="row-main">
+                        <span className="row-title">{c.name}</span>
+                        <span className="row-subtitle">You owe {formatCurrency(c.amount)}</span>
                       </span>
-                      <span className="block text-[13px] text-[var(--text-tertiary)]">
-                        you owe {formatCurrency(c.amount)}
-                      </span>
-                    </span>
-                    {selected && (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="m5 12.5 4.5 4.5L19 7.5" />
-                      </svg>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-              Amount
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-            />
-          </div>
-
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            This approves {fromName}&apos;s payment and sends a settlement request
-            to {target?.name}, who will need to approve it.
-          </p>
-
-          {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-          <GlassButton disabled={busy} className="w-full">
-            {busy ? "Forwarding…" : "Forward Payment"}
-          </GlassButton>
-        </form>
+                      {selected && (
+                        <span className="text-tint" aria-hidden>
+                          <Icon name="checkmark" size={20} strokeWidth={2.6} />
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </List>
+          </Section>
+          {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
+        </>
       )}
-    </GlassModal>
+    </Sheet>
   );
 }

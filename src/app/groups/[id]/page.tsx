@@ -2,21 +2,22 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { useSingleGroup } from "@/lib/group-data-context";
 import {
-  updateGroupProfile,
   updateSettlementStatus,
-  updateExpense,
   deleteExpense,
   deleteGroup,
   removeMember,
   addExpense,
+  updateExpense,
   setGroupArchived,
 } from "@/lib/firestore";
 import { Expense, Settlement } from "@/lib/types";
 import {
   activeExpenses as onlyActive,
+  canRespondToSettlement,
   computeBalances,
   computeDirectDebts,
   computeSettlementProgress,
@@ -24,34 +25,33 @@ import {
   simplifyDebts,
   splitEqually,
   formatCurrency,
+  settlementCreator,
 } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { isArchivedFor } from "@/lib/group-filters";
 import { groupItemLink } from "@/lib/statement";
-import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
-import { categoryMeta } from "@/lib/categories";
+import { uploadMultipleReceipts } from "@/lib/storage";
 import { showLocalNotification } from "@/lib/notifications";
-import GlassButton from "@/components/ui/GlassButton";
-import { GlassField } from "@/components/ui/GlassField";
-import GlassModal from "@/components/ui/GlassModal";
-import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { hapticSuccess } from "@/lib/haptics";
-import { activateFileInputOnKey } from "@/lib/keyboard";
-import dynamic from "next/dynamic";
 import type { NewExpenseInput } from "@/components/AddExpenseModal";
+import ActivityTimeline from "@/components/group/ActivityTimeline";
+import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
+import LoginScreen from "@/components/LoginScreen";
+import Screen from "@/components/kit/Screen";
+import { BarButton } from "@/components/kit/BarButton";
+import { Menu, type MenuItem } from "@/components/kit/Menu";
+import { Card, List, RowButton, Section } from "@/components/kit/List";
+import { Avatar, AvatarStack } from "@/components/kit/Avatar";
+import { GroupAvatar, IconTile } from "@/components/kit/Tile";
+import { Button, EmptyState, Meter } from "@/components/kit/Controls";
+import { ConfirmSheet } from "@/components/kit/ActionSheet";
+import { useNav } from "@/components/kit/nav";
 
 /**
- * Sheets are loaded on demand, not with the screen.
- *
- * Every one of these sits behind a boolean or a null check and is closed when
- * the screen opens, yet all seven were statically imported — so opening a group
- * downloaded and parsed the code for all of them, plus `qrcode` (pulled in by
- * InviteQrSheet), before anything could paint. This is the heaviest route in the
- * app, so it is the one where that mattered most.
- *
- * `ssr: false` because these are client-only surfaces; there is nothing useful
- * to render for them on the server, and it keeps them out of the SSR pass.
+ * Sheets load on demand, not with the screen: each sits behind a boolean and
+ * is closed when the screen opens, and this is the heaviest route in the app.
+ * `ssr: false` — client-only surfaces with nothing to render on the server.
  */
 const AddExpenseModal = dynamic(() => import("@/components/AddExpenseModal"), { ssr: false });
 const SettleUpModal = dynamic(() => import("@/components/SettleUpModal"), { ssr: false });
@@ -60,10 +60,8 @@ const AddMemberModal = dynamic(() => import("@/components/group/AddMemberModal")
 const ActivityDetailModal = dynamic(() => import("@/components/group/ActivityDetailModal"), { ssr: false });
 const PersonStatementSheet = dynamic(() => import("@/components/group/PersonStatementSheet"), { ssr: false });
 const InviteQrSheet = dynamic(() => import("@/components/group/InviteQrSheet"), { ssr: false });
-import BottomNav from "@/components/home/BottomNav";
-import ActivityTimeline from "@/components/group/ActivityTimeline";
-import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
-import LoginScreen from "@/components/LoginScreen";
+const MembersSheet = dynamic(() => import("@/components/group/MembersSheet"), { ssr: false });
+const EditGroupSheet = dynamic(() => import("@/components/group/EditGroupSheet"), { ssr: false });
 
 function timeAgoShort(ts: number): string {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -81,53 +79,47 @@ function createdAgoText(createdAt: number): string {
   return `${days} days ago`;
 }
 
+type ConfirmState = {
+  title: string;
+  message?: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+};
+
 function GroupPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const nav = useNav();
   const { user, loading } = useAuth();
-  // Reads from the one shared subscription set instead of opening three more
+  // Reads from the one shared subscription set instead of opening more
   // listeners every time this screen mounts.
   const { group, expenses, settlements, loading: groupLoading, notFound } = useSingleGroup(id);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
-  const [showGroupInfo, setShowGroupInfo] = useState(false);
-  const [showAddMember, setShowAddMember] = useState(false);
-  // Which detail sheet is open lives in the URL, not in state: a
-  // notification can then point straight at one item, and closing the sheet
-  // is just a navigation. `?expense=` / `?settlement=` carry the id.
+  const [sheet, setSheet] = useState<"members" | "invite" | "addMember" | "edit" | null>(null);
+  // Which detail sheet is open lives in the URL, not in state: a notification
+  // can point straight at one item, and closing is just a navigation.
   const searchParams = useSearchParams();
   const openExpenseId = searchParams.get("expense");
   const openSettlementId = searchParams.get("settlement");
   const missingDeepLinkRef = useRef<string | null>(null);
-  // Which member's pairwise statement is open. Held by uid so the sheet
-  // follows live data instead of a snapshot taken at tap time.
+  // True when this screen pushed the ?expense= entry itself, so closing can
+  // pop it instead of leaving a duplicate history entry behind.
+  const detailPushedRef = useRef(false);
+  // Which member's pairwise statement is open, by uid, so it follows live data.
   const [statementUid, setStatementUid] = useState<string | null>(null);
-  const [showInvite, setShowInvite] = useState(false);
-  const [showEditGroup, setShowEditGroup] = useState(false);
-  const [editName, setEditName] = useState("");
-  const [editDesc, setEditDesc] = useState("");
-  const [editUseSimplified, setEditUseSimplified] = useState(false);
-  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
-  const [editPhotoPreview, setEditPhotoPreview] = useState("");
-  const [editBusy, setEditBusy] = useState(false);
-  const [editError, setEditError] = useState("");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [confirmState, setConfirmState] = useState<{
-    title: string;
-    message?: string;
-    confirmLabel: string;
-    destructive?: boolean;
-    onConfirm: () => void | Promise<void>;
-  } | null>(null);
+  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
   // Expense ids hidden locally during the undo window (deferred-commit delete).
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
+  const [busySettlement, setBusySettlement] = useState<string | null>(null);
   const showToast = useToast();
 
-  // A notification can outlive the thing it points at — the expense gets
-  // deleted, or the settlement belongs to a group you have since left. Say so
-  // once instead of opening an empty sheet or silently ignoring the link.
+  // A notification can outlive what it points at. Say so once instead of
+  // opening an empty sheet or silently ignoring the link.
   useEffect(() => {
     const target = openExpenseId || openSettlementId;
     if (!target || groupLoading) return;
@@ -137,14 +129,12 @@ function GroupPageInner() {
       : settlements.some((s) => s.id === openSettlementId);
     if (!found) {
       missingDeepLinkRef.current = target;
-      showToast({ message: "That item isn\u2019t here any more." });
+      showToast({ message: "That item isn\u2019t here any more.", tone: "info" });
     }
   }, [openExpenseId, openSettlementId, expenses, settlements, groupLoading, showToast]);
 
-
   if (loading) return <GroupDetailSkeleton />;
-  // Previously rendered `null`, i.e. a blank white screen, whenever auth hadn't
-  // resolved — the most visible symptom of the Android sign-in problem.
+  // Was `null` — a blank screen — whenever auth hadn't resolved.
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
@@ -152,27 +142,25 @@ function GroupPageInner() {
   if (!group) {
     if (notFound) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-          <p className="text-[17px] font-semibold text-[var(--text-primary)]">
-            This group isn&rsquo;t available
-          </p>
-          <p className="text-[14px] text-[var(--text-tertiary)] max-w-xs">
-            It may have been deleted, or you may no longer be a member.
-          </p>
-          <button
-            onClick={() => router.push("/")}
-            className="mt-1 rounded-full bg-[var(--brand-solid)] text-white px-5 py-2.5 text-[15px] font-semibold tap-shrink"
-          >
-            Back to groups
-          </button>
-        </div>
+        <Screen title="" back="/" tabBar>
+          <EmptyState
+            icon="person.2"
+            title="Group Not Available"
+            message="It may have been deleted, or you may no longer be a member."
+            action={
+              <Button size="md" onClick={() => nav.back("/")}>
+                Back to Groups
+              </Button>
+            }
+          />
+        </Screen>
       );
     }
     return <GroupDetailSkeleton />;
   }
 
-  // Hold the skeleton until the first expense/settlement snapshot lands, so the
-  // stats and balances never flash ₹0 before the real numbers arrive.
+  // Hold the skeleton until the first expense/settlement snapshot lands, so
+  // balances never flash ₹0 before the real numbers arrive.
   if (groupLoading && expenses.length === 0 && settlements.length === 0) {
     return <GroupDetailSkeleton />;
   }
@@ -182,14 +170,12 @@ function GroupPageInner() {
     uid === currentUser.uid
       ? "You"
       : group?.members[uid]?.displayName ||
-        // Someone who was removed can still appear in old expenses; naming them
-        // "Unknown" made it look like corrupt data.
+        // Someone removed can still appear in old expenses; "Unknown" made it
+        // look like corrupt data.
         (group?.memberIds.includes(uid) ? "Member" : "Former member");
 
-  // Merge optimistic (pending) expenses with the live ones. An optimistic entry
-  // is hidden as soon as a matching real expense arrives (Firestore delivers our
-  // own write near-instantly via latency compensation), keyed by content — this
-  // avoids both a duplicate flash and a gap during reconciliation.
+  // Merge optimistic (pending) expenses with live ones; an optimistic entry
+  // hides as soon as a matching real one arrives, keyed by content.
   const realExpenseKeys = new Set(
     expenses.map((e) => `${e.createdBy}|${e.amount}|${e.description}|${e.paidBy}`)
   );
@@ -200,33 +186,39 @@ function GroupPageInner() {
     ...expenses,
   ];
 
-  // Only deleted expenses leave the ledger. Filtering on any `editAction` (as
-  // before) dropped every *edited* expense from the balances, so amounts drifted
-  // apart from reality the moment anyone corrected an entry.
   const detailExpense = openExpenseId
     ? mergedExpenses.find((e) => e.id === openExpenseId) ?? null
     : null;
   const detailSettlement = openSettlementId
     ? settlements.find((s) => s.id === openSettlementId) ?? null
     : null;
-  const closeDetail = () => router.replace(`/groups/${group.id}`, { scroll: false });
-  const openExpense = (e: Expense) =>
+  const closeDetail = () => {
+    if (detailPushedRef.current) {
+      detailPushedRef.current = false;
+      router.back();
+    } else {
+      router.replace(`/groups/${group.id}`, { scroll: false });
+    }
+  };
+  const openExpense = (e: Expense) => {
+    detailPushedRef.current = true;
     router.push(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
-  const openSettlement = (s: Settlement) =>
+  };
+  const openSettlement = (s: Settlement) => {
+    detailPushedRef.current = true;
     router.push(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
+  };
 
   const iArchived = isArchivedFor(group, currentUser.uid);
+  // Only deleted expenses leave the ledger; edited ones stay.
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
-  // Direct pairwise debts by default: you only ever owe the people you
-  // actually shared expenses with, which is the figure people can check
-  // against their own memory. Simplification is opt-in per group because it
-  // routes debts through third parties — fewer transfers, but it can tell you
-  // to pay someone you never shared a bill with.
+  // Direct pairwise debts by default; simplification is opt-in per group
+  // because it can route a debt through someone you never shared a bill with.
   const transactions = group.useSimplifiedDebts
     ? simplifyDebts(balances)
     : computeDirectDebts(group.memberIds, balanceExpenses, settlements);
-  // People the current user owes (used for the "forward payment" flow).
+  // People the current user owes (for the forward-payment flow).
   const myCreditors = transactions
     .filter((t) => t.fromUid === currentUser.uid)
     .map((t) => ({ uid: t.toUid, name: memberName(t.toUid), amount: t.amount }));
@@ -236,18 +228,12 @@ function GroupPageInner() {
   }
 
   function getExpensesOwedTo(toUid: string): Expense[] {
-    if (!group) return [];
     // Expenses already covered by a prior settlement to this person shouldn't
-    // reappear in the picker (pending or approved requests both count; only
-    // rejected ones are still outstanding).
+    // reappear (pending or approved both count; only rejected stay open).
     const settledExpenseIds = new Set<string>();
     settlements.forEach((s) => {
-      if (
-        s.fromUid === currentUser.uid &&
-        s.toUid === toUid &&
-        s.status !== "rejected"
-      ) {
-        (s.expenseIds || []).forEach((id) => settledExpenseIds.add(id));
+      if (s.fromUid === currentUser.uid && s.toUid === toUid && s.status !== "rejected") {
+        (s.expenseIds || []).forEach((eid) => settledExpenseIds.add(eid));
       }
     });
     return onlyActive(expenses).filter((e) => {
@@ -257,54 +243,51 @@ function GroupPageInner() {
     });
   }
 
-  async function respondToSettlement(s: Settlement, status: "approved" | "rejected") {
-    if (!group) return;
-    await updateSettlementStatus(s.groupId || group.id, s.id, status);
-  }
-
-  // These writes were fire-and-forget: a rejected write (e.g. a rules failure)
-  // showed a success toast while the balance silently never changed.
+  // These writes used to be fire-and-forget: a rejected write showed success
+  // while the balance never changed.
   async function handleApproveSettlement(s: Settlement) {
     if (!group) return;
+    setBusySettlement(s.id);
     try {
-      await respondToSettlement(s, "approved");
-      showToast({
-        message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
-      });
+      await updateSettlementStatus(s.groupId || group.id, s.id, "approved");
+      hapticSuccess();
+      showToast({ message: `Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}` });
       showLocalNotification(
         "Settlement approved",
         `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
         `/groups/${group.id}`
       );
     } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve",
-      });
+      showToast({ message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve" });
+    } finally {
+      setBusySettlement(null);
     }
   }
 
   async function handleRejectSettlement(s: Settlement) {
     if (!group) return;
+    setBusySettlement(s.id);
     try {
-      await respondToSettlement(s, "rejected");
-      showToast({ message: "Request declined" });
+      await updateSettlementStatus(s.groupId || group.id, s.id, "rejected");
+      showToast({ message: "Request declined", tone: "info" });
     } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't decline: ${err.message}` : "Couldn't decline",
-      });
+      showToast({ message: err instanceof Error ? `Couldn't decline: ${err.message}` : "Couldn't decline" });
+    } finally {
+      setBusySettlement(null);
     }
   }
 
   function handleDeleteGroup() {
     if (!group) return;
     setConfirmState({
-      title: "Delete group?",
-      message: `This removes “${group.name}” and its balances for everyone in it. This can't be undone.`,
-      confirmLabel: "Delete",
+      title: `Delete “${group.name}”?`,
+      message: "This removes the group and its balances for everyone in it. This can't be undone.",
+      confirmLabel: "Delete Group",
       destructive: true,
       onConfirm: async () => {
         await deleteGroup(group.id);
-        router.push("/");
+        setSheet(null);
+        nav.back("/");
       },
     });
   }
@@ -313,15 +296,14 @@ function GroupPageInner() {
     if (!group) return;
     const name = memberName(uid);
     const net = balances.find((b) => b.uid === uid)?.netAmount ?? 0;
-    const warn =
-      !isSettled(net)
-        ? `\n\nHeads up: ${name} still has an unsettled balance of ${formatCurrency(
-            Math.abs(net)
-          )}. Removing them drops it from the group's balances.`
-        : "";
+    const warn = !isSettled(net)
+      ? `\n\n${name} still has an unsettled balance of ${formatCurrency(
+          Math.abs(net)
+        )}. Removing them drops it from the group's balances.`
+      : "";
     setConfirmState({
       title: `Remove ${name}?`,
-      message: `Remove ${name} from “${group.name}”?${warn}`,
+      message: `${name} will no longer be part of “${group.name}”.${warn}`,
       confirmLabel: "Remove",
       destructive: true,
       onConfirm: () => removeMember(group.id, uid),
@@ -332,11 +314,9 @@ function GroupPageInner() {
     if (!group) return;
     const gid = group.id;
     const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
-
     const apply = async () => {
       try {
         await setGroupArchived(gid, currentUser.uid, !iArchived);
-        setShowGroupInfo(false);
         showToast({ message: iArchived ? "Group restored" : "Group archived" });
       } catch (err) {
         showToast({
@@ -344,16 +324,15 @@ function GroupPageInner() {
         });
       }
     };
-
-    // Archiving never writes off a debt, but it does move the group somewhere
-    // the user isn't looking, so say so plainly before hiding money.
+    // Archiving never writes off a debt, but it does move money somewhere the
+    // user isn't looking, so say so first.
     if (!iArchived && !isSettled(net)) {
       setConfirmState({
         title: "Archive with an open balance?",
         message: `You still have an unsettled balance of ${formatCurrency(
           Math.abs(net)
-        )} here. Archiving only tidies your home screen — the balance stays, and it keeps counting towards your totals.`,
-        confirmLabel: "Archive anyway",
+        )} here. Archiving only tidies your Groups list — the balance stays and keeps counting in your totals. Only you see this.`,
+        confirmLabel: "Archive Anyway",
         onConfirm: apply,
       });
       return;
@@ -370,94 +349,38 @@ function GroupPageInner() {
     setConfirmState({
       title: `Leave “${group.name}”?`,
       message: `You'll be removed from this group.${warn}`,
-      confirmLabel: "Leave",
+      confirmLabel: "Leave Group",
       destructive: true,
       onConfirm: async () => {
         await removeMember(group.id, currentUser.uid);
-        router.push("/");
+        nav.back("/");
       },
     });
-  }
-
-  function handleOpenEditGroup() {
-    if (!group) return;
-    setEditName(group.name);
-    setEditDesc(group.description || "");
-    setEditUseSimplified(group.useSimplifiedDebts === true);
-    setEditPhotoPreview(group.photoURL || "");
-    setEditPhotoFile(null);
-    setShowEditGroup(true);
-    setEditError("");
-  }
-
-  function handleEditPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setEditPhotoFile(file);
-    const reader = new FileReader();
-    reader.onload = () => setEditPhotoPreview(reader.result as string);
-    reader.readAsDataURL(file);
-  }
-
-  async function handleSaveGroupProfile(e: React.FormEvent) {
-    e.preventDefault();
-    if (!group || !editName.trim()) {
-      setEditError("Group name is required.");
-      return;
-    }
-    setEditBusy(true);
-    setEditError("");
-    try {
-      let photoURL = editPhotoPreview || undefined;
-      if (editPhotoFile) {
-        photoURL = await uploadImage(editPhotoFile, "group-avatar");
-      }
-      await updateGroupProfile(group.id, {
-        name: editName.trim(),
-        description: editDesc.trim() || undefined,
-        photoURL,
-        useSimplifiedDebts: editUseSimplified,
-      });
-      showToast({ message: "Group updated" });
-      setShowEditGroup(false);
-    } catch (err) {
-      setEditError(err instanceof Error ? err.message : "Failed to update group");
-    } finally {
-      setEditBusy(false);
-    }
-  }
-
-
-  function handleEditExpense(expense: Expense) {
-    setEditingExpense(expense);
   }
 
   function handleDeleteExpense(expense: Expense) {
     if (!group) return;
     const gid = group.id;
-    const id = expense.id;
+    const eid = expense.id;
     const deletedBy = currentUser.uid;
     // Hide immediately; commit to Firestore only after the undo window.
-    setPendingDeleteIds((prev) => new Set(prev).add(id));
+    setPendingDeleteIds((prev) => new Set(prev).add(eid));
     const timer = setTimeout(() => {
-      deleteExpense(gid, id, deletedBy);
-      showLocalNotification(
-        "Expense deleted",
-        `${expense.description} was deleted by admin`,
-        `/groups/${gid}`
-      );
-      // Leave the id in pendingDeleteIds: the incoming editAction:"deleted"
-      // will keep it hidden, so removing here would only risk a reappear flash.
+      deleteExpense(gid, eid, deletedBy);
+      showLocalNotification("Expense deleted", `${expense.description} was deleted by admin`, `/groups/${gid}`);
+      // The id stays in pendingDeleteIds: the incoming editAction:"deleted"
+      // keeps it hidden, so removing it here would only risk a flash.
     }, 5000);
     showToast({
       message: `“${expense.description}” deleted`,
       actionLabel: "Undo",
       duration: 5000,
+      tone: "info",
       onAction: () => {
         clearTimeout(timer);
         setPendingDeleteIds((prev) => {
           const next = new Set(prev);
-          next.delete(id);
+          next.delete(eid);
           return next;
         });
       },
@@ -465,7 +388,7 @@ function GroupPageInner() {
   }
 
   // Optimistic add: show the expense immediately, persist in the background,
-  // and let the live listener reconcile (matching entries are de-duped below).
+  // and let the live listener reconcile (matching entries are de-duped above).
   async function handleAddExpense(input: NewExpenseInput) {
     if (!group) return;
     const gid = group.id;
@@ -500,10 +423,10 @@ function GroupPageInner() {
         receiptUrls,
         category: input.category,
       });
-      showToast({ message: `${categoryMeta(input.category).emoji} Expense added · ${formatCurrency(input.amount)}` });
+      showToast({ message: `Expense added · ${formatCurrency(input.amount)}` });
       hapticSuccess();
     } catch {
-      showToast({ message: "Couldn't add expense — tap + to retry." });
+      showToast({ message: "Couldn't add the expense — tap + to try again." });
     } finally {
       setOptimisticExpenses((prev) => prev.filter((x) => x.id !== tempId));
     }
@@ -517,15 +440,12 @@ function GroupPageInner() {
       original.splits.length === input.splitMemberIds.length &&
       original.splits.every((s) => input.splitMemberIds.includes(s.uid));
     // Preserve an uneven split's shape: only fall back to an equal split when
-    // the people involved actually changed. Rescaling keeps each person's
-    // proportion of a legacy exact/percentage expense intact.
+    // the people involved actually changed.
     const keepsUnevenSplit = sameMembers && original.splitType !== "equal";
     const splits = keepsUnevenSplit
       ? rescaleSplits(original.splits, input.amount)
       : splitEqually(input.amount, input.splitMemberIds);
-    // The stored splitType has to follow the splits. Leaving it alone meant an
-    // expense that fell back to an equal split still read as "exact", so the
-    // next edit would try to rescale amounts that were no longer uneven.
+    // The stored splitType has to follow the splits.
     const splitType = keepsUnevenSplit ? original.splitType : "equal";
     setEditingExpense(null);
     try {
@@ -558,15 +478,10 @@ function GroupPageInner() {
   }
 
   const visibleExpenses = balanceExpenses;
-
-  // ── Derived stats for the header/summary cards ──
   const totalSpent = visibleExpenses.reduce((sum, e) => sum + e.amount, 0);
   const expenseCount = visibleExpenses.length;
 
-  // Settlement progress is measured in money, not in "expenses that happen to
-  // be tagged on a settlement". The old count relied on `expenseIds`, which is
-  // only written when the payer manually ticks items, so a fully paid-up group
-  // reported 0% settled while an empty group reported 100%.
+  // Settlement progress is measured in money, not in tagged expenses.
   const progress = computeSettlementProgress(group.memberIds, visibleExpenses, settlements);
 
   const lastActivityItem = [
@@ -580,7 +495,7 @@ function GroupPageInner() {
     })),
   ].sort((a, b) => b.ts - a.ts)[0];
 
-  // Largest single debt the current user owes (drives the "You owe" hero).
+  // Largest single debt the current user owes drives the balance card.
   const myDebts = transactions
     .filter((t) => t.fromUid === currentUser.uid)
     .sort((a, b) => b.amount - a.amount);
@@ -590,271 +505,286 @@ function GroupPageInner() {
   const topDebt = myDebts[0];
   const topCredit = myCredits[0];
 
-  // Per-member net balances for the balance chips (creditors first). Current
-  // members always show; people who have left only appear while they still
+  // Current members always show; people who've left only while they still
   // carry a balance, so their share of the ledger stays visible.
   const memberBalances = [...balances]
     .filter((b) => group.memberIds.includes(b.uid) || !isSettled(b.netAmount))
     .sort((a, b) => b.netAmount - a.netAmount);
 
-  const createdAgo = createdAgoText(group.createdAt);
+  // Records only the current user can answer — first, until answered.
+  const waitingOnMe = settlements
+    .filter((s) => canRespondToSettlement(s, currentUser.uid))
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  const menuItems: MenuItem[] = [
+    { label: "Invite People", icon: "qrcode", onSelect: () => setSheet("invite") },
+    { label: "Members", icon: "person.2", onSelect: () => setSheet("members") },
+    ...(isAdmin ? [{ label: "Edit Group", icon: "pencil", onSelect: () => setSheet("edit") }] : []),
+    "separator",
+    {
+      label: iArchived ? "Restore to Groups" : "Archive",
+      subtitle: iArchived ? undefined : "Only hides it for you",
+      icon: iArchived ? "archivebox.up" : "archivebox",
+      onSelect: handleToggleArchive,
+    },
+    ...(!isAdmin
+      ? [{ label: "Leave Group", icon: "leave", destructive: true, onSelect: handleLeaveGroup }]
+      : []),
+  ];
+
+  const people = group.memberIds.map((uid) => ({
+    id: uid,
+    name: group.members[uid]?.displayName || "Member",
+    photoURL: group.members[uid]?.photoURL,
+  }));
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => router.push("/")}
-            aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={() => setShowAddExpense(true)}
-              aria-label="Add expense"
-              className="w-11 h-11 rounded-2xl bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setShowGroupInfo(true)}
-              aria-label="Group menu"
-              className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
-                <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
-              </svg>
-            </button>
-          </div>
+    <Screen
+      title={group.name}
+      back="/"
+      heroTitle
+      tabBar
+      trailing={
+        <>
+          <BarButton icon="plus" label="Add expense" onClick={() => setShowAddExpense(true)} />
+          <Menu items={menuItems} title={group.name}>
+            {(props) => <BarButton icon="ellipsis" label="Group options" {...props} />}
+          </Menu>
+        </>
+      }
+    >
+      {/* Header */}
+      <div className="flex flex-col items-center px-2 pb-1 pt-1 text-center">
+        <GroupAvatar id={group.id} name={group.name} photoURL={group.photoURL} size={84} />
+        <h2 data-hero-title className="t-title1 mt-3 max-w-full [overflow-wrap:anywhere]">{group.name}</h2>
+        {group.description && <p className="t-subhead mt-0.5 text-label-2">{group.description}</p>}
+        <div className="mt-2 flex items-center gap-2">
+          <AvatarStack people={people} size={24} max={5} />
+          <span className="t-footnote text-label-2">
+            {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created{" "}
+            {createdAgoText(group.createdAt)}
+            {iArchived ? " · Archived" : ""}
+          </span>
         </div>
-      </header>
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum space-y-5">
-        {/* Group hero */}
-        <div className="flex items-start gap-4">
-          {group.photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={group.photoURL} alt="" className="w-[88px] h-[88px] rounded-[var(--radius-card)] object-cover shrink-0 shadow-[var(--shadow-float)]" />
-          ) : (
-            <div className="w-[88px] h-[88px] rounded-[var(--radius-card)] bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 shadow-[0_8px_24px_-8px_rgba(79,70,229,0.5)]">
-              <span className="text-[34px] font-bold text-white">{group.name.charAt(0).toUpperCase()}</span>
-            </div>
-          )}
-          <div className="min-w-0 flex-1 pt-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-[26px] font-extrabold text-[var(--text-primary)] truncate">{group.name}</h1>
-              {isAdmin && (
-                <button
-                  onClick={handleOpenEditGroup}
-                  aria-label="Edit group"
-                  className="w-7 h-7 rounded-full bg-[var(--surface)] shadow-[var(--shadow-sm)] flex items-center justify-center shrink-0 tap-shrink"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
-              )}
-            </div>
-            <p className="text-[14px] text-[var(--text-tertiary)] mt-1">
-              {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created {createdAgo}
-            </p>
-            <div className="flex items-center mt-2.5">
-              <div className="flex -space-x-2">
-                {group.memberIds.slice(0, 3).map((uid) =>
-                  group.members[uid]?.photoURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={uid} src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full border-2 border-[var(--background)] object-cover" />
-                  ) : (
-                    <span key={uid} className="w-8 h-8 rounded-full border-2 border-[var(--background)] bg-[var(--fill)] flex items-center justify-center text-[12px] font-medium text-[var(--text-secondary)]">
-                      {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
-                    </span>
-                  )
-                )}
-              </div>
-              {group.memberIds.length > 3 && (
-                <span className="ml-1 h-8 min-w-8 px-2 rounded-full bg-[var(--tint-accent)] flex items-center justify-center text-[12px] font-semibold text-[var(--brand)]">
-                  +{group.memberIds.length - 3}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+      </div>
 
-        {/* Stats card — 2×2 grid so each metric has room to breathe */}
-        <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)] grid grid-cols-2 gap-x-4 gap-y-5">
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Total spent</p>
-            <p className="text-[22px] font-bold text-[var(--brand)] mt-1 truncate">{formatCurrency(totalSpent)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Expenses</p>
-            <p className="text-[22px] font-bold text-[var(--text-primary)] mt-1">{expenseCount}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Settled</p>
-            <p className="text-[22px] font-bold text-[var(--pos)] mt-1">{progress.pct}%</p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-              {progress.isEmpty
-                ? "nothing to settle"
-                : isSettled(progress.outstanding)
-                ? "everyone's square"
-                : `${formatCurrency(progress.outstanding)} still to move`}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Last activity</p>
-            <p className="text-[18px] font-bold text-[var(--text-primary)] mt-1 truncate">
-              {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
-            </p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">{lastActivityItem?.label || "no activity"}</p>
-          </div>
-        </div>
-
-        {/* You owe / you're owed hero */}
+      {/* Balance card: the one money action this screen exists for. */}
+      <Card className="mt-5 p-4">
         {topDebt ? (
-          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-danger-soft)]">
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💸</span>
-            <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU OWE</p>
-              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topDebt.toUid)}</p>
-              <p className="text-[34px] font-extrabold text-[var(--neg)] leading-tight">{formatCurrency(topDebt.amount)}</p>
-              <div className="flex flex-wrap items-center gap-2 mt-3">
-                <button
-                  onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
-                  className="inline-flex items-center gap-2 bg-[var(--neg)] text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
-                >
-                  Settle up now
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
+          <>
+            <p className="t-subhead text-label-2">You owe {memberName(topDebt.toUid)}</p>
+            <p className="amount-hero mt-1 text-[34px] text-neg">{formatCurrency(topDebt.amount)}</p>
+            {myDebts.length > 1 && (
+              <p className="t-footnote mt-1 text-label-2">
+                and {myDebts.length - 1} other{myDebts.length > 2 ? "s" : ""} — see Balances
+              </p>
+            )}
+            <Button
+              block
+              className="mt-4"
+              icon="banknote"
+              onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
+            >
+              Settle Up
+            </Button>
+          </>
         ) : topCredit ? (
-          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-success-soft)]">
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💰</span>
-            <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU&rsquo;LL RECEIVE</p>
-              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topCredit.fromUid)}</p>
-              <p className="text-[34px] font-extrabold text-[var(--pos)] leading-tight">{formatCurrency(topCredit.amount)}</p>
-              <p className="mt-2 text-[13px] text-[var(--text-tertiary)]">Waiting for {memberName(topCredit.fromUid)} to settle up.</p>
-            </div>
-          </div>
+          <>
+            <p className="t-subhead text-label-2">{memberName(topCredit.fromUid)} owes you</p>
+            <p className="amount-hero mt-1 text-[34px] text-pos">{formatCurrency(topCredit.amount)}</p>
+            <p className="t-footnote mt-2 text-label-2">
+              {myCredits.length > 1
+                ? `${myCredits.length} people owe you here. Each one settles up from their phone.`
+                : `Waiting for ${memberName(topCredit.fromUid)} to settle up.`}
+            </p>
+          </>
         ) : (
-          <div className="rounded-[var(--radius-card)] p-6 bg-[var(--tint-accent)] text-center">
-            <p className="text-[18px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled up 🎉</p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">No outstanding balances in this group.</p>
+          <div className="flex items-center gap-3">
+            <IconTile icon="checkmark" color="var(--green)" size="lg" />
+            <div>
+              <p className="t-headline">You&rsquo;re all settled up</p>
+              <p className="t-subhead text-label-2">No outstanding balances in this group.</p>
+            </div>
           </div>
         )}
+      </Card>
 
-        {/* Balances */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Balances</h2>
-            <button onClick={() => setShowGroupInfo(true)} className="text-[14px] font-semibold text-[var(--brand)] tap-shrink">View all</button>
-          </div>
-          <div className="flex gap-3 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
-            {memberBalances.map((b) => {
-              const isMe = b.uid === currentUser.uid;
-              // One definition of "settled" for the label, the colour and the
-              // number. These were three separate `0.01` comparisons, so a
-              // residual under the threshold rendered a real figure next to a
-              // "settled up" chip.
-              const settled = isSettled(b.netAmount);
-              const pos = !settled && b.netAmount > 0;
-              const neg = !settled && b.netAmount < 0;
+      {/* Needs a decision from the current user. */}
+      {waitingOnMe.length > 0 && (
+        <Section header="Waiting on You">
+          <List>
+            {waitingOnMe.map((s) => {
+              const isOffset = s.kind === "offset";
+              const creator = settlementCreator(s);
+              const text = isOffset
+                ? `${memberName(creator)} wants to cancel out ${formatCurrency(s.amount)} between you`
+                : s.fromUid === creator
+                ? `${memberName(s.fromUid)} says they paid you ${formatCurrency(s.amount)}`
+                : `${memberName(creator)} recorded your payment of ${formatCurrency(s.amount)}`;
+              const busy = busySettlement === s.id;
               return (
-                <button
-                  key={b.uid}
-                  type="button"
-                  // Your own card has no pairwise statement to show.
-                  disabled={isMe}
-                  onClick={() => setStatementUid(b.uid)}
-                  aria-label={isMe ? undefined : `View your statement with ${memberName(b.uid)}`}
-                  className={`shrink-0 w-[190px] text-left rounded-[var(--radius-inner)] p-3.5 ${
-                    isMe ? "" : "tap-shrink"
-                  } ${
-                    isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    {isMe ? (
-                      <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold ${neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--tint-success)] text-[var(--pos)]"}`}>You</span>
-                    ) : group.members[b.uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[b.uid].photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="w-10 h-10 rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 text-[14px] font-medium text-[var(--text-secondary)]">
-                        {(group.members[b.uid]?.displayName || "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{isMe ? "You" : memberName(b.uid)}</p>
-                      <p className={`text-[15px] font-bold ${pos ? "text-[var(--pos)]" : neg ? "text-[var(--neg)]" : "text-[var(--text-tertiary)]"}`}>
-                        {pos ? "+" : neg ? "-" : ""}
-                        {formatCurrency(settled ? 0 : Math.abs(b.netAmount))}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
-                      pos ? "bg-[var(--tint-success)] text-[var(--pos)]" : neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--fill)] text-[var(--text-secondary)]"
-                    }`}>
-                      {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
+                <div key={s.id} className="px-4 py-3" style={{ ["--sep-inset" as string]: "58px" }}>
+                  <button type="button" onClick={() => openSettlement(s)} className="flex w-full items-start gap-3 text-left">
+                    <IconTile icon={isOffset ? "arrow.left.right" : "clock"} color={isOffset ? "var(--indigo)" : "var(--orange)"} />
+                    <span className="min-w-0 flex-1">
+                      <span className="t-body block">{text}</span>
+                      {s.note && <span className="t-subhead block truncate text-label-2">“{s.note}”</span>}
                     </span>
-                    {!isMe && !group.memberIds.includes(b.uid) && (
-                      <span className="inline-block rounded-full bg-[var(--fill)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)]">
-                        left group
-                      </span>
+                  </button>
+                  <div className="mt-3 flex gap-2 pl-[42px]">
+                    <Button size="sm" busy={busy} onClick={() => handleApproveSettlement(s)}>
+                      {isOffset ? "Accept" : "Approve"}
+                    </Button>
+                    {myCreditors.length > 0 && !isOffset && s.toUid === currentUser.uid && (
+                      <Button size="sm" variant="gray" disabled={busy} onClick={() => setForwardTarget(s)}>
+                        Forward
+                      </Button>
                     )}
-                    {!isMe && (
-                      <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[var(--brand)]">
-                        Statement
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <path d="M9 6l6 6-6 6" />
-                        </svg>
-                      </span>
-                    )}
+                    <Button size="sm" variant="gray" disabled={busy} onClick={() => handleRejectSettlement(s)}>
+                      Decline
+                    </Button>
                   </div>
-                </button>
+                </div>
               );
             })}
-          </div>
-        </section>
+          </List>
+        </Section>
+      )}
 
-        {/* Activity */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Activity</h2>
+      {/* Summary */}
+      <Section header="Summary">
+        <Card className="p-4">
+          <div className="flex items-end justify-between gap-3">
+            <div className="min-w-0">
+              <p className="t-footnote text-label-2">Total spent</p>
+              <p className="num t-title2 truncate">{formatCurrency(totalSpent)}</p>
+            </div>
+            <p className="t-subhead shrink-0 text-label-2">
+              {expenseCount} expense{expenseCount !== 1 ? "s" : ""}
+            </p>
           </div>
-          <ActivityTimeline
-            expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
-            settlements={settlements}
-            memberName={memberName}
-            currentUid={currentUser.uid}
-            isAdmin={isAdmin}
-            onEditExpense={handleEditExpense}
-            onDeleteExpense={handleDeleteExpense}
-            onApprove={handleApproveSettlement}
-            onReject={handleRejectSettlement}
-            onForward={(s) => setForwardTarget(s)}
-            canForward={myCreditors.length > 0}
-            onOpenExpense={openExpense}
-            onOpenSettlement={openSettlement}
-          />
-        </section>
-      </main>
+          <div className="mt-4">
+            <Meter value={progress.pct} label="Settled" />
+            <div className="t-footnote mt-1.5 flex justify-between gap-3 text-label-2">
+              <span>
+                <span className="font-semibold text-label">{progress.pct}%</span> settled
+              </span>
+              <span className="truncate text-right">
+                {progress.isEmpty
+                  ? "Nothing to settle"
+                  : isSettled(progress.outstanding)
+                  ? "Everyone's square"
+                  : `${formatCurrency(progress.outstanding)} still to move`}
+              </span>
+            </div>
+          </div>
+          <p className="t-footnote mt-3 truncate text-label-2">
+            Last activity{" "}
+            <span className="text-label">{lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}</span>
+            {lastActivityItem ? ` · ${lastActivityItem.label}` : ""}
+          </p>
+        </Card>
+      </Section>
 
-      <BottomNav active="groups" />
+      {/* Balances */}
+      <Section header="Balances" footer={group.useSimplifiedDebts ? "Combine Payments is on: who pays whom is reshuffled for fewer transfers." : undefined}>
+        <List>
+          {memberBalances.map((b) => {
+            const isMe = b.uid === currentUser.uid;
+            const settled = isSettled(b.netAmount);
+            const pos = !settled && b.netAmount > 0;
+            const left = !group.memberIds.includes(b.uid);
+            const name = isMe ? "You" : memberName(b.uid);
+            const status = settled
+              ? "Settled"
+              : isMe
+              ? pos
+                ? "You get back"
+                : "You owe"
+              : pos
+              ? "Gets back"
+              : "Owes";
+            const amount = (
+              <span className={`num t-headline shrink-0 ${settled ? "text-label-3" : pos ? "text-pos" : "text-neg"}`}>
+                {settled ? formatCurrency(0) : `${pos ? "+" : "−"}${formatCurrency(Math.abs(b.netAmount))}`}
+              </span>
+            );
+            const common = {
+              inset: "avatar" as const,
+              leading: (
+                <Avatar
+                  name={isMe ? currentUser.displayName || "You" : group.members[b.uid]?.displayName || name}
+                  photoURL={group.members[b.uid]?.photoURL}
+                  size={40}
+                />
+              ),
+              title: name,
+              subtitle: left ? `${status} · Left the group` : status,
+              trailing: amount,
+            };
+            // Your own row has no pairwise statement to show.
+            return isMe ? (
+              <div key={b.uid} className="row is-tall" style={{ ["--sep-inset" as string]: "68px" }}>
+                {common.leading}
+                <span className="row-main">
+                  <span className="row-title font-semibold">{name}</span>
+                  <span className="row-subtitle">{common.subtitle}</span>
+                </span>
+                {amount}
+              </div>
+            ) : (
+              <RowButton
+                key={b.uid}
+                {...common}
+                chevron
+                onClick={() => setStatementUid(b.uid)}
+                ariaLabel={`${name}, ${status} ${formatCurrency(Math.abs(b.netAmount))}. View statement`}
+              />
+            );
+          })}
+        </List>
+      </Section>
+
+      {group.memberIds.length === 1 && (
+        <Section>
+          <List>
+            <RowButton
+              onClick={() => setSheet("invite")}
+              leading={<IconTile icon="qrcode" color="var(--blue)" />}
+              title="Invite People"
+              subtitle="Share a link or QR code to get the group started."
+              chevron
+            />
+          </List>
+        </Section>
+      )}
+
+      <ActivityTimeline
+        expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
+        settlements={settlements}
+        memberName={memberName}
+        currentUid={currentUser.uid}
+        isAdmin={isAdmin}
+        onDeleteExpense={handleDeleteExpense}
+        onOpenExpense={openExpense}
+        onOpenSettlement={openSettlement}
+        emptyAction={
+          <Button size="md" icon="plus" onClick={() => setShowAddExpense(true)}>
+            Add Expense
+          </Button>
+        }
+      />
+      {isAdmin && expenseCount > 0 && (
+        <p className="section-footer">Swipe left on an expense to delete it.</p>
+      )}
 
       {showAddExpense && (
-        <AddExpenseModal group={group} currentUid={currentUser.uid} onSubmit={handleAddExpense} onClose={() => setShowAddExpense(false)} />
+        <AddExpenseModal
+          group={group}
+          currentUid={currentUser.uid}
+          onSubmit={handleAddExpense}
+          onClose={() => setShowAddExpense(false)}
+        />
       )}
 
       {settleTarget && (
@@ -870,14 +800,32 @@ function GroupPageInner() {
         />
       )}
 
-
-      {showInvite && (
-        <InviteQrSheet
-          groupName={group.name}
-          inviteCode={group.inviteCode}
-          onClose={() => setShowInvite(false)}
+      {sheet === "invite" && (
+        <InviteQrSheet groupName={group.name} inviteCode={group.inviteCode} onClose={() => setSheet(null)} />
+      )}
+      {sheet === "members" && (
+        <MembersSheet
+          group={group}
+          currentUid={currentUser.uid}
+          isAdmin={isAdmin}
+          memberName={memberName}
+          onInvite={() => setSheet("invite")}
+          onAddMember={() => setSheet("addMember")}
+          onRemove={handleRemoveMember}
+          onClose={() => setSheet((s) => (s === "members" ? null : s))}
         />
       )}
+      {sheet === "addMember" && (
+        <AddMemberModal groupId={group.id} existingUids={group.memberIds} onClose={() => setSheet(null)} />
+      )}
+      {sheet === "edit" && (
+        <EditGroupSheet
+          group={group}
+          onDelete={handleDeleteGroup}
+          onClose={() => setSheet((s) => (s === "edit" ? null : s))}
+        />
+      )}
+
       {statementUid && (
         <PersonStatementSheet
           group={group}
@@ -901,115 +849,6 @@ function GroupPageInner() {
         />
       )}
 
-      {/* Group Info Modal */}
-      {showGroupInfo && (
-        <GlassModal title="Group Info" onClose={() => setShowGroupInfo(false)}>
-          <div className="space-y-4">
-            <div className="text-center">
-              {group.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={group.photoURL} alt="" className="w-20 h-20 rounded-full object-cover mx-auto" />
-              ) : (
-                <div className="w-20 h-20 rounded-full bg-[var(--accent)]/10 flex items-center justify-center mx-auto">
-                  <span className="text-[32px] font-semibold text-[var(--accent)]">{group.name.charAt(0).toUpperCase()}</span>
-                </div>
-              )}
-              <p className="text-[20px] font-semibold text-[var(--text-primary)] mt-3">{group.name}</p>
-              {group.description && <p className="text-[14px] text-[var(--text-secondary)] mt-1">{group.description}</p>}
-              <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-                {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); setShowInvite(true); }} className="flex-1">
-                Invite people
-              </GlassButton>
-              {isAdmin && (
-                <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); handleOpenEditGroup(); }} className="flex-1">
-                  Edit Group
-                </GlassButton>
-              )}
-            </div>
-
-            <div className="border-t border-[var(--border-subtle)] pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-[var(--text-secondary)]">Members</p>
-                {isAdmin && (
-                  <button
-                    onClick={() => { setShowGroupInfo(false); setShowAddMember(true); }}
-                    className="text-[13px] font-medium text-[var(--brand)] tap-shrink"
-                  >
-                    + Add member
-                  </button>
-                )}
-              </div>
-              <div className="space-y-2">
-                {group.memberIds.map((uid) => (
-                  <div key={uid} className="flex items-center gap-2.5">
-                    {group.members[uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-                        <span className="text-[13px] font-medium text-[var(--accent)]">
-                          {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--text-primary)] truncate">
-                        {memberName(uid)}{uid === group.createdBy && <span className="text-[11px] text-[var(--text-tertiary)] ml-1">(Admin)</span>}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] truncate">{group.members[uid]?.email || ""}</p>
-                    </div>
-                    {isAdmin && uid !== group.createdBy && (
-                      <button
-                        onClick={() => handleRemoveMember(uid)}
-                        className="text-[12px] font-medium text-[var(--danger)] shrink-0 tap-shrink px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Archiving is personal: it moves this group into your Archived tab
-                and leaves it exactly where it is for everyone else. */}
-            <button
-              onClick={handleToggleArchive}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
-            >
-              {iArchived ? "Restore to active groups" : "Archive this group"}
-            </button>
-            <p className="text-[12px] text-[var(--text-tertiary)] -mt-1">
-              {iArchived
-                ? "It will show up under Your Groups again."
-                : "Hides it from your home screen without changing any balance. Only you see this."}
-            </p>
-
-            {!isAdmin && (
-              <button
-                onClick={handleLeaveGroup}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink"
-              >
-                Leave group
-              </button>
-            )}
-          </div>
-        </GlassModal>
-      )}
-
-      {showAddMember && (
-        <AddMemberModal
-          groupId={group.id}
-          existingUids={group.memberIds}
-          onClose={() => setShowAddMember(false)}
-        />
-      )}
-
       {(detailExpense || detailSettlement) && (
         <ActivityDetailModal
           expense={detailExpense}
@@ -1018,82 +857,17 @@ function GroupPageInner() {
           memberName={memberName}
           currentUid={currentUser.uid}
           isAdmin={isAdmin}
-          onEditExpense={handleEditExpense}
+          canForward={myCreditors.length > 0}
+          busy={detailSettlement ? busySettlement === detailSettlement.id : false}
+          onEditExpense={(e) => setEditingExpense(e)}
           onDeleteExpense={handleDeleteExpense}
+          onApprove={handleApproveSettlement}
+          onReject={handleRejectSettlement}
+          onForward={(s) => setForwardTarget(s)}
           onClose={closeDetail}
         />
       )}
 
-      {/* Edit Group Modal */}
-      {showEditGroup && (
-        <GlassModal title="Edit Group" onClose={() => setShowEditGroup(false)}>
-          <form onSubmit={handleSaveGroupProfile} className="space-y-4">
-            <div className="flex justify-center">
-              <label
-                role="button"
-                tabIndex={0}
-                aria-label="Change group photo"
-                onKeyDown={activateFileInputOnKey}
-                className="relative cursor-pointer tap-shrink rounded-full"
-              >
-                {editPhotoPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={editPhotoPreview} alt="" className="w-20 h-20 rounded-full object-cover border-2 border-[var(--border-subtle)]" />
-                ) : (
-                  <div className="w-20 h-20 rounded-full bg-[var(--accent)]/10 flex items-center justify-center border-2 border-[var(--border-subtle)]">
-                    <span className="text-[28px] font-semibold text-[var(--accent)]">{(editName || "G").charAt(0).toUpperCase()}</span>
-                  </div>
-                )}
-                <span className="absolute bottom-0 right-0 bg-[var(--accent)] text-white text-[10px] px-1.5 py-0.5 rounded-full">Edit</span>
-                <input type="file" accept="image/*" onChange={handleEditPhotoChange} className="hidden" />
-              </label>
-            </div>
-            <GlassField label="Group name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Group name" />
-            <GlassField label="Description" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Group description (optional)" />
-
-            <div className="rounded-[var(--radius-inner)] border border-[var(--border-subtle)] p-3.5">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={editUseSimplified}
-                  onChange={(e) => setEditUseSimplified(e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-solid)]"
-                />
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-semibold text-[var(--text-primary)]">
-                    Combine payments
-                  </span>
-                  <span className="block text-[13px] text-[var(--text-secondary)] mt-0.5">
-                    Off: you settle directly with each person you shared expenses
-                    with. On: the app reshuffles who pays whom so there are fewer
-                    transfers — which can ask you to pay someone you never shared
-                    a bill with.
-                  </span>
-                </span>
-              </label>
-            </div>
-
-            {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
-            <GlassButton disabled={editBusy} className="w-full">{editBusy ? "Saving…" : "Save"}</GlassButton>
-
-            <div className="border-t border-[var(--border-subtle)] pt-3">
-              <button
-                type="button"
-                onClick={handleDeleteGroup}
-                disabled={editBusy}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink disabled:opacity-50"
-              >
-                Delete Group
-              </button>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-1.5 text-center">
-                Permanently removes this group for everyone. This can&apos;t be undone.
-              </p>
-            </div>
-          </form>
-        </GlassModal>
-      )}
-
-      {/* Edit Expense Modal */}
       {editingExpense && (
         <AddExpenseModal
           group={group}
@@ -1104,7 +878,7 @@ function GroupPageInner() {
         />
       )}
       {confirmState && (
-        <ConfirmDialog
+        <ConfirmSheet
           title={confirmState.title}
           message={confirmState.message}
           confirmLabel={confirmState.confirmLabel}
@@ -1113,15 +887,14 @@ function GroupPageInner() {
           onClose={() => setConfirmState(null)}
         />
       )}
-    </div>
+    </Screen>
   );
 }
 
 /**
  * `useSearchParams` makes everything below it client-rendered, so the tree is
- * wrapped in a Suspense boundary as the Next docs recommend. The fallback is the
- * same skeleton the page shows while its data loads, so a deep link doesn't
- * flash something different on the way in.
+ * wrapped in a Suspense boundary as the Next docs recommend. The fallback is
+ * the same skeleton the page shows while its data loads.
  */
 export default function GroupPage() {
   return (

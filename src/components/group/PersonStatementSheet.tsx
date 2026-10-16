@@ -1,10 +1,14 @@
 "use client";
-import { useRouter } from "next/navigation";
-import GlassModal from "@/components/ui/GlassModal";
+import { useRef } from "react";
 import { Expense, Group, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { buildPairStatement, describeNet, StatementRow } from "@/lib/statement";
+import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
+import { DetailRow, List, Row, Section } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { Button } from "@/components/kit/Controls";
+import { useNav } from "@/components/kit/nav";
 
 function shortDate(ts: number): string {
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
@@ -36,6 +40,7 @@ function rowWords(row: StatementRow, otherName: string): { text: string; tone: "
   }
 }
 
+/** "Why do I owe this?" — the running account with one person in one group. */
 export default function PersonStatementSheet({
   group,
   meUid,
@@ -53,152 +58,130 @@ export default function PersonStatementSheet({
   onClose: () => void;
   onSettle: (toUid: string, amount: number) => void;
 }) {
-  const router = useRouter();
+  const nav = useNav();
+  const sheetRef = useRef<SheetHandle>(null);
   const otherName = group.members[otherUid]?.displayName || "Member";
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
   const settled = isSettled(stmt.net);
   const iOwe = !settled && stmt.net < 0;
-  // With simplified debts on, the group's payment plan chains balances through
-  // third parties, so this pairwise figure is history between the two of you —
-  // not an amount to pay. Offering "Settle X" here would contradict the plan on
-  // the group screen, so the action is withheld and we point at the plan instead.
+  // With simplified debts on, the group's plan chains balances through third
+  // parties, so this pairwise figure is history — not an amount to pay.
   const simplified = group.useSimplifiedDebts === true;
+  const pending = !isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem);
 
   return (
-    <GlassModal title={otherName} onClose={onClose}>
-      <div className="space-y-4">
-        {/* The headline answer, in words rather than a signed number. */}
-        <div
-          className={`rounded-[var(--radius-inner)] p-4 text-center ${
-            settled
-              ? "bg-[var(--fill-soft)]"
-              : iOwe
-              ? "bg-[var(--tint-danger-soft)]"
-              : "bg-[var(--tint-success-soft)]"
-          }`}
-        >
-          <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-            {describeNet(stmt.net, otherName, formatCurrency)}
-          </p>
-          <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
-            Just between you two, in {group.name}
-          </p>
-          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
-            <p className="text-[12px] text-[var(--warning)] mt-2">
-              {!isSettled(stmt.pendingFromThem)
-                ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
-                : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
-              . Not counted above.
-            </p>
+    <Sheet
+      ref={sheetRef}
+      large
+      title={otherName}
+      subtitle={group.name}
+      onClose={onClose}
+      footer={
+        <div className="flex gap-2">
+          {iOwe && !simplified && (
+            <Button
+              block
+              onClick={() => {
+                onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
+                sheetRef.current?.dismiss();
+              }}
+            >
+              Settle {formatCurrency(-stmt.net)}
+            </Button>
           )}
+          <Button
+            block
+            variant={iOwe && !simplified ? "tinted" : "prominent"}
+            onClick={() => nav.push(`/reports?person=${otherUid}&group=${group.id}`)}
+          >
+            Full Statement
+          </Button>
         </div>
+      }
+    >
+      <div className="flex flex-col items-center px-2 pb-2 pt-3 text-center">
+        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} />
+        <p
+          className={`t-title3 mt-3 ${settled ? "text-label" : iOwe ? "text-neg" : "text-pos"}`}
+        >
+          {describeNet(stmt.net, otherName, formatCurrency)}
+        </p>
+        <p className="t-footnote mt-1 text-label-2">Just between you two, in {group.name}</p>
+        {pending && (
+          <p className="t-footnote mt-2 max-w-[320px] text-warn">
+            {!isSettled(stmt.pendingFromThem)
+              ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
+              : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
+            . Not counted above.
+          </p>
+        )}
+      </div>
 
-        {/* Where the number comes from */}
-        <div className="rounded-[var(--radius-inner)] bg-[var(--fill-soft)] p-3 space-y-1.5">
-          <div className="flex justify-between text-[14px]">
-            <span className="text-[var(--text-tertiary)]">You covered for {otherName}</span>
-            <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.iCoveredForThem)}</span>
-          </div>
-          <div className="flex justify-between text-[14px]">
-            <span className="text-[var(--text-tertiary)]">{otherName} covered for you</span>
-            <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.theyCoveredForMe)}</span>
-          </div>
+      <Section header="Where it comes from">
+        <List>
+          <DetailRow label={`You covered for ${otherName}`} value={formatCurrency(stmt.iCoveredForThem)} />
+          <DetailRow label={`${otherName} covered for you`} value={formatCurrency(stmt.theyCoveredForMe)} />
           {!isSettled(stmt.iPaid) && (
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Payments you sent</span>
-              <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>
-            </div>
+            <DetailRow label="Payments you sent" value={formatCurrency(stmt.iPaid)} valueClassName="text-pos" />
           )}
           {!isSettled(stmt.theyPaid) && (
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Payments {otherName} sent</span>
-              <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>
-            </div>
+            <DetailRow label={`Payments ${otherName} sent`} value={formatCurrency(stmt.theyPaid)} valueClassName="text-pos" />
           )}
-        </div>
+        </List>
+      </Section>
 
-        {/* Row-by-row history */}
-        <div>
-          <p className="text-[13px] font-semibold text-[var(--text-secondary)] mb-2">
-            {stmt.rows.length > 0
-              ? `${stmt.rows.length} entr${stmt.rows.length === 1 ? "y" : "ies"} between you`
-              : "Nothing shared yet"}
-          </p>
-          {stmt.rows.length === 0 ? (
-            <p className="text-[13px] text-[var(--text-tertiary)]">
-              You haven&rsquo;t shared any expenses with {otherName} in this group.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--border-subtle)]">
-              {[...stmt.rows].reverse().map((row) => {
-                const words = rowWords(row, otherName);
-                return (
-                  <li key={row.key} className="py-2.5 flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] font-medium text-[var(--text-primary)] truncate">
-                        {row.label}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
-                        {shortDate(row.ts)} · {words.text}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p
-                        className={`text-[14px] font-semibold ${
-                          words.tone === "owe"
-                            ? "text-[var(--neg)]"
-                            : words.tone === "get"
-                            ? "text-[var(--pos)]"
-                            : "text-[var(--text-tertiary)]"
+      <Section
+        header={
+          stmt.rows.length > 0
+            ? `${stmt.rows.length} entr${stmt.rows.length === 1 ? "y" : "ies"} between you`
+            : "History"
+        }
+        footer={
+          simplified && !settled
+            ? "This group combines payments, so these amounts are your shared history. The group's balances show who to pay."
+            : undefined
+        }
+      >
+        {stmt.rows.length === 0 ? (
+          <div className="card p-4">
+            <p className="t-subhead text-label-2">You haven&rsquo;t shared any expenses with {otherName} in this group.</p>
+          </div>
+        ) : (
+          <List>
+            {[...stmt.rows].reverse().map((row) => {
+              const words = rowWords(row, otherName);
+              return (
+                <Row
+                  key={row.key}
+                  tall
+                  title={row.label}
+                  subtitle={`${shortDate(row.ts)} · ${words.text}`}
+                  trailing={
+                    <span className="flex shrink-0 flex-col items-end">
+                      <span
+                        className={`num t-subhead font-semibold ${
+                          words.tone === "owe" ? "text-neg" : words.tone === "get" ? "text-pos" : "text-label-3"
                         }`}
                       >
                         {row.informationalOnly
                           ? "—"
                           : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
-                      </p>
-                      <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                      </span>
+                      <span className="t-caption text-label-2">
                         {isSettled(row.balance)
                           ? "settled"
                           : row.balance > 0
                           ? `owes you ${formatCurrency(row.balance)}`
                           : `you owe ${formatCurrency(-row.balance)}`}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {simplified && !settled && (
-          <p className="text-[12px] text-[var(--text-tertiary)] text-center">
-            This group uses simplified debts, so the amounts above are your shared
-            history. Use the group&rsquo;s settle-up plan to see who to pay.
-          </p>
+                      </span>
+                    </span>
+                  }
+                />
+              );
+            })}
+          </List>
         )}
-        <div className="flex gap-2">
-          {iOwe && !simplified && (
-            <button
-              type="button"
-              onClick={() => {
-                onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
-                onClose();
-              }}
-              className="flex-1 rounded-full bg-[var(--brand-solid)] text-white px-4 py-3 text-[15px] font-semibold tap-shrink"
-            >
-              Settle {formatCurrency(-stmt.net)}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => router.push(`/reports?person=${otherUid}&group=${group.id}`)}
-            className="flex-1 rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] text-[var(--text-primary)] px-4 py-3 text-[15px] font-semibold tap-shrink"
-          >
-            Full statement
-          </button>
-        </div>
-      </div>
-    </GlassModal>
+      </Section>
+    </Sheet>
   );
 }

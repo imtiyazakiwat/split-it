@@ -1,9 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { searchUsers, addMemberToGroup, UserSearchResult } from "@/lib/firestore";
-import GlassModal from "@/components/ui/GlassModal";
 import { useToast } from "@/components/ui/Toast";
+import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
+import { Button, EmptyState, SearchField, Spinner } from "@/components/kit/Controls";
+import { List, Row } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
 
 export default function AddMemberModal({
   groupId,
@@ -19,6 +22,7 @@ export default function AddMemberModal({
   const [searching, setSearching] = useState(false);
   const [addingUid, setAddingUid] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
 
   useEffect(() => {
@@ -58,62 +62,73 @@ export default function AddMemberModal({
         photoURL: u.photoURL,
       });
       showToast({ message: `${u.displayName} added to the group` });
-      onClose();
+      sheetRef.current?.dismiss();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add member");
       setAddingUid(null);
     }
   }
 
+  const searched = term.trim().length >= 2;
+
   return (
-    <GlassModal title="Add member" onClose={onClose}>
-      <div className="space-y-3">
-        <input
-          autoFocus
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="Search by name or email…"
-          className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-        />
+    <Sheet ref={sheetRef} large title="Add Member" onClose={onClose}>
+      <SearchField
+        value={term}
+        onChange={setTerm}
+        autoFocus
+        placeholder="Name or email"
+        label="Search people by name or email"
+        className="mt-1"
+      />
 
-        {searching && <p className="text-[13px] text-[var(--text-tertiary)]">Searching…</p>}
-
-        {!searching && term.trim().length >= 2 && results.length === 0 && (
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            No users found. They need to have signed in to SplitIt at least once.
-          </p>
-        )}
-
-        <div className="space-y-1 max-h-72 overflow-y-auto">
-          {results.map((u) => (
-            <div key={u.uid} className="flex items-center gap-2.5 py-2">
-              {u.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={u.photoURL} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-                  <span className="text-[14px] font-medium text-[var(--accent)]">
-                    {u.displayName.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[14px] text-[var(--text-primary)] truncate">{u.displayName}</p>
-                <p className="text-[12px] text-[var(--text-tertiary)] truncate">{u.email}</p>
-              </div>
-              <button
-                onClick={() => handleAdd(u)}
-                disabled={addingUid === u.uid}
-                className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium shrink-0 tap-shrink disabled:opacity-50"
-              >
-                {addingUid === u.uid ? "Adding…" : "Add"}
-              </button>
-            </div>
-          ))}
+      {searching && (
+        <div className="flex justify-center py-6 text-label-2">
+          <Spinner />
         </div>
+      )}
 
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-      </div>
-    </GlassModal>
+      {!searching && searched && results.length === 0 && (
+        <EmptyState
+          compact
+          icon="magnifyingglass"
+          title="No Results"
+          message="They need to have signed in to SplitIt at least once. You can also send them an invite link."
+        />
+      )}
+
+      {!searched && (
+        <p className="section-footer mt-3">
+          Search for anyone who has signed in to SplitIt. For someone new, share the group&rsquo;s invite link instead.
+        </p>
+      )}
+
+      {results.length > 0 && (
+        <List className="mt-4">
+          {results.map((u) => (
+            <Row
+              key={u.uid}
+              inset="avatar"
+              leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={40} />}
+              title={u.displayName}
+              subtitle={u.email}
+              trailing={
+                <Button
+                  size="sm"
+                  variant="tinted"
+                  busy={addingUid === u.uid}
+                  disabled={!!addingUid}
+                  onClick={() => handleAdd(u)}
+                >
+                  Add
+                </Button>
+              }
+            />
+          ))}
+        </List>
+      )}
+
+      {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
+    </Sheet>
   );
 }

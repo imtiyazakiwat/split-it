@@ -1,29 +1,24 @@
-import Logo from "@/components/Logo";
+import Image from "next/image";
 
 /**
- * Full-screen animated brand splash. The "split it" wordmark pops in with a
- * shimmer sweep, over a soft indigo-tinted backdrop, with a small loader.
+ * The first web frame. It reproduces the static apple-touch-startup-image —
+ * the blue gradient, the app icon, the name — so the launch screen iOS shows
+ * before any JavaScript runs continues seamlessly into the app instead of
+ * cutting to a different design. No spinner: this is shown for a few hundred
+ * milliseconds while a cached session resolves, not while anything loads.
  */
-export default function SplashScreen() {
+export default function SplashScreen({ leaving = false }: { leaving?: boolean }) {
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-white to-indigo-50 dark:from-black dark:to-indigo-950">
-      <div className="relative animate-splash-logo">
-        <Logo className="h-16 w-auto" />
-        {/* shimmer sweep clipped to the logo area */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="animate-splash-shimmer absolute top-0 -left-1/3 h-full w-1/3 bg-gradient-to-r from-transparent via-white/70 to-transparent" />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1.5 mt-8">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-splash-dot"
-            style={{ animationDelay: `${i * 0.16}s` }}
-          />
-        ))}
-      </div>
+    <div className={`splash ${leaving ? "is-leaving" : ""}`}>
+      <Image
+        src="/icon-512.png"
+        alt=""
+        width={86}
+        height={86}
+        priority
+        className="splash-icon"
+      />
+      <p className="splash-name">SplitIt</p>
     </div>
   );
 }

@@ -1,8 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
@@ -11,20 +10,23 @@ import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { DirectTransfer } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
-import BottomNav from "@/components/home/BottomNav";
-import GlassModal from "@/components/ui/GlassModal";
 import Skeleton from "@/components/ui/Skeleton";
-import NavHint from "@/components/NavHint";
-import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
+import Screen from "@/components/kit/Screen";
+import { BarButton } from "@/components/kit/BarButton";
+import { List, RowButton, RowLink, Section, sepInset } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { IconTile } from "@/components/kit/Tile";
+import { EmptyState, SearchField } from "@/components/kit/Controls";
+import { Sheet } from "@/components/kit/Sheet";
+import { NavLink, useNav } from "@/components/kit/nav";
+
+// Behind a tap, so it loads on demand (it reaches the Firestore SDK).
+const IncludeTransferSheet = dynamic(() => import("@/components/pay/IncludeTransferSheet"), { ssr: false });
 
 /**
- * The Pay tab: one row per person, the way a payments app lists contacts rather
- * than the way a splitting app lists groups.
- *
- * The group screens answer "what does this trip cost us?". This one answers
- * "where do I stand with Asha?" — which is the question people actually have
- * when they're about to send money, and the reason a direct payment needed a
- * home that isn't inside a group.
+ * The Pay tab: one row per person, the way a payments app lists contacts
+ * rather than the way a splitting app lists groups. It answers "where do I
+ * stand with Asha?" — the question people actually have before sending money.
  */
 
 function timeAgo(ts: number): string {
@@ -38,43 +40,29 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
-function Avatar({
-  name,
-  photoURL,
-  size = 44,
-}: {
-  name: string;
-  photoURL?: string;
-  size?: number;
-}) {
-  if (photoURL) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={photoURL}
-        alt=""
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
+function PaySkeleton() {
   return (
-    <span
-      className="rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 font-semibold text-[var(--text-secondary)]"
-      style={{ width: size, height: size, fontSize: size * 0.36 }}
-      aria-hidden
-    >
-      {name.charAt(0).toUpperCase()}
-    </span>
+    <Screen title="Pay" large tabBar>
+      <div className="card list mt-1" aria-hidden>
+        {[0, 1, 2, 3, 4].map((i) => (
+          <div key={i} className="row is-tall" style={sepInset(76)}>
+            <Skeleton className="h-12 w-12 rounded-full" />
+            <div className="flex-1">
+              <Skeleton className="h-4 w-32 rounded-md" />
+              <Skeleton className="mt-2 h-3 w-48 rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Screen>
   );
 }
 
 export default function PayPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
+  const nav = useNav();
   const { datasets, groupsLoaded } = useGroupData();
-  const { transfers, pendingIncoming, unattributed, threadWith, unreadFrom, unreadCount } =
-    usePayments();
+  const { transfers, pendingIncoming, unattributed, threadWith, unreadFrom } = usePayments();
   const [search, setSearch] = useState("");
   const [decide, setDecide] = useState<DirectTransfer | null>(null);
   const [showPicker, setShowPicker] = useState(false);
@@ -87,23 +75,16 @@ export default function PayPage() {
     [uid, datasets, transfers]
   );
 
-  const nameOf = useMemo(() => {
-    const map = new Map(counterparties.map((c) => [c.uid, c.displayName]));
-    return (id: string) => map.get(id) || "Someone";
-  }, [counterparties]);
+  const byUid = useMemo(() => new Map(counterparties.map((c) => [c.uid, c])), [counterparties]);
+  const nameOf = (id: string) => byUid.get(id)?.displayName || "Someone";
 
-  /**
-   * Rows carry their own "last thing that happened" so the list can be ordered
-   * by recency like a messaging app, not alphabetically.
-   */
+  /** Rows carry their own "last thing that happened", for messaging-app order. */
   const rows = useMemo(() => {
     if (!uid) return [];
     return counterparties
       .map((c) => {
         const thread = threadWith(c.uid);
-        const theirTransfers = transfers.filter(
-          (t) => t.fromUid === c.uid || t.toUid === c.uid
-        );
+        const theirTransfers = transfers.filter((t) => t.fromUid === c.uid || t.toUid === c.uid);
         const lastTransfer = theirTransfers[0]; // already newest-first
         const lastMessageAt = thread?.lastMessageAt ?? 0;
         const lastTransferAt = lastTransfer?.createdAt ?? 0;
@@ -146,242 +127,190 @@ export default function PayPage() {
     [counterparties, pickerQuery]
   );
 
-  if (loading || (user && !groupsLoaded)) {
-    return (
-      <div className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] space-y-3">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-11 w-full" />
-        {[0, 1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-16 w-full" />
-        ))}
-      </div>
-    );
-  }
+  if (loading || (user && !groupsLoaded)) return <PaySkeleton />;
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
   const needsDecision = pendingIncoming.length + unattributed.length;
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum">
-        <div className="flex items-center justify-between pt-2">
-          <h1 className="text-[28px] font-extrabold text-[var(--text-primary)]">Pay</h1>
-          <div className="flex items-center gap-2">
-            {unreadCount > 0 && (
-              <span className="rounded-full bg-[var(--tint-accent)] px-3 py-1 text-[12px] font-semibold text-[var(--brand)]">
-                {unreadCount} unread
-              </span>
-            )}
-            <button
-              onClick={() => setShowPicker(true)}
-              aria-label="Send money"
-              className="grid place-items-center w-11 h-11 rounded-full bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          </div>
+    <Screen
+      title="Pay"
+      large
+      tabBar
+      trailing={<BarButton icon="plus" label="Send money" onClick={() => setShowPicker(true)} />}
+    >
+      {/* Money waiting on a decision: until it's answered, a balance is wrong. */}
+      {needsDecision > 0 && (
+        <Section header="Waiting on You" tight>
+          <List>
+            {pendingIncoming.map((t) => (
+              <RowButton
+                key={t.id}
+                onClick={() => setDecide(t)}
+                inset="tile"
+                tall
+                leading={<IconTile icon="clock" color="var(--orange)" />}
+                title={`${nameOf(t.fromUid)} sent you ${formatCurrency(t.amount)}`}
+                subtitle={`${t.note ? `“${t.note}” · ` : ""}Confirm it and choose what it settles`}
+                chevron
+              />
+            ))}
+            {unattributed.map((t) => (
+              <RowButton
+                key={t.id}
+                onClick={() => setDecide(t)}
+                inset="tile"
+                tall
+                leading={<IconTile icon="info.circle" color="var(--blue)" />}
+                title={`${formatCurrency(t.amount)} from ${nameOf(t.fromUid)} isn't in a group`}
+                subtitle="Counted as personal. Attach it to settle a group balance."
+                chevron
+              />
+            ))}
+          </List>
+        </Section>
+      )}
+
+      {counterparties.length === 0 ? (
+        <div className="card mt-2">
+          <EmptyState
+            icon="rupee.bubble"
+            title="Nobody to Pay Yet"
+            message="You can pay anyone you share a group with. Join or create one first."
+            action={
+              <NavLink href="/" kind="tab" className="btn btn-prominent is-md">
+                Go to Groups
+              </NavLink>
+            }
+          />
         </div>
-        <p className="text-[15px] text-[var(--text-tertiary)] mt-1 mb-4">
-          Send money straight to someone, and see everything you&rsquo;ve settled.
-        </p>
-
-        {/* Money waiting on a decision from the current user. Deliberately the
-            first thing on the screen: until it's answered, somebody's balance is
-            wrong. */}
-        {needsDecision > 0 && (
-          <section className="mb-5">
-            <h2 className="text-[13px] font-semibold tracking-wide text-[var(--text-tertiary)] mb-2">
-              WAITING ON YOU
-            </h2>
-            <div className="space-y-2">
-              {pendingIncoming.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDecide(t)}
-                  className="w-full text-left rounded-[var(--radius-inner)] bg-[var(--tint-warning)] p-3.5 tap-shrink"
-                >
-                  <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                    {nameOf(t.fromUid)} sent you {formatCurrency(t.amount)}
-                  </p>
-                  <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
-                    {t.note ? `“${t.note}” · ` : ""}Confirm it and choose which balance it
-                    settles
-                  </p>
-                </button>
-              ))}
-              {unattributed.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDecide(t)}
-                  className="w-full text-left rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] p-3.5 tap-shrink"
-                >
-                  <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                    {formatCurrency(t.amount)} from {nameOf(t.fromUid)} isn&rsquo;t in any
-                    group
-                  </p>
-                  <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                    You confirmed it — it counts as personal. Attach it to a group to settle a group balance.
-                  </p>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {counterparties.length > 3 && (
-          <label className="block mb-3">
-            <span className="sr-only">Search people</span>
-            <input
-              type="search"
+      ) : (
+        <Section header={needsDecision > 0 ? "People" : undefined} tight={needsDecision === 0}>
+          {counterparties.length > 3 && (
+            <SearchField
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={setSearch}
               placeholder="Search people"
-              className="w-full rounded-full border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+              label="Search people"
+              className="mb-3"
             />
-          </label>
-        )}
-
-        {counterparties.length === 0 ? (
-          <div className="rounded-[var(--radius-card)] bg-[var(--tint-accent)] p-6 text-center">
-            <p className="text-[17px] font-bold text-[var(--text-primary)]">
-              Nobody to pay yet
-            </p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-              Join or create a group first — you can pay anyone you share one with.
-            </p>
-            <button
-              onClick={() => router.push("/")}
-              className="mt-3 rounded-full bg-[var(--brand-solid)] text-white px-5 py-2.5 text-[15px] font-semibold tap-shrink"
-            >
-              Go to groups
-            </button>
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="text-center text-[14px] text-[var(--text-tertiary)] py-10">
-            Nobody matches that search.
-          </p>
-        ) : (
-          <div className="space-y-1.5 stagger">
-            {rows.map((r) => {
-              const iOwe = !isSettled(r.net) && r.net > 0;
-              const theyOwe = !isSettled(r.net) && r.net < 0;
-              return (
-                // Link, not router.push: /chat/[uid] is a dynamic route, so
-                // without a prefetched shell every tap paid a cold server round
-                // trip while this screen stayed frozen on top.
-                <Link
-                  key={r.uid}
-                  href={`/chat/${r.uid}`}
-                  className="w-full text-left flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] px-3.5 py-3 tap-shrink"
-                >
-                  <NavHint />
-                  <Avatar name={r.displayName} photoURL={r.photoURL} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
-                        {r.displayName}
-                      </p>
-                      {r.unread && (
+          )}
+          {rows.length === 0 ? (
+            <div className="card">
+              <EmptyState compact icon="magnifyingglass" title="No Results" message={`Nobody matches “${search}”.`} />
+            </div>
+          ) : (
+            <List>
+              {rows.map((r) => {
+                const iOwe = !isSettled(r.net) && r.net > 0;
+                const theyOwe = !isSettled(r.net) && r.net < 0;
+                return (
+                  // Link, not router.push: /chat/[uid] is dynamic, so without a
+                  // prefetched shell every tap paid a cold server round trip.
+                  <RowLink
+                    key={r.uid}
+                    href={`/chat/${r.uid}`}
+                    inset={76}
+                    tall
+                    chevron={false}
+                    leading={
+                      <span className="relative">
+                        <Avatar name={r.displayName} photoURL={r.photoURL} size={48} />
+                        {r.unread && (
+                          <span
+                            className="absolute -left-[13px] top-1/2 h-2.5 w-2.5 -translate-y-1/2 rounded-full bg-[var(--tint)]"
+                            aria-label="Unread messages"
+                          />
+                        )}
+                      </span>
+                    }
+                    title={r.displayName}
+                    titleClassName={r.unread ? "font-semibold" : "font-medium"}
+                    subtitle={
+                      r.awaitingMe ? (
+                        <span className="font-medium text-warn">Waiting for you to confirm a payment</span>
+                      ) : (
+                        r.preview
+                      )
+                    }
+                    trailing={
+                      <span className="flex shrink-0 flex-col items-end gap-0.5">
+                        <span className="t-caption text-label-2">
+                          {r.lastActivityAt ? timeAgo(r.lastActivityAt) : ""}
+                        </span>
                         <span
-                          className="h-2 w-2 rounded-full bg-[var(--brand)] shrink-0"
-                          aria-label="Unread messages"
-                        />
-                      )}
-                    </div>
-                    <p
-                      className={`text-[13px] truncate ${
-                        r.awaitingMe
-                          ? "text-[var(--warning)] font-medium"
-                          : "text-[var(--text-tertiary)]"
-                      }`}
-                    >
-                      {r.awaitingMe ? "Waiting for you to confirm a payment" : r.preview}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className={`text-[15px] font-bold ${
-                        iOwe
-                          ? "text-[var(--neg)]"
-                          : theyOwe
-                          ? "text-[var(--pos)]"
-                          : "text-[var(--text-tertiary)]"
-                      }`}
-                    >
-                      {iOwe || theyOwe ? formatCurrency(Math.abs(r.net)) : "settled"}
-                    </p>
-                    <p className="text-[11px] text-[var(--text-tertiary)]">
-                      {iOwe
-                        ? "you owe"
-                        : theyOwe
-                        ? "owes you"
-                        : r.lastActivityAt
-                        ? timeAgo(r.lastActivityAt)
-                        : ""}
-                    </p>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </main>
-
-      <BottomNav active="pay" payBadge={unreadCount > 0 || needsDecision > 0} />
+                          className={`num t-subhead font-semibold ${
+                            iOwe ? "text-neg" : theyOwe ? "text-pos" : "text-label-3"
+                          }`}
+                        >
+                          {iOwe || theyOwe ? formatCurrency(Math.abs(r.net)) : "Settled"}
+                        </span>
+                      </span>
+                    }
+                  />
+                );
+              })}
+            </List>
+          )}
+          <p className="section-footer">
+            Green: they owe you. Red: you owe them. Netted across every group you share.
+          </p>
+        </Section>
+      )}
 
       {showPicker && (
-        <GlassModal title="Send money to" onClose={() => setShowPicker(false)}>
-          <div className="space-y-3">
-            <input
-              type="search"
-              autoFocus
-              value={pickerQuery}
-              onChange={(e) => setPickerQuery(e.target.value)}
-              placeholder="Search people"
-              aria-label="Search people"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-            />
-            {pickerRows.length === 0 ? (
-              <p className="text-[13px] text-[var(--text-tertiary)] py-4 text-center">
-                {counterparties.length === 0
+        <Sheet
+          large
+          title="Send Money"
+          onClose={() => {
+            setShowPicker(false);
+            setPickerQuery("");
+          }}
+        >
+          <SearchField
+            value={pickerQuery}
+            onChange={setPickerQuery}
+            autoFocus
+            placeholder="Search people"
+            label="Search people"
+            className="mt-1"
+          />
+          {pickerRows.length === 0 ? (
+            <EmptyState
+              compact
+              icon="person.2"
+              title={counterparties.length === 0 ? "Nobody Yet" : "No Results"}
+              message={
+                counterparties.length === 0
                   ? "You can pay anyone you share a group with. Join a group first."
-                  : "Nobody matches that search."}
-              </p>
-            ) : (
-              <div className="space-y-1 max-h-72 overflow-y-auto scroll-momentum">
-                {pickerRows.map((c) => (
-                  <button
-                    key={c.uid}
-                    onClick={() => {
-                      setShowPicker(false);
-                      // The conversation is where paying happens, so the picker
-                      // hands off rather than stacking a second sheet on top.
-                      router.push(`/chat/${c.uid}?pay=1`);
-                    }}
-                    className="w-full text-left flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-2 tap-shrink hover:bg-[var(--fill-soft)]"
-                  >
-                    <Avatar name={c.displayName} photoURL={c.photoURL} size={36} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-[var(--text-primary)] truncate">
-                        {c.displayName}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)]">
-                        {!isSettled(c.net) && c.net > 0
-                          ? `You owe ${formatCurrency(c.net)}`
-                          : !isSettled(c.net) && c.net < 0
-                          ? `Owes you ${formatCurrency(-c.net)}`
-                          : "Settled up"}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        </GlassModal>
+                  : "Nobody matches that search."
+              }
+            />
+          ) : (
+            <List className="mt-4">
+              {pickerRows.map((c) => (
+                <RowButton
+                  key={c.uid}
+                  // The conversation is where paying happens, so the picker
+                  // hands off rather than stacking a second sheet on top.
+                  onClick={() => nav.push(`/chat/${c.uid}?pay=1`)}
+                  inset="avatar"
+                  leading={<Avatar name={c.displayName} photoURL={c.photoURL} size={40} />}
+                  title={c.displayName}
+                  subtitle={
+                    !isSettled(c.net) && c.net > 0
+                      ? `You owe ${formatCurrency(c.net)}`
+                      : !isSettled(c.net) && c.net < 0
+                      ? `Owes you ${formatCurrency(-c.net)}`
+                      : "Settled up"
+                  }
+                  chevron
+                />
+              ))}
+            </List>
+          )}
+        </Sheet>
       )}
 
       {decide && (
@@ -389,10 +318,11 @@ export default function PayPage() {
           transfer={decide}
           meUid={currentUser.uid}
           fromName={nameOf(decide.fromUid)}
+          fromPhotoURL={byUid.get(decide.fromUid)?.photoURL}
           datasets={datasets}
           onClose={() => setDecide(null)}
         />
       )}
-    </div>
+    </Screen>
   );
 }

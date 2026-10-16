@@ -1,22 +1,33 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import TopBar from "@/components/TopBar";
-import LoginScreen from "@/components/LoginScreen";
-import Card from "@/components/ui/Card";
-import { GlassSelect } from "@/components/ui/GlassField";
-import AddExpenseModal from "@/components/AddExpenseModal";
 import { activateFileInputOnKey } from "@/lib/keyboard";
+import LoginScreen from "@/components/LoginScreen";
+import AddExpenseModal from "@/components/AddExpenseModal";
+import Screen from "@/components/kit/Screen";
+import { Card, List, RowButton, Section } from "@/components/kit/List";
+import { GroupAvatar } from "@/components/kit/Tile";
+import { EmptyState } from "@/components/kit/Controls";
+import { Icon } from "@/components/kit/Icon";
+import { useNav } from "@/components/kit/nav";
 
+/**
+ * Landing page for the Web Share Target: an image shared from Photos/Gallery
+ * arrives here (via the service worker's cache), you pick the group, and the
+ * expense sheet opens with the image attached.
+ */
 export default function ShareReceiptPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
+  const nav = useNav();
   const { groups } = useGroupData();
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const preview = useMemo(() => (receiptFile ? URL.createObjectURL(receiptFile) : ""), [receiptFile]);
+  useEffect(() => () => {
+    if (preview) URL.revokeObjectURL(preview);
+  }, [preview]);
 
   useEffect(() => {
     if ("caches" in window) {
@@ -33,9 +44,9 @@ export default function ShareReceiptPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)] text-sm">Loading…</p>
-      </div>
+      <Screen title="Add Receipt" back="/">
+        <div />
+      </Screen>
     );
   }
   if (!user) return <LoginScreen />;
@@ -43,64 +54,63 @@ export default function ShareReceiptPage() {
   const group = groups.find((g) => g.id === selectedGroupId);
 
   return (
-    <div className="flex-1 flex flex-col">
-      <TopBar title="Add Receipt" onBack={() => router.push("/")} />
-      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 scroll-momentum">
-        <p className="text-sm text-[var(--text-secondary)]">
-          Received a shared image. Pick a group to attach it to a new expense.
-        </p>
-
-        {!receiptFile && (
-          <label
-            role="button"
-            tabIndex={0}
-            aria-label="Select an image to attach"
-            onKeyDown={activateFileInputOnKey}
-            className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--text-tertiary)] cursor-pointer tap-shrink"
-          >
-            No image detected. Tap to select one manually.
-            <input
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
-            />
-          </label>
-        )}
-
-        {receiptFile && (
-          <Card className="p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={URL.createObjectURL(receiptFile)}
-              alt="Shared receipt preview"
-              className="w-full rounded-[var(--radius-md)] max-h-64 object-contain"
-            />
-          </Card>
-        )}
-
-        <GlassSelect
-          label="Group"
-          value={selectedGroupId}
-          onChange={(e) => setSelectedGroupId(e.target.value)}
+    <Screen title="Add Receipt" back="/">
+      {receiptFile ? (
+        <Card className="mt-1 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={preview} alt="Shared receipt" className="max-h-72 w-full bg-[var(--fill-4)] object-contain" />
+        </Card>
+      ) : (
+        <label
+          role="button"
+          tabIndex={0}
+          aria-label="Choose an image to attach"
+          onKeyDown={activateFileInputOnKey}
+          className="card mt-1 flex cursor-pointer flex-col items-center gap-2 px-6 py-8 text-center"
         >
-          <option value="">Select a group…</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </GlassSelect>
-      </main>
+          <span className="inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--fill-4)] text-tint">
+            <Icon name="photo" size={26} />
+          </span>
+          <span className="t-headline">No Image Received</span>
+          <span className="t-subhead text-label-2">Tap to choose one from your photos.</span>
+          <input
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
+          />
+        </label>
+      )}
+
+      <Section header="Add it to" footer="Opens a new expense with this image attached.">
+        {groups.length === 0 ? (
+          <Card>
+            <EmptyState compact icon="person.2" title="No Groups Yet" message="Create or join a group first." />
+          </Card>
+        ) : (
+          <List>
+            {groups.map((g) => (
+              <RowButton
+                key={g.id}
+                onClick={() => setSelectedGroupId(g.id)}
+                inset={58}
+                leading={<GroupAvatar id={g.id} name={g.name} photoURL={g.photoURL} size={30} />}
+                title={g.name}
+                chevron
+              />
+            ))}
+          </List>
+        )}
+      </Section>
 
       {group && (
         <AddExpenseModal
           group={group}
           currentUid={user.uid}
-          onClose={() => router.push(`/groups/${group.id}`)}
+          onClose={() => nav.replace(`/groups/${group.id}`)}
           prefillReceipt={receiptFile}
         />
       )}
-    </div>
+    </Screen>
   );
 }

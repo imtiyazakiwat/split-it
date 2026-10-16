@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
@@ -29,18 +30,23 @@ import { getUserProfile } from "@/lib/firestore";
 import LoginScreen from "@/components/LoginScreen";
 import ChatSkeleton from "@/components/chat/ChatSkeleton";
 import { useToast } from "@/components/ui/Toast";
-import SendMoneyModal from "@/components/pay/SendMoneyModal";
-import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
+import Screen from "@/components/kit/Screen";
+import { BarLink } from "@/components/kit/BarButton";
+import { Avatar } from "@/components/kit/Avatar";
+import { EmptyState } from "@/components/kit/Controls";
+import { Icon } from "@/components/kit/Icon";
+import { useNav } from "@/components/kit/nav";
+
+// Sheets behind a tap load on demand.
+const SendMoneyModal = dynamic(() => import("@/components/pay/SendMoneyModal"), { ssr: false });
+const IncludeTransferSheet = dynamic(() => import("@/components/pay/IncludeTransferSheet"), { ssr: false });
 
 /**
- * The conversation with one person: every rupee that has moved between the two
- * of you, in order, with chat on top.
- *
- * The point of putting payments and talk on one surface is that the argument and
- * the evidence stop being in different places — "did you send it?" is answered
- * by the bubble above it. Money rows are projections of the ledger (see
- * lib/conversation.ts), never chat state, so nothing here can disagree with the
- * balances on the group screens.
+ * The conversation with one person: every rupee that has moved between you,
+ * in order, with chat woven in — so "did you send it?" is answered by the
+ * bubble above it. Money rows are projections of the ledger
+ * (lib/conversation.ts), never chat state, so nothing here can disagree with
+ * the balances on the group screens.
  */
 
 function dayLabel(ts: number): string {
@@ -48,7 +54,7 @@ function dayLabel(ts: number): string {
   const days = Math.round((startOfDay(new Date()) - startOfDay(new Date(ts))) / 86400000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
+  if (days < 7) return new Date(ts).toLocaleDateString("en-IN", { weekday: "long" });
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
@@ -56,16 +62,12 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-// ChatSkeleton now lives in components/chat so this screen and the route's
-// loading.tsx render the same shape. See app/chat/[uid]/loading.tsx.
-
 /**
- * Rows are hoisted out of the screen component on purpose. Declared inside it,
- * every keystroke in the composer produced new component identities, so React
- * unmounted and remounted every bubble in the conversation — janky scrolling on
- * a long thread for no reason.
+ * Rows are hoisted out of the screen on purpose: declared inside it, every
+ * keystroke in the composer gave them new identities, so React remounted
+ * every bubble in the conversation.
  */
-function TransferBubble({
+function TransferCard({
   item,
   otherName,
   groupNameOf,
@@ -78,7 +80,6 @@ function TransferBubble({
   item: ConversationItem;
   otherName: string;
   groupNameOf: (groupId: string) => string;
-  /** Settlement ids present in each loaded group, for spotting missing legs. */
   settlementIdsByGroup: Map<string, Set<string>>;
   onDecide: (t: DirectTransfer) => void;
   onCancel: (t: DirectTransfer) => void;
@@ -87,24 +88,19 @@ function TransferBubble({
 }) {
   const t = item.transfer!;
   const mine = item.side === "me";
-  // A payment can be split across several groups, and can be only partly
-  // assigned, so the status line has to describe an allocation rather than a
-  // single destination.
+  // A payment can be split across groups and only partly assigned, so the
+  // status describes an allocation rather than a single destination.
   const legs = transferAllocations(t);
   const unassigned = unallocatedAmount(t);
-  // Booking a payment takes two writes, so a leg can be recorded on the transfer
-  // while its settlement never reached the group. That understates the balance
-  // silently, and a fully assigned payment offers no other reason to come back
-  // here — so surface it and let the receiver finish the job.
+  // Booking takes two writes, so a leg can be on the transfer while its
+  // settlement never reached the group. Surface it so the receiver can finish.
   const broken = missingAllocationLegs(t, settlementIdsByGroup);
   const status = (() => {
     if (t.status === "cancelled") return { text: "Withdrawn", tone: "flat" as const };
     if (t.status === "declined") return { text: "Marked as not received", tone: "bad" as const };
     if (t.status === "accepted" && legs.length > 0) {
       const where =
-        legs.length === 1
-          ? `Counted in ${groupNameOf(legs[0].groupId)}`
-          : `Counted across ${legs.length} groups`;
+        legs.length === 1 ? `Counted in ${groupNameOf(legs[0].groupId)}` : `Counted across ${legs.length} groups`;
       if (broken.length > 0) {
         return {
           text: `Not fully recorded — ${formatCurrency(
@@ -114,71 +110,57 @@ function TransferBubble({
         };
       }
       return {
-        text: isSettled(unassigned)
-          ? where
-          : `${where} · ${formatCurrency(unassigned)} unassigned`,
+        text: isSettled(unassigned) ? where : `${where} · ${formatCurrency(unassigned)} unassigned`,
         tone: "good" as const,
       };
     }
-    if (t.status === "accepted")
-      return { text: "Confirmed · personal balance (not in a group)", tone: "flat" as const };
+    if (t.status === "accepted") return { text: "Confirmed · personal balance", tone: "flat" as const };
     return {
       text: mine ? `Waiting for ${otherName} to confirm` : "Waiting for you to confirm",
       tone: "warn" as const,
     };
   })();
 
+  const statusColor = mine
+    ? "text-white/85"
+    : status.tone === "good"
+    ? "text-pos"
+    : status.tone === "bad"
+    ? "text-neg"
+    : status.tone === "warn"
+    ? "text-warn"
+    : "text-label-2";
+
+  const actionCls = mine
+    ? "mt-2.5 w-full rounded-full bg-white/20 px-4 py-2 text-[15px] font-semibold text-white transition-transform active:scale-[0.97]"
+    : "mt-2.5 w-full rounded-full px-4 py-2 text-[15px] font-semibold transition-transform active:scale-[0.97]";
+
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-[var(--radius-inner)] p-3.5 ${
+        className={`w-[78%] max-w-[300px] rounded-[24px] p-4 ${
           mine
-            ? "bg-[var(--brand-solid)] text-white"
-            : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
+            ? "bg-[linear-gradient(160deg,color-mix(in_srgb,var(--tint)_82%,white)_0%,var(--tint)_100%)] text-white"
+            : "bg-[var(--cell)]"
         }`}
       >
-        <p className={`text-[12px] ${mine ? "text-white/75" : "text-[var(--text-tertiary)]"}`}>
+        <p className={`t-footnote flex items-center gap-1.5 ${mine ? "text-white/80" : "text-label-2"}`}>
+          <Icon name="indianrupee" size={14} strokeWidth={2.2} />
           {mine ? `You paid ${otherName}` : `${otherName} paid you`}
         </p>
-        <p
-          className={`text-[24px] font-extrabold leading-tight ${
-            mine ? "text-white" : "text-[var(--text-primary)]"
-          }`}
-        >
-          {formatCurrency(t.amount)}
-        </p>
-        {t.note && (
-          <p className={`text-[13px] mt-0.5 ${mine ? "text-white/85" : "text-[var(--text-secondary)]"}`}>
-            {t.note}
-          </p>
-        )}
-        <p
-          className={`text-[12px] mt-1.5 font-medium ${
-            mine
-              ? "text-white/85"
-              : status.tone === "good"
-              ? "text-[var(--pos)]"
-              : status.tone === "bad"
-              ? "text-[var(--neg)]"
-              : status.tone === "warn"
-              ? "text-[var(--warning)]"
-              : "text-[var(--text-tertiary)]"
-          }`}
-        >
-          {status.text}
-        </p>
+        <p className="amount-hero mt-1 text-[32px]">{formatCurrency(t.amount)}</p>
+        {t.note && <p className={`t-subhead mt-0.5 ${mine ? "text-white/90" : "text-label-2"}`}>{t.note}</p>}
+        <p className={`t-footnote mt-2 font-medium ${statusColor}`}>{status.text}</p>
 
         {t.receiptUrls.length > 0 && (
-          <div className="flex flex-wrap gap-2 mt-1.5">
+          <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
             {t.receiptUrls.map((url, i) => (
               <a
                 key={url}
                 href={url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className={`text-[12px] font-medium underline ${
-                  mine ? "text-white/90" : "text-[var(--brand)]"
-                }`}
+                className={`t-footnote font-medium underline ${mine ? "text-white/90" : "text-tint"}`}
               >
                 Screenshot {i + 1}
               </a>
@@ -188,38 +170,23 @@ function TransferBubble({
 
         {/* The receiver's decision, and the sender's escape hatch. */}
         {!mine && t.status === "pending" && (
-          <button
-            onClick={() => onDecide(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--brand-solid)] text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
-          >
-            Confirm &amp; choose a group
+          <button type="button" onClick={() => onDecide(t)} className={`${actionCls} bg-[var(--tint)] text-white`}>
+            Confirm &amp; Choose a Group
           </button>
         )}
         {!mine && broken.length > 0 && (
-          <button
-            onClick={() => onRepair(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--tint-warning)] text-[var(--warning)] px-4 py-2 text-[13px] font-semibold tap-shrink"
-          >
-            Finish recording this payment
+          <button type="button" onClick={() => onRepair(t)} className={`${actionCls} bg-[color-mix(in_srgb,var(--orange)_18%,transparent)] text-warn`}>
+            Finish Recording This Payment
           </button>
         )}
-        {/* Still offered once part of the payment is booked: the remainder can
-            go to another group whenever a new balance shows up there. */}
+        {/* Still offered once part is booked: the rest can go to another group. */}
         {!mine && t.status === "accepted" && !isSettled(unassigned) && (
-          <button
-            onClick={() => onDecide(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--fill)] text-[var(--text-primary)] px-4 py-2 text-[13px] font-semibold tap-shrink"
-          >
-            {legs.length === 0
-              ? "Attach to a group"
-              : `Assign remaining ${formatCurrency(unassigned)}`}
+          <button type="button" onClick={() => onDecide(t)} className={`${actionCls} bg-[var(--fill-3)] text-label`}>
+            {legs.length === 0 ? "Attach to a Group" : `Assign Remaining ${formatCurrency(unassigned)}`}
           </button>
         )}
         {mine && t.status === "pending" && (
-          <button
-            onClick={() => onCancel(t)}
-            className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
-          >
+          <button type="button" onClick={() => onCancel(t)} className={actionCls}>
             Withdraw
           </button>
         )}
@@ -228,25 +195,20 @@ function TransferBubble({
           legs.map((leg) => (
             <button
               key={leg.settlementId}
-              onClick={() =>
-                onNavigate(
-                  groupItemLink(leg.groupId, { kind: "settlement", id: leg.settlementId })
-                )
-              }
-              className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
+              type="button"
+              onClick={() => onNavigate(groupItemLink(leg.groupId, { kind: "settlement", id: leg.settlementId }))}
+              className={actionCls}
             >
               View {formatCurrency(leg.amount)} in {groupNameOf(leg.groupId)}
             </button>
           ))}
-        <p className={`text-[11px] mt-1.5 ${mine ? "text-white/60" : "text-[var(--text-quaternary)]"}`}>
-          {timeLabel(item.ts)}
-        </p>
+        <p className={`t-caption mt-2 text-right ${mine ? "text-white/70" : "text-label-3"}`}>{timeLabel(item.ts)}</p>
       </div>
     </div>
   );
 }
 
-function SettlementBubble({
+function SettlementCard({
   item,
   otherName,
   onNavigate,
@@ -268,45 +230,33 @@ function SettlementBubble({
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <button
-        onClick={() =>
-          item.groupId &&
-          onNavigate(groupItemLink(item.groupId, { kind: "settlement", id: s.id }))
-        }
-        className={`max-w-[85%] text-left rounded-[var(--radius-inner)] p-3.5 tap-shrink ${
-          mine ? "bg-[var(--tint-accent-2)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-        }`}
+        type="button"
+        onClick={() => item.groupId && onNavigate(groupItemLink(item.groupId, { kind: "settlement", id: s.id }))}
+        className="w-[78%] max-w-[300px] rounded-[24px] bg-[var(--cell)] p-4 text-left transition-transform duration-150 active:scale-[0.98]"
       >
-        <p className="text-[12px] text-[var(--text-tertiary)]">
+        <p className="t-footnote truncate text-label-2">
           {isOffset
             ? `Offset · ${item.groupName}`
             : mine
             ? `You paid ${otherName} · ${item.groupName}`
             : `${otherName} paid you · ${item.groupName}`}
         </p>
-        <p className="text-[20px] font-bold text-[var(--text-primary)] leading-tight">
-          {formatCurrency(s.amount)}
-        </p>
-        {s.note && (
-          <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">{s.note}</p>
-        )}
+        <p className="amount-hero mt-1 text-[26px]">{formatCurrency(s.amount)}</p>
+        {s.note && <p className="t-subhead mt-0.5 text-label-2">{s.note}</p>}
         <p
-          className={`text-[12px] mt-1 font-medium ${
-            s.status === "approved"
-              ? "text-[var(--pos)]"
-              : s.status === "rejected"
-              ? "text-[var(--neg)]"
-              : "text-[var(--warning)]"
+          className={`t-footnote mt-1.5 font-medium ${
+            s.status === "approved" ? "text-pos" : s.status === "rejected" ? "text-neg" : "text-warn"
           }`}
         >
           {statusText}
         </p>
-        <p className="text-[11px] text-[var(--text-quaternary)] mt-1">{timeLabel(item.ts)}</p>
+        <p className="t-caption mt-1 text-right text-label-3">{timeLabel(item.ts)}</p>
       </button>
     </div>
   );
 }
 
-function ExpenseRow({
+function ExpenseLine({
   item,
   meUid,
   otherName,
@@ -319,42 +269,40 @@ function ExpenseRow({
 }) {
   const e = item.expense!;
   const payerIsMe = e.paidBy === meUid;
-  const yourShare = item.myShare ?? 0;
-  const theirShare = item.theirShare ?? 0;
   return (
-    <div className="flex justify-center">
+    <div className="flex justify-center px-4">
       <button
-        onClick={() =>
-          item.groupId && onNavigate(groupItemLink(item.groupId, { kind: "expense", id: e.id }))
-        }
-        className="max-w-[92%] text-center rounded-full bg-[var(--fill-soft)] px-3.5 py-1.5 tap-shrink"
+        type="button"
+        onClick={() => item.groupId && onNavigate(groupItemLink(item.groupId, { kind: "expense", id: e.id }))}
+        className="t-footnote max-w-[92%] rounded-full px-3 py-1 text-center text-label-2 transition-colors active:bg-[var(--fill-3)]"
       >
-        <p className="text-[12px] text-[var(--text-secondary)]">
-          <span className="font-semibold">{payerIsMe ? "You" : otherName}</span> paid{" "}
-          {formatCurrency(e.amount)} for{" "}
-          <span className="font-semibold">{e.description}</span> · {item.groupName} ·{" "}
-          {payerIsMe
-            ? `their share ${formatCurrency(theirShare)}`
-            : `your share ${formatCurrency(yourShare)}`}
-        </p>
+        <span className="font-semibold text-label">{payerIsMe ? "You" : otherName}</span> paid{" "}
+        {formatCurrency(e.amount)} for <span className="font-semibold text-label">{e.description}</span> ·{" "}
+        {item.groupName} ·{" "}
+        {payerIsMe
+          ? `their share ${formatCurrency(item.theirShare ?? 0)}`
+          : `your share ${formatCurrency(item.myShare ?? 0)}`}
       </button>
     </div>
   );
 }
 
-function MessageBubble({ item }: { item: ConversationItem }) {
+function MessageBubble({ item, tail }: { item: ConversationItem; tail: boolean }) {
   const mine = item.side === "me";
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded-[var(--radius-inner)] px-3.5 py-2.5 ${
-          mine
-            ? "bg-[var(--brand-solid)] text-white"
-            : "bg-[var(--surface)] shadow-[var(--shadow-sm)] text-[var(--text-primary)]"
+        className={`max-w-[78%] px-3.5 py-2 ${
+          mine ? "bg-[var(--tint)] text-white" : "bg-[var(--cell)] text-label"
         }`}
+        style={{
+          borderRadius: 20,
+          borderBottomRightRadius: mine && tail ? 6 : 20,
+          borderBottomLeftRadius: !mine && tail ? 6 : 20,
+        }}
       >
-        <p className="text-[15px] whitespace-pre-wrap break-words">{item.message!.text}</p>
-        <p className={`text-[11px] mt-1 ${mine ? "text-white/60" : "text-[var(--text-quaternary)]"}`}>
+        <p className="t-body whitespace-pre-wrap break-words">{item.message!.text}</p>
+        <p className={`t-caption mt-0.5 text-right ${mine ? "text-white/70" : "text-label-3"}`}>
           {timeLabel(item.ts)}
         </p>
       </div>
@@ -363,7 +311,7 @@ function MessageBubble({ item }: { item: ConversationItem }) {
 }
 
 export default function ChatPage() {
-  // useSearchParams needs a Suspense boundary above it, same as the group screen.
+  // useSearchParams needs a Suspense boundary above it.
   return (
     <Suspense fallback={<ChatSkeleton />}>
       <ChatPageInner />
@@ -374,6 +322,7 @@ export default function ChatPage() {
 function ChatPageInner() {
   const { uid: otherUid } = useParams<{ uid: string }>();
   const router = useRouter();
+  const nav = useNav();
   const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const { datasets, groupsLoaded } = useGroupData();
@@ -385,8 +334,8 @@ function ChatPageInner() {
   const [sending, setSending] = useState(false);
   const [showPay, setShowPay] = useState(searchParams.get("pay") === "1");
   const [decide, setDecide] = useState<DirectTransfer | null>(null);
-  // Someone with no shared group (they left every group you share) still has a
-  // history worth reading, so the name falls back to their user document.
+  // Someone with no shared group still has history worth reading, so the name
+  // falls back to their user document.
   const [fallbackProfile, setFallbackProfile] = useState<{
     displayName: string;
     photoURL?: string;
@@ -395,6 +344,7 @@ function ChatPageInner() {
 
   const meUid = user?.uid;
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!meUid || !otherUid) return;
@@ -406,21 +356,15 @@ function ChatPageInner() {
     return computeCounterpartyBalances(meUid, datasets, transfers).find((c) => c.uid === otherUid);
   }, [meUid, datasets, transfers, otherUid]);
 
-  // Transfer-only counterparties carry no profile (displayName "Member"), so
-  // still resolve the real name from their user document.
-  const needsProfile =
-    !counterparty || !counterparty.displayName || counterparty.displayName === "Member";
+  // Transfer-only counterparties carry no profile ("Member").
+  const needsProfile = !counterparty || !counterparty.displayName || counterparty.displayName === "Member";
 
   useEffect(() => {
     if (!otherUid || !needsProfile || !groupsLoaded) return;
     let cancelled = false;
     getUserProfile(otherUid).then((p) => {
       if (cancelled || !p) return;
-      setFallbackProfile({
-        displayName: p.displayName || "Someone",
-        photoURL: p.photoURL,
-        upiId: p.upiId,
-      });
+      setFallbackProfile({ displayName: p.displayName || "Someone", photoURL: p.photoURL, upiId: p.upiId });
     });
     return () => {
       cancelled = true;
@@ -440,8 +384,7 @@ function ChatPageInner() {
 
   const thread = otherUid ? threadWith(otherUid) : undefined;
 
-  // Mark read whenever the newest message the other person sent changes, rather
-  // than on every render — this is a Firestore write.
+  // Mark read whenever the newest message from them changes — it's a write.
   useEffect(() => {
     if (!meUid || !otherUid) return;
     const newest = thread?.lastMessageAt;
@@ -455,10 +398,7 @@ function ChatPageInner() {
   }, [items.length]);
 
   const settlementIdsByGroup = useMemo(
-    () =>
-      new Map(
-        datasets.map((d) => [d.group.id, new Set(d.settlements.map((s) => s.id))] as const)
-      ),
+    () => new Map(datasets.map((d) => [d.group.id, new Set(d.settlements.map((s) => s.id))] as const)),
     [datasets]
   );
 
@@ -471,14 +411,13 @@ function ChatPageInner() {
   const theyOwe = !isSettled(net) && net < 0;
   const groupNameOf = (groupId: string) =>
     datasets.find((d) => d.group.id === groupId)?.group.name || "a group";
+
   async function handleRepairTransfer(t: DirectTransfer) {
     try {
       const repaired = await reconcileTransferAllocations(t);
       showToast({
         message:
-          repaired > 0
-            ? `Recorded ${repaired} missing ${repaired === 1 ? "entry" : "entries"}`
-            : "Already up to date",
+          repaired > 0 ? `Recorded ${repaired} missing ${repaired === 1 ? "entry" : "entries"}` : "Already up to date",
       });
     } catch (err) {
       showToast({
@@ -486,10 +425,10 @@ function ChatPageInner() {
       });
     }
   }
-  const navigate = (href: string) => router.push(href);
+  const navigate = (href: string) => nav.push(href);
 
-  async function handleSend(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSend(e?: React.FormEvent) {
+    e?.preventDefault();
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
@@ -500,117 +439,92 @@ function ChatPageInner() {
       hapticTap();
     } catch (err) {
       setDraft(text);
-      showToast({
-        message: err instanceof Error ? `Couldn't send: ${err.message}` : "Couldn't send",
-      });
+      showToast({ message: err instanceof Error ? `Couldn't send: ${err.message}` : "Couldn't send" });
     } finally {
       setSending(false);
+      inputRef.current?.focus({ preventScroll: true });
     }
   }
 
   async function handleCancelTransfer(t: DirectTransfer) {
     try {
       await cancelTransfer(t);
-      showToast({ message: "Payment withdrawn" });
+      showToast({ message: "Payment withdrawn", tone: "info" });
     } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't withdraw: ${err.message}` : "Couldn't withdraw",
-      });
+      showToast({ message: err instanceof Error ? `Couldn't withdraw: ${err.message}` : "Couldn't withdraw" });
     }
   }
 
-  return (
-    <div className="fixed inset-0 flex flex-col bg-[var(--background)]">
-      <header className="shrink-0 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 glass-strong">
-        <div className="max-w-md mx-auto flex items-center gap-3">
-          <button
-            onClick={() => router.push("/pay")}
-            aria-label="Back"
-            className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center tap-shrink shrink-0"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          {otherPhoto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={otherPhoto} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
-          ) : (
-            <span className="w-9 h-9 rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 text-[13px] font-semibold text-[var(--text-secondary)]">
-              {otherName.charAt(0).toUpperCase()}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[16px] font-bold text-[var(--text-primary)] truncate">{otherName}</p>
-            <p
-              className={`text-[12px] font-medium truncate ${
-                iOwe
-                  ? "text-[var(--neg)]"
-                  : theyOwe
-                  ? "text-[var(--pos)]"
-                  : "text-[var(--text-tertiary)]"
-              }`}
-            >
-              {iOwe
-                ? `You owe ${formatCurrency(net)}`
-                : theyOwe
-                ? `Owes you ${formatCurrency(-net)}`
-                : counterparty
-                ? "All settled up"
-                : "No shared groups"}
-            </p>
-          </div>
-        </div>
-      </header>
+  const balanceLine = iOwe
+    ? `You owe ${formatCurrency(net)}`
+    : theyOwe
+    ? `Owes you ${formatCurrency(-net)}`
+    : counterparty
+    ? "All settled up"
+    : "No shared groups";
 
-      <main className="flex-1 overflow-y-auto scroll-momentum px-4 py-3">
-        <div className="max-w-md mx-auto space-y-2">
+  return (
+    <Screen
+      title={otherName}
+      back="/pay"
+      fixed
+      fixedClassName="is-viewport"
+      inlineTitle={
+        <span className="flex flex-col items-center leading-tight">
+          <span className="flex items-center gap-2">
+            <Avatar name={otherName} photoURL={otherPhoto} size={26} />
+            <span className="max-w-[42vw] truncate">{otherName}</span>
+          </span>
+          <span
+            className={`t-caption mt-0.5 font-medium ${iOwe ? "text-neg" : theyOwe ? "text-pos" : "text-label-2"}`}
+          >
+            {balanceLine}
+          </span>
+        </span>
+      }
+      trailing={<BarLink href={`/reports?person=${otherUid}`} icon="doc.text" label={`Statement with ${otherName}`} />}
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-[calc(12px+var(--sal))] pb-4 pt-[calc(var(--nav-total)+14px)]">
+        <div className="mx-auto max-w-[var(--content-max)] space-y-1.5">
           {items.length === 0 ? (
-            <div className="rounded-[var(--radius-card)] bg-[var(--tint-accent)] p-5 text-center mt-6">
-              <p className="text-[16px] font-bold text-[var(--text-primary)]">
-                Nothing between you two yet
-              </p>
-              <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-                Send {otherName} money, or say hello. Every payment and settled
-                balance shows up here.
-              </p>
-            </div>
+            <EmptyState
+              icon="message"
+              title="No Messages Yet"
+              message={`Send ${otherName} money, or say hello. Every payment and settled balance between you shows up here.`}
+            />
           ) : (
             items.map((item, i) => {
               const label = dayLabel(item.ts);
               const showDay = i === 0 || dayLabel(items[i - 1].ts) !== label;
+              const next = items[i + 1];
+              const tail = !next || next.side !== item.side || next.kind !== "message" || dayLabel(next.ts) !== label;
               return (
-                <div key={item.key} className="space-y-2">
-                  {showDay && (
-                    <div className="flex justify-center py-1">
-                      <span className="rounded-full bg-[var(--fill)] px-3 py-0.5 text-[11px] font-semibold text-[var(--text-secondary)]">
-                        {label}
-                      </span>
+                <div key={item.key} className={showDay ? "pt-3" : undefined}>
+                  {showDay && <p className="t-caption pb-2 text-center font-medium text-label-2">{label}</p>}
+                  {item.kind === "message" && <MessageBubble item={item} tail={tail} />}
+                  {item.kind === "transfer" && (
+                    <div className="py-1">
+                      <TransferCard
+                        item={item}
+                        otherName={otherName}
+                        groupNameOf={groupNameOf}
+                        settlementIdsByGroup={settlementIdsByGroup}
+                        onDecide={setDecide}
+                        onCancel={handleCancelTransfer}
+                        onRepair={handleRepairTransfer}
+                        onNavigate={navigate}
+                      />
                     </div>
                   )}
-                  {item.kind === "message" && <MessageBubble item={item} />}
-                  {item.kind === "transfer" && (
-                    <TransferBubble
-                      item={item}
-                      otherName={otherName}
-                      groupNameOf={groupNameOf}
-                      settlementIdsByGroup={settlementIdsByGroup}
-                      onDecide={setDecide}
-                      onCancel={handleCancelTransfer}
-                      onRepair={handleRepairTransfer}
-                      onNavigate={navigate}
-                    />
-                  )}
                   {item.kind === "settlement" && (
-                    <SettlementBubble item={item} otherName={otherName} onNavigate={navigate} />
+                    <div className="py-1">
+                      <SettlementCard item={item} otherName={otherName} onNavigate={navigate} />
+                    </div>
                   )}
                   {item.kind === "expense" && (
-                    <ExpenseRow
-                      item={item}
-                      meUid={currentUser.uid}
-                      otherName={otherName}
-                      onNavigate={navigate}
-                    />
+                    <div className="py-1">
+                      <ExpenseLine item={item} meUid={currentUser.uid} otherName={otherName} onNavigate={navigate} />
+                    </div>
                   )}
                 </div>
               );
@@ -618,50 +532,52 @@ function ChatPageInner() {
           )}
           <div ref={bottomRef} />
         </div>
-      </main>
+      </div>
 
+      {/* Composer */}
       <form
         onSubmit={handleSend}
-        className="shrink-0 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] glass-strong"
+        className="shrink-0 px-[calc(12px+var(--sal))] pb-[max(10px,var(--sab))] pt-2"
+        style={{ background: "linear-gradient(to bottom, color-mix(in srgb, var(--bg) 0%, transparent), var(--bg) 40%)" }}
       >
-        <div className="max-w-md mx-auto flex items-end gap-2">
+        <div className="mx-auto flex max-w-[var(--content-max)] items-end gap-2">
           <button
             type="button"
             onClick={() => setShowPay(true)}
             aria-label={`Pay ${otherName}`}
-            className="w-11 h-11 shrink-0 rounded-full bg-[var(--brand-solid)] text-white flex items-center justify-center tap-shrink font-bold text-[18px]"
+            className="bar-btn glass shrink-0 text-tint"
           >
-            ₹
+            <Icon name="indianrupee" size={21} strokeWidth={2.1} />
           </button>
-          <label className="flex-1">
+          <label className="glass flex min-h-[44px] flex-1 items-end rounded-[22px] pl-4 pr-1.5">
             <span className="sr-only">Message {otherName}</span>
             <textarea
+              ref={inputRef}
               rows={1}
               value={draft}
               maxLength={MAX_MESSAGE_LENGTH}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                // Enter sends, Shift+Enter makes a new line — the convention
-                // people already have from every other messaging app.
+                // Enter sends, Shift+Enter makes a new line.
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  void handleSend(e as unknown as React.FormEvent);
+                  void handleSend();
                 }
               }}
               placeholder="Message"
-              className="w-full max-h-28 resize-none rounded-[var(--radius-xl)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+              className="field max-h-28 flex-1 self-center py-[10px] [field-sizing:content]"
             />
+            <button
+              type="submit"
+              disabled={!draft.trim() || sending}
+              aria-label="Send message"
+              className={`mb-1.5 ml-1 inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[var(--tint)] text-white transition-[transform,opacity] duration-200 ${
+                draft.trim() ? "scale-100 opacity-100" : "pointer-events-none scale-50 opacity-0"
+              }`}
+            >
+              <Icon name="arrow.up" size={18} strokeWidth={2.6} />
+            </button>
           </label>
-          <button
-            type="submit"
-            disabled={!draft.trim() || sending}
-            aria-label="Send message"
-            className="w-11 h-11 shrink-0 rounded-full bg-[var(--fill)] text-[var(--brand)] flex items-center justify-center tap-shrink disabled:opacity-40"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
-            </svg>
-          </button>
         </div>
       </form>
 
@@ -670,23 +586,22 @@ function ChatPageInner() {
           fromUid={currentUser.uid}
           toUid={otherUid}
           toName={otherName}
+          toPhotoURL={otherPhoto}
           toUpiId={otherUpiId}
           suggestedAmount={iOwe ? net : 0}
           contextLine={
             iOwe
-              ? `You owe ${otherName} ${formatCurrency(net)} across ${
-                  counterparty?.groups.length ?? 0
-                } group${(counterparty?.groups.length ?? 0) === 1 ? "" : "s"}`
+              ? `You owe ${otherName} ${formatCurrency(net)} across ${counterparty?.groups.length ?? 0} group${
+                  (counterparty?.groups.length ?? 0) === 1 ? "" : "s"
+                }`
               : theyOwe
               ? `${otherName} owes you ${formatCurrency(-net)} — you don't need to pay them`
               : undefined
           }
           onClose={() => {
             setShowPay(false);
-            // Drop ?pay=1 so going back and forward doesn't reopen the sheet.
-            if (searchParams.get("pay")) {
-              router.replace(`/chat/${otherUid}`, { scroll: false });
-            }
+            // Drop ?pay=1 so back/forward doesn't reopen the sheet.
+            if (searchParams.get("pay")) router.replace(`/chat/${otherUid}`, { scroll: false });
           }}
         />
       )}
@@ -696,10 +611,11 @@ function ChatPageInner() {
           transfer={decide}
           meUid={currentUser.uid}
           fromName={otherName}
+          fromPhotoURL={otherPhoto}
           datasets={datasets}
           onClose={() => setDecide(null)}
         />
       )}
-    </div>
+    </Screen>
   );
 }

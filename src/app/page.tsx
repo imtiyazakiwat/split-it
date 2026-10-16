@@ -1,19 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import NavHint from "@/components/NavHint";
+import { useMemo, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-// Write functions are dynamically imported at the point of use, not here: this is
-// the entry route, and a static import puts the 641 kB Firestore chunk in front of
-// first interaction for the sake of three handlers the user may never trigger.
-import {
-  canRespondToSettlement,
-  computeBalances,
-  formatCurrency,
-} from "@/lib/balance";
+// Write functions are dynamically imported at the point of use, not here: this
+// is the entry route, and a static import puts the 641 kB Firestore chunk in
+// front of first interaction for three handlers the user may never trigger.
+import { canRespondToSettlement, computeBalances, formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import { usePayments } from "@/lib/payments-context";
@@ -26,49 +19,42 @@ import {
   isArchivedFor,
 } from "@/lib/group-filters";
 import LoginScreen from "@/components/LoginScreen";
-import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
-import { GlassField } from "@/components/ui/GlassField";
-import BottomNav from "@/components/home/BottomNav";
 import GroupRow from "@/components/home/GroupRow";
 import HomeSkeleton from "@/components/home/HomeSkeleton";
 import Skeleton from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import Logo from "@/components/Logo";
-
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good Morning,";
-  if (h < 17) return "Good Afternoon,";
-  return "Good Evening,";
-}
+import Screen from "@/components/kit/Screen";
+import { BarButton, BarLink } from "@/components/kit/BarButton";
+import { Menu } from "@/components/kit/Menu";
+import { List, RowButton, RowLink, Section, Card } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { IconTile } from "@/components/kit/Tile";
+import { EmptyState, FieldRow, SearchField, Segmented, Button } from "@/components/kit/Controls";
+import { Sheet, SheetIconButton, type SheetHandle } from "@/components/kit/Sheet";
+import { Icon } from "@/components/kit/Icon";
+import { useNav } from "@/components/kit/nav";
 
 export default function Home() {
   const { user, loading } = useAuth();
-  const router = useRouter();
-  // `allLoaded` deliberately not consumed here any more: gating this screen on
-  // every group having reported was the cause of the blanked hero and the
-  // unresponsive people rows. Progress is now tracked per group below.
+  const nav = useNav();
+  // `allLoaded` deliberately not consumed: gating this screen on every group
+  // having reported blanked the totals and deadened the people rows. Progress
+  // is tracked per group below.
   const { groups, groupsLoaded, byGroup, datasets, error } = useGroupData();
   const { transfers } = usePayments();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [tab, setTab] = useState<GroupTab>("active");
-  const [showAdd, setShowAdd] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
-  const [showJoin, setShowJoin] = useState(false);
+  const [sheet, setSheet] = useState<"create" | "join" | null>(null);
   const [groupName, setGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
+  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
   const uid = user?.uid;
 
-  /**
-   * Per-group figures, derived once from the shared cache. Each row used to
-   * open its own listeners and report balances back up via a callback, which
-   * meant the summary could sit on stale or partial numbers.
-   */
+  /** Per-group figures, derived once from the shared cache. */
   const rows = useMemo(() => {
     if (!uid) return [];
     return groups.map((group) => {
@@ -93,37 +79,43 @@ export default function Home() {
     });
   }, [groups, byGroup, uid]);
 
-  const tabCounts = useMemo(() => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }), [rows, uid]);
+  const tabCounts = useMemo(
+    () => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }),
+    [rows, uid]
+  );
 
   const counterparties = useMemo(
     () => (uid ? computeCounterpartyBalances(uid, datasets, transfers) : []),
     [uid, datasets, transfers]
   );
 
-  if (loading || (!groupsLoaded && user)) {
-    return <HomeSkeleton />;
-  }
-
+  if (loading || (!groupsLoaded && user)) return <HomeSkeleton />;
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
+  const member = {
+    displayName: currentUser.displayName || currentUser.email || "User",
+    email: (currentUser.email || "").toLowerCase(),
+    photoURL: currentUser.photoURL || "",
+  };
 
-  async function handleCreateGroup(e: React.FormEvent) {
-    e.preventDefault();
-    if (!groupName.trim()) return;
+  function openSheet(which: "create" | "join") {
+    setFormError("");
+    setSheet(which);
+  }
+
+  async function handleCreateGroup(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!groupName.trim() || busy) return;
     setBusy(true);
     setFormError("");
     try {
       const { createGroup } = await import("@/lib/firestore");
-      const id = await createGroup(groupName.trim(), currentUser.uid, {
-        displayName: currentUser.displayName || currentUser.email || "User",
-        email: (currentUser.email || "").toLowerCase(),
-        photoURL: currentUser.photoURL || "",
-      });
-      setShowCreate(false);
+      const id = await createGroup(groupName.trim(), currentUser.uid, member);
       setGroupName("");
       showToast({ message: "Group created" });
-      router.push(`/groups/${id}`);
+      sheetRef.current?.dismiss();
+      nav.push(`/groups/${id}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
@@ -131,26 +123,22 @@ export default function Home() {
     }
   }
 
-  async function handleJoinGroup(e: React.FormEvent) {
-    e.preventDefault();
-    if (!joinCode.trim()) return;
+  async function handleJoinGroup(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!joinCode.trim() || busy) return;
     setBusy(true);
     setFormError("");
     try {
       const { joinGroupByCode } = await import("@/lib/firestore");
-      const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, {
-        displayName: currentUser.displayName || currentUser.email || "User",
-        email: (currentUser.email || "").toLowerCase(),
-        photoURL: currentUser.photoURL || "",
-      });
+      const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, member);
       if (!id) {
         setFormError("No group found with that invite code.");
         return;
       }
-      setShowJoin(false);
       setJoinCode("");
       showToast({ message: "Joined group" });
-      router.push(`/groups/${id}`);
+      sheetRef.current?.dismiss();
+      nav.push(`/groups/${id}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to join group");
     } finally {
@@ -158,32 +146,32 @@ export default function Home() {
     }
   }
 
-  const firstName = (currentUser.displayName || "there").split(" ")[0];
+  async function handleToggleArchive(groupId: string, archived: boolean) {
+    try {
+      const { setGroupArchived } = await import("@/lib/firestore");
+      await setGroupArchived(groupId, currentUser.uid, archived);
+      showToast({ message: archived ? "Group archived" : "Group restored" });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
+      });
+    }
+  }
 
   // Totals net across groups AND confirmed direct payments, so they agree with
-  // "By person" below. Per-group rows stay group-only; direct lives in the
-  // person totals.
+  // the people list below.
+  const owePeople = counterparties.filter((c) => !isSettled(c.net) && c.net > 0);
+  const owedPeople = counterparties.filter((c) => !isSettled(c.net) && c.net < 0);
   const totalOwe = counterparties.reduce((s, c) => s + (c.net > 0 ? c.net : 0), 0);
   const totalReceive = counterparties.reduce((s, c) => s + (c.net < 0 ? -c.net : 0), 0);
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
-  /**
-   * Two different states, previously conflated into one.
-   *
-   * The original gate was `groups.length > 0 && !allLoaded`, and `allLoaded`
-   * requires *every* group's expenses AND settlements to have arrived — ten
-   * snapshots for five groups. So one slow or failed listener blanked the
-   * headline figure and disabled the entire people list indefinitely, which is
-   * the worst of both worlds: a number the user already knew is replaced by a
-   * skeleton, and rows they can see refuse to respond to a tap.
-   *
-   * Hiding a total computed from zero groups is right — that really is a
-   * misleading ₹0. But a total from four groups out of five is a real number
-   * that only needs a quiet note that it is still settling.
-   */
+  // Hiding a total computed from zero groups is right — that's a misleading
+  // ₹0. A total from four groups of five is real and only needs a note.
   const loadedGroupCount = groups.filter((g) => byGroup[g.id]?.loaded).length;
   const noBalancesYet = groups.length > 0 && loadedGroupCount === 0;
   const balancesSettling = loadedGroupCount > 0 && loadedGroupCount < groups.length;
+  const allSquare = isSettled(totalOwe) && isSettled(totalReceive);
 
   const peopleToShow = counterparties.filter((c) => !isSettled(c.net));
 
@@ -200,451 +188,335 @@ export default function Home() {
         : (b.lastActivityTs || b.group.createdAt) - (a.lastActivityTs || a.group.createdAt)
     );
 
-  // Archiving is a view preference, never a write-off, so the totals above keep
-  // counting archived groups. This surfaces the money that is sitting in a tab
-  // the user isn't looking at, rather than letting it quietly disappear.
-  const archivedOutstanding = rows
-    .filter((r) => isArchivedFor(r.group, currentUser.uid) && !isSettled(r.net))
-    .length;
+  // Archiving is a view preference, never a write-off: totals keep counting
+  // archived groups. Say so when money is sitting in a tab out of sight.
+  const archivedOutstanding = rows.filter(
+    (r) => isArchivedFor(r.group, currentUser.uid) && !isSettled(r.net)
+  ).length;
 
-  async function handleToggleArchive(groupId: string, archived: boolean) {
-    try {
-      const { setGroupArchived } = await import("@/lib/firestore");
-      await setGroupArchived(groupId, currentUser.uid, archived);
-      showToast({ message: archived ? "Group archived" : "Group restored" });
-    } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
-      });
-    }
-  }
-
-  const emptyMessage = query
-    ? "No groups match your search."
-    : tab === "archived"
-    ? "Nothing archived. Groups you archive are tucked away here."
-    : tab === "settled"
-    ? "No settled groups yet. Groups where everyone is square land here."
-    : groups.length === 0
-    ? "No groups yet. Tap Add to create or join one."
-    : "Nothing needs attention. Check the Settled tab.";
+  const emptyState = query ? (
+    <EmptyState compact icon="magnifyingglass" title="No Results" message={`No groups match “${query}”.`} />
+  ) : tab === "archived" ? (
+    <EmptyState compact icon="archivebox" title="Nothing Archived" message="Swipe a group to archive it. It moves here without changing any balance." />
+  ) : tab === "settled" ? (
+    <EmptyState compact icon="checkmark.circle" title="No Settled Groups" message="Groups where everyone is square land here." />
+  ) : groups.length === 0 ? (
+    <EmptyState
+      icon="person.2"
+      title="No Groups Yet"
+      message="Create a group for a trip, a flat or a team, or join one with an invite code."
+      action={
+        <Button size="md" icon="plus" onClick={() => openSheet("create")}>
+          New Group
+        </Button>
+      }
+    />
+  ) : (
+    <EmptyState compact icon="checkmark.circle" title="Nothing Needs Attention" message="All your groups are settled. They're in the Settled tab." />
+  );
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-40 scroll-momentum">
-        {/* Header */}
-        <div className="flex items-start justify-between pt-3">
-          <Logo className="h-9 w-auto" />
-          <div className="flex items-center gap-2.5">
-            <div className="relative">
-              <button
-                onClick={() => setShowAdd((v) => !v)}
-                aria-label="Add"
-                aria-expanded={showAdd}
-                className="w-11 h-11 rounded-2xl bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-              >
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                  <path d="M12 5v14M5 12h14" />
-                </svg>
-              </button>
-              {showAdd && (
-                <div className="absolute right-0 top-full mt-2 w-44 bg-[var(--surface)] rounded-2xl p-1.5 shadow-[var(--shadow-float)] border border-[var(--border-subtle)] animate-modal-in z-30">
-                  <button
-                    onClick={() => { setShowAdd(false); setShowCreate(true); setFormError(""); }}
-                    className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
-                  >
-                    + New Group
-                  </button>
-                  <button
-                    onClick={() => { setShowAdd(false); setShowJoin(true); setFormError(""); }}
-                    className="w-full text-left px-3.5 py-2.5 rounded-xl text-[15px] font-medium text-[var(--text-primary)] hover:bg-[var(--fill-soft)] tap-shrink"
-                  >
-                    Join Group
-                  </button>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => router.push("/notifications")}
-              aria-label={
-                actionableCount > 0
-                  ? `Notifications, ${actionableCount} needing action`
-                  : "Notifications"
-              }
-              className="relative w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-                <path d="M13.7 21a2 2 0 0 1-3.4 0" />
-              </svg>
-              {actionableCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-5 h-5 px-1 rounded-full bg-[var(--neg)] text-white text-[11px] font-bold flex items-center justify-center">
-                  {actionableCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => router.push("/settings")}
-              aria-label="Settings"
-              className="w-11 h-11 rounded-2xl bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-                <path d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-                <path d="M19.4 13a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V19a2 2 0 11-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H4a2 2 0 110-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V4a2 2 0 114 0v.09a1.65 1.65 0 001 1.51h0a1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H20a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
-              </svg>
-            </button>
+    <Screen
+      title="Groups"
+      large
+      tabBar
+      trailing={
+        <>
+          <BarLink
+            href="/notifications"
+            icon="bell"
+            label="Notifications"
+            badge={actionableCount}
+          />
+          <Menu
+            items={[
+              { label: "New Group", icon: "plus", onSelect: () => openSheet("create") },
+              { label: "Join with Code", icon: "qrcode", onSelect: () => openSheet("join") },
+            ]}
+          >
+            {(props) => <BarButton icon="plus" label="Add group" {...props} />}
+          </Menu>
+        </>
+      }
+    >
+      {error && (
+        <Card className="mb-3 flex items-start gap-3 p-4">
+          <span className="mt-0.5 text-[var(--orange)]">
+            <Icon name="exclamationmark.triangle" size={20} />
+          </span>
+          <p className="t-footnote text-label-2">
+            Couldn&rsquo;t load the latest data ({error}). Showing what&rsquo;s saved on this device.
+          </p>
+        </Card>
+      )}
+
+      {/* Balance summary — answers "what needs my attention?" first. */}
+      <Card className="mt-1 p-4" style={{ minHeight: 104 }}>
+        {noBalancesYet ? (
+          <div className="grid grid-cols-2" aria-label="Loading balances">
+            {[0, 1].map((i) => (
+              <div key={i} className={i ? "border-l-[0.5px] border-[var(--separator)] pl-4" : "pr-4"}>
+                <Skeleton className="h-3 w-14 rounded-md" />
+                <Skeleton className="mt-2 h-7 w-24 rounded-lg" />
+              </div>
+            ))}
           </div>
-        </div>
-
-        {/* Greeting */}
-        <p className="text-[17px] text-[var(--text-tertiary)] mt-4">{greeting()}</p>
-        <h1 className="text-[32px] font-extrabold text-[var(--text-primary)] leading-tight">
-          {firstName} <span className="align-middle">👋</span>
-        </h1>
-
-        {error && (
-          <div className="mt-3 rounded-[var(--radius-inner)] bg-[var(--tint-danger-soft)] p-3">
-            <p className="text-[13px] text-[var(--neg)]">
-              Couldn&rsquo;t load the latest data ({error}). Showing what&rsquo;s cached on this
-              device.
-            </p>
-          </div>
-        )}
-
-        {/* Summary chip */}
-        <div className="mt-3 inline-flex items-center gap-2 bg-[var(--surface)] rounded-full pl-3 pr-4 py-2 shadow-[var(--shadow-sm)] border border-[var(--border-subtle)]">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" className="text-[var(--brand)]">
-            <path d="M12 2l1.9 5.8L20 9.7l-5 3.6 1.9 6L12 15.8 6.1 19.3 8 13.3l-5-3.6 6.1-1.9z" />
-          </svg>
-          <span className="text-[14px] text-[var(--text-secondary)]">Here&rsquo;s your summary across all groups</span>
-        </div>
-
-        {/* Summary card — leads with the actionable balance (owe first) */}
-        <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-xl)] p-5 shadow-[var(--shadow-card)]">
-          {noBalancesYet ? (
-            <div>
-              <Skeleton className="h-4 w-24 rounded-md" />
-              <Skeleton className="h-10 w-40 mt-2 rounded-lg" />
+        ) : groups.length > 0 && allSquare ? (
+          <div className="flex items-center gap-3 py-1">
+            <IconTile icon="checkmark" color="var(--green)" size="lg" />
+            <div className="min-w-0">
+              <p className="t-headline">All settled up</p>
+              <p className="t-subhead text-label-2">No outstanding balances in any group.</p>
             </div>
-          ) : !isSettled(totalOwe) ? (
-            <div>
-              <p className="text-[15px] text-[var(--text-tertiary)]">You owe</p>
-              <p className="text-[36px] font-extrabold text-[var(--neg)] leading-tight mt-0.5 truncate">
+          </div>
+        ) : (
+          <div className="grid grid-cols-2">
+            <div className="min-w-0 pr-4">
+              <p className="t-footnote font-medium uppercase text-label-2">You owe</p>
+              <p className={`num t-title1 mt-0.5 truncate ${isSettled(totalOwe) ? "text-label-3" : "text-neg"}`}>
                 {formatCurrency(totalOwe)}
               </p>
-              {!isSettled(totalReceive) && (
-                <p className="text-[14px] text-[var(--text-secondary)] mt-1">
-                  You&rsquo;ll also receive{" "}
-                  <span className="font-semibold text-[var(--pos)]">{formatCurrency(totalReceive)}</span>
-                </p>
-              )}
+              <p className="t-footnote mt-0.5 text-label-2">
+                {owePeople.length === 0
+                  ? "Nothing to pay"
+                  : `${owePeople.length} ${owePeople.length === 1 ? "person" : "people"}`}
+              </p>
             </div>
-          ) : !isSettled(totalReceive) ? (
-            <div>
-              <p className="text-[15px] text-[var(--text-tertiary)]">You will receive</p>
-              <p className="text-[36px] font-extrabold text-[var(--pos)] leading-tight mt-0.5 truncate">
+            <div className="min-w-0 border-l-[0.5px] border-[var(--separator)] pl-4">
+              <p className="t-footnote font-medium uppercase text-label-2">You&rsquo;re owed</p>
+              <p className={`num t-title1 mt-0.5 truncate ${isSettled(totalReceive) ? "text-label-3" : "text-pos"}`}>
                 {formatCurrency(totalReceive)}
               </p>
-              <p className="text-[14px] text-[var(--text-tertiary)] mt-1">Across all groups</p>
-            </div>
-          ) : (
-            <div>
-              <p className="text-[22px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled 🎉</p>
-              <p className="text-[14px] text-[var(--text-tertiary)] mt-0.5">No outstanding balances</p>
-            </div>
-          )}
-
-          {/* Honest about provisional numbers instead of hiding them. A live
-              figure with a caveat beats a skeleton where a figure used to be. */}
-          {balancesSettling && (
-            <p
-              role="status"
-              className="mt-2 flex items-center gap-1.5 text-[12px] text-[var(--text-tertiary)]"
-            >
-              <span
-                aria-hidden
-                className="h-1.5 w-1.5 rounded-full bg-[var(--brand)] animate-pulse"
-              />
-              Still adding up {groups.length - loadedGroupCount} of {groups.length} groups
-            </p>
-          )}
-
-          <div className="h-px bg-[var(--border-subtle)] my-4" />
-
-          <button
-            onClick={() => document.getElementById("your-groups")?.scrollIntoView({ behavior: "smooth" })}
-            className="w-full flex items-center gap-2.5 tap-shrink"
-          >
-            <span className="w-10 h-10 rounded-full bg-[var(--tint-accent)] text-[var(--brand)] flex items-center justify-center shrink-0">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            </span>
-            <div className="text-left flex-1">
-              <p className="text-[17px] font-bold text-[var(--text-primary)] leading-none">{groups.length}</p>
-              <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                Group{groups.length !== 1 ? "s" : ""}
-                {tabCounts.archived > 0 ? ` · ${tabCounts.archived} archived` : ""}
+              <p className="t-footnote mt-0.5 text-label-2">
+                {owedPeople.length === 0
+                  ? "Nobody owes you"
+                  : `${owedPeople.length} ${owedPeople.length === 1 ? "person" : "people"}`}
               </p>
             </div>
-            <span className="text-[var(--text-quaternary)] text-lg">›</span>
-          </button>
-        </div>
-
-        {/* Balances by person, netted across groups plus direct payments.
-            Group rows below stay group-only; direct lives here and in Reports. */}
-        {peopleToShow.length > 0 && (
-          <section className="mt-6">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="text-[20px] font-bold text-[var(--text-primary)]">By person</h2>
-            </div>
-            <p className="text-[13px] text-[var(--text-tertiary)] mb-3">
-              Balances netted across every group you share, plus direct payments. Tap for the full statement.
-            </p>
-            <div className="space-y-2.5">
-              {peopleToShow.map((person) => {
-                const iOweNet = !isSettled(person.net) && person.net > 0;
-                const hasDirect = !isSettled(person.directNet || 0);
-                const sub =
-                  person.groups.length > 0
-                    ? person.groups.map((g) => g.groupName).join(" · ") +
-                      (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
-                    : person.sharedGroupCount > 0
-                    ? `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}` +
-                      (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
-                    : "Direct payment";
-                return (
-                  // Was a <button> with `disabled={!allLoaded}`, which meant a row
-                  // showing a real balance silently ignored taps until every
-                  // group in the account had reported in — indistinguishable to
-                  // the user from the app being broken. The partial-ledger
-                  // concern it was guarding is now handled honestly by the
-                  // "still adding up" note on the summary above, and the
-                  // statement screen this opens recomputes from live data anyway.
-                  // As a <Link> it also prefetches /reports.
-                  <Link
-                    key={person.uid}
-                    href={`/reports?person=${person.uid}`}
-                    className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-3.5 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink"
-                  >
-                    <NavHint />
-                    {person.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={person.photoURL} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="w-11 h-11 rounded-full bg-[var(--fill)] flex items-center justify-center text-[16px] font-semibold text-[var(--text-secondary)] shrink-0">
-                        {person.displayName.charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
-                        {person.displayName}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                        {sub}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className="text-[11px] text-[var(--text-tertiary)]">
-                        {isSettled(person.net) ? "net" : iOweNet ? "you owe" : "owes you"}
-                      </p>
-                      <p
-                        className={`text-[16px] font-bold ${
-                          isSettled(person.net)
-                            ? "text-[var(--text-tertiary)]"
-                            : iOweNet
-                            ? "text-[var(--neg)]"
-                            : "text-[var(--pos)]"
-                        }`}
-                      >
-                        {isSettled(person.net) ? "₹0" : formatCurrency(Math.abs(person.net))}
-                      </p>
-                    </div>
-                  </Link>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
-        {/* Search */}
-        <div className="mt-5">
-          <div className="flex items-center gap-2.5 bg-[var(--fill)] rounded-full px-4 h-12">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" className="text-[var(--text-tertiary)]" strokeWidth="2" strokeLinecap="round">
-              <circle cx="11" cy="11" r="7" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search groups..."
-              aria-label="Search groups"
-              className="flex-1 bg-transparent outline-none text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
-            />
           </div>
-        </div>
-
-        {/* Your Groups header */}
-        <div id="your-groups" className="mt-6 flex items-center justify-between scroll-mt-4">
-          <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Your Groups</h2>
-          <button
-            onClick={() => setSort((s) => (s === "recent" ? "name" : "recent"))}
-            aria-label={`Sorted by ${sort === "recent" ? "most recent" : "name"}. Tap to switch.`}
-            className="flex items-center gap-1.5 bg-[var(--surface)] rounded-full px-3.5 py-2 text-[14px] font-medium text-[var(--text-secondary)] shadow-[var(--shadow-sm)] tap-shrink"
-          >
-            {sort === "recent" ? "Recent" : "Name"}
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M7 4v16M4 7l3-3 3 3M17 20V4M14 17l3 3 3-3" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Tabs. Keeps finished trips and squared-up flatshares out of the way
-            without hiding them, and without touching any balance. */}
-        <div
-          role="tablist"
-          aria-label="Filter groups"
-          className="mt-3 flex gap-1 bg-[var(--fill)] rounded-full p-1"
-        >
-          {GROUP_TABS.map((t) => {
-            const active = tab === t.id;
-            return (
-              <button
-                key={t.id}
-                role="tab"
-                aria-selected={active}
-                onClick={() => setTab(t.id)}
-                className={`flex-1 rounded-full py-2 text-[13px] font-semibold tap-shrink ${
-                  active
-                    ? "bg-[var(--surface)] text-[var(--text-primary)] shadow-[var(--shadow-sm)]"
-                    : "text-[var(--text-secondary)]"
-                }`}
-              >
-                {t.label}
-                {tabCounts[t.id] > 0 && (
-                  <span className={active ? "text-[var(--brand)]" : "text-[var(--text-tertiary)]"}>
-                    {" "}
-                    {tabCounts[t.id]}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {tab === "archived" && archivedOutstanding > 0 && (
-          <p className="mt-2.5 text-[12px] text-[var(--warning)]">
-            {archivedOutstanding} archived group{archivedOutstanding !== 1 ? "s" : ""} still
-            {archivedOutstanding !== 1 ? " have" : " has"} an unsettled balance. Archiving only
-            tidies the list — these are still counted in your totals above.
+        )}
+        {balancesSettling && (
+          <p role="status" className="t-footnote mt-3 flex items-center gap-1.5 text-label-2">
+            <span aria-hidden className="dot animate-pulse bg-[var(--tint)]" style={{ width: 6, height: 6 }} />
+            Still adding up {groups.length - loadedGroupCount} of {groups.length} groups
           </p>
         )}
+      </Card>
 
-        {/* Group list */}
-        <div className="mt-3 space-y-3 stagger">
-          {sortedRows.length === 0 && (
-            <p className="text-center text-[var(--text-tertiary)] text-sm py-14">{emptyMessage}</p>
-          )}
-          {sortedRows.map((row, i) => (
-            <GroupRow
-              key={row.group.id}
-              group={row.group}
-              index={i}
-              net={row.net}
-              loaded={row.loaded}
-              lastActivityTs={row.lastActivityTs}
-              pendingCount={row.pendingCount}
-              href={`/groups/${row.group.id}`}
-              action={
-                tab === "archived"
-                  ? {
-                      label: "Restore",
-                      ariaLabel: `Restore ${row.group.name} to your active groups`,
-                      onClick: () => handleToggleArchive(row.group.id, false),
-                    }
-                  : {
-                      label: "Archive",
-                      ariaLabel: `Archive ${row.group.name}`,
-                      onClick: () => handleToggleArchive(row.group.id, true),
-                    }
-              }
-            />
-          ))}
-        </div>
+      {/* People with an open balance, netted across groups + direct payments. */}
+      {peopleToShow.length > 0 && (
+        <Section
+          header="People"
+          footer="Netted across every group you share, plus direct payments. Tap for the full statement."
+        >
+          <List>
+            {peopleToShow.map((person) => {
+              const iOwe = person.net > 0;
+              const hasDirect = !isSettled(person.directNet || 0);
+              const sub =
+                person.groups.length > 0
+                  ? person.groups.map((g) => g.groupName).join(" · ") +
+                    (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
+                  : person.sharedGroupCount > 0
+                  ? `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}` +
+                    (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
+                  : "Direct payment";
+              return (
+                <RowLink
+                  key={person.uid}
+                  href={`/reports?person=${person.uid}`}
+                  inset="avatar"
+                  leading={<Avatar name={person.displayName} photoURL={person.photoURL} size={40} />}
+                  title={person.displayName}
+                  subtitle={sub}
+                  trailing={
+                    <span className="flex shrink-0 flex-col items-end">
+                      <span className="t-caption text-label-2">{iOwe ? "you owe" : "owes you"}</span>
+                      <span className={`num t-headline ${iOwe ? "text-neg" : "text-pos"}`}>
+                        {formatCurrency(Math.abs(person.net))}
+                      </span>
+                    </span>
+                  }
+                />
+              );
+            })}
+          </List>
+        </Section>
+      )}
 
-        {/* Only on the Active tab, and now a way through to the settled ones
-            rather than a second copy of the count already on the tab. */}
-        {tab === "active" && tabCounts.settled > 0 && (
-          <button
-            onClick={() => setTab("settled")}
-            className="mt-4 w-full text-left flex items-center gap-3 bg-[var(--tint-accent)] rounded-[var(--radius-card)] p-4 tap-shrink"
+      {/* Groups */}
+      <Section
+        header="Your Groups"
+        headerAction={
+          <Menu
+            align="end"
+            title="Sort by"
+            items={[
+              { label: "Recent Activity", checked: sort === "recent", onSelect: () => setSort("recent") },
+              { label: "Name", checked: sort === "name", onSelect: () => setSort("name") },
+            ]}
           >
-            <span className="w-10 h-10 rounded-full bg-[var(--surface)] text-[var(--brand)] flex items-center justify-center shrink-0 shadow-sm">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2l1.9 5.8L20 9.7l-5 3.6 1.9 6L12 15.8 6.1 19.3 8 13.3l-5-3.6 6.1-1.9z" />
-              </svg>
-            </span>
-            <div className="flex-1 min-w-0">
-              <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                You&rsquo;re all settled in {tabCounts.settled} group
-                {tabCounts.settled !== 1 ? "s" : ""}.
-              </p>
-              <p className="text-[13px] text-[var(--text-tertiary)]">
-                Tap to review or archive them 🎉
-              </p>
-            </div>
-            <span className="text-[var(--text-quaternary)] text-lg shrink-0">›</span>
-          </button>
+            {(props) => (
+              <button
+                type="button"
+                {...props}
+                className="inline-flex min-h-[32px] items-center gap-1 text-[15px] text-tint"
+                aria-label={`Sorted by ${sort === "recent" ? "recent activity" : "name"}. Change sort.`}
+              >
+                {sort === "recent" ? "Recent" : "Name"}
+                <Icon name="chevron.up.down" size={14} strokeWidth={2.2} />
+              </button>
+            )}
+          </Menu>
+        }
+      >
+        {groups.length > 0 && (
+          <div className="mb-3 space-y-3">
+            <SearchField value={query} onChange={setQuery} placeholder="Search groups" label="Search groups" />
+            <Segmented
+              label="Show groups"
+              value={tab}
+              onChange={setTab}
+              options={GROUP_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCounts[t.id] }))}
+            />
+          </div>
         )}
-      </main>
+        {sortedRows.length === 0 ? (
+          <Card>{emptyState}</Card>
+        ) : (
+          <List>
+            {sortedRows.map((row) => (
+              <GroupRow
+                key={row.group.id}
+                group={row.group}
+                net={row.net}
+                loaded={row.loaded}
+                lastActivityTs={row.lastActivityTs}
+                pendingCount={row.pendingCount}
+                href={`/groups/${row.group.id}`}
+                action={
+                  tab === "archived"
+                    ? {
+                        label: "Restore",
+                        ariaLabel: `Restore ${row.group.name} to your active groups`,
+                        onClick: () => handleToggleArchive(row.group.id, false),
+                      }
+                    : {
+                        label: "Archive",
+                        ariaLabel: `Archive ${row.group.name}`,
+                        onClick: () => handleToggleArchive(row.group.id, true),
+                      }
+                }
+              />
+            ))}
+          </List>
+        )}
+        {tab === "archived" && archivedOutstanding > 0 && (
+          <p className="section-footer text-warn">
+            {archivedOutstanding} archived group{archivedOutstanding !== 1 ? "s" : ""} still
+            {archivedOutstanding !== 1 ? " have" : " has"} an open balance. Archiving only tidies
+            this list — they still count in your totals.
+          </p>
+        )}
+        {tab !== "archived" && sortedRows.length > 0 && (
+          <p className="section-footer">Swipe left on a group to archive it.</p>
+        )}
+      </Section>
 
-      {/* Click-away layer to dismiss the Add popover on outside tap */}
-      {showAdd && (
-        <div className="fixed inset-0 z-20" onClick={() => setShowAdd(false)} aria-hidden />
-      )}
-
-      <BottomNav active="groups" />
-
-
-      {showCreate && (
-        <GlassModal title="New Group" onClose={() => setShowCreate(false)}>
-          <form onSubmit={handleCreateGroup} className="space-y-3.5">
-            <GlassField
-              label="Group name"
-              autoFocus
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              placeholder="Goa Trip, Roommates…"
+      {tab === "active" && tabCounts.settled > 0 && (
+        <Section>
+          <List>
+            <RowButton
+              onClick={() => setTab("settled")}
+              leading={<IconTile icon="checkmark" color="var(--green)" />}
+              title={`${tabCounts.settled} settled group${tabCounts.settled !== 1 ? "s" : ""}`}
+              subtitle="Everyone's square. Review or archive them."
+              chevron
             />
-            {formError && <p className="text-sm text-[var(--danger)]">{formError}</p>}
-            <GlassButton disabled={busy} className="w-full">
-              {busy ? "Creating…" : "Create"}
-            </GlassButton>
-          </form>
-        </GlassModal>
+          </List>
+        </Section>
       )}
 
-      {showJoin && (
-        <GlassModal title="Join Group" onClose={() => setShowJoin(false)}>
-          <form onSubmit={handleJoinGroup} className="space-y-3.5">
-            <GlassField
-              label="Invite code"
-              autoFocus
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-              placeholder="ABC123"
-              className="uppercase tracking-widest"
+      {sheet === "create" && (
+        <Sheet
+          ref={sheetRef}
+          title="New Group"
+          dirty={!!groupName.trim() && !busy}
+          onClose={() => {
+            setSheet(null);
+            setGroupName("");
+          }}
+          trailing={
+            <SheetIconButton
+              icon="checkmark"
+              label="Create group"
+              prominent
+              disabled={!groupName.trim() || busy}
+              onClick={() => void handleCreateGroup()}
             />
-            {formError && <p className="text-sm text-[var(--danger)]">{formError}</p>}
-            <GlassButton disabled={busy} className="w-full">
-              {busy ? "Joining…" : "Join"}
-            </GlassButton>
+          }
+        >
+          <form onSubmit={handleCreateGroup}>
+            <List>
+              <FieldRow
+                autoFocus
+                value={groupName}
+                onChange={(e) => setGroupName(e.target.value)}
+                placeholder="Group name"
+                aria-label="Group name"
+                enterKeyHint="done"
+                maxLength={60}
+              />
+            </List>
+            <p className="section-footer">A trip, a flat, a team — anything you split costs for.</p>
+            {formError && <p className="t-footnote mt-3 px-4 text-neg">{formError}</p>}
+            <button type="submit" hidden aria-hidden tabIndex={-1} />
           </form>
-        </GlassModal>
+        </Sheet>
       )}
-    </div>
+
+      {sheet === "join" && (
+        <Sheet
+          ref={sheetRef}
+          title="Join a Group"
+          dirty={!!joinCode.trim() && !busy}
+          onClose={() => {
+            setSheet(null);
+            setJoinCode("");
+          }}
+          trailing={
+            <SheetIconButton
+              icon="checkmark"
+              label="Join group"
+              prominent
+              disabled={!joinCode.trim() || busy}
+              onClick={() => void handleJoinGroup()}
+            />
+          }
+        >
+          <form onSubmit={handleJoinGroup}>
+            <List>
+              <FieldRow
+                autoFocus
+                value={joinCode}
+                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                placeholder="Invite code"
+                aria-label="Invite code"
+                autoCapitalize="characters"
+                autoCorrect="off"
+                spellCheck={false}
+                enterKeyHint="go"
+                inputClassName="font-semibold uppercase tracking-[0.2em]"
+              />
+            </List>
+            <p className="section-footer">
+              Ask any member for the 6-character code, or scan the QR code on their phone.
+            </p>
+            {formError && <p className="t-footnote mt-3 px-4 text-neg">{formError}</p>}
+            <button type="submit" hidden aria-hidden tabIndex={-1} />
+          </form>
+        </Sheet>
+      )}
+    </Screen>
   );
 }
