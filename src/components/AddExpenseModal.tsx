@@ -7,29 +7,15 @@ import { uploadMultipleReceipts } from "@/lib/storage";
 import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
-import { hapticSuccess } from "@/lib/haptics";
-import { activateFileInputOnKey } from "@/lib/keyboard";
-import { useSheetLayer } from "@/lib/sheet-layer";
-import { useOverlayBehavior } from "@/lib/overlay-stack";
-
-function CategoryIcon({ id, active }: { id: string; active: boolean }) {
-  const stroke = active ? "var(--brand)" : "var(--text-secondary)";
-  const common = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke, strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
-  switch (id) {
-    case "meal":
-      return (<svg {...common}><path d="M4 3v7a2 2 0 0 0 2 2h0V3M6 3v18M15 3s-3 1.5-3 5 3 4 3 4v10" /></svg>);
-    case "fuel":
-      return (<svg {...common}><path d="M3 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16M3 12h10" /><path d="M13 8h2a2 2 0 0 1 2 2v6a1.5 1.5 0 0 0 3 0V9l-3-3" /></svg>);
-    case "hotel":
-      return (<svg {...common}><path d="M4 21V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v17M16 8h3a1 1 0 0 1 1 1v12M8 7h1M12 7h1M8 11h1M12 11h1M8 15h1M12 15h1" /></svg>);
-    case "transport":
-      return (<svg {...common}><path d="M5 17h14M5 17a2 2 0 1 1-4 0M23 17a2 2 0 1 1-4 0M5 17l1.5-6a2 2 0 0 1 2-1.5h7a2 2 0 0 1 2 1.5L19 17" /></svg>);
-    case "shopping":
-      return (<svg {...common}><path d="M6 2 4 6v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6l-2-4zM4 6h16M16 10a4 4 0 0 1-8 0" /></svg>);
-    default:
-      return (<svg {...common}><circle cx="5" cy="12" r="1.6" fill={stroke} stroke="none" /><circle cx="12" cy="12" r="1.6" fill={stroke} stroke="none" /><circle cx="19" cy="12" r="1.6" fill={stroke} stroke="none" /></svg>);
-  }
-}
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
+import { Sheet, SheetIconButton, type SheetHandle } from "@/components/kit/Sheet";
+import { List, Section, sepInset } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { CategoryTile } from "@/components/kit/Tile";
+import { AmountField } from "@/components/kit/AmountField";
+import { Attachments } from "@/components/kit/Attachments";
+import { Menu } from "@/components/kit/Menu";
+import { Icon } from "@/components/kit/Icon";
 
 export interface NewExpenseInput {
   description: string;
@@ -45,6 +31,12 @@ export interface NewExpenseInput {
   receiptFiles: File[];
 }
 
+/**
+ * Add or edit an expense: a large sheet, amount first.
+ *
+ * ✕ leading, ✓ trailing (disabled until there's an amount and at least one
+ * person in the split). Closing with anything typed asks before discarding.
+ */
 export default function AddExpenseModal({
   group,
   currentUid,
@@ -58,18 +50,13 @@ export default function AddExpenseModal({
   onClose: () => void;
   prefillReceipt?: File | null;
   /** When provided, the parent persists the expense (enabling optimistic UI):
-   *  the modal builds the input, hands it off, and closes immediately. */
+   *  the sheet builds the input, hands it off, and closes immediately. */
   onSubmit?: (input: NewExpenseInput) => void;
-  /** Editing an existing expense reuses this whole screen rather than a
-   *  cut-down form, so adding and editing look and behave the same. */
+  /** Editing reuses this whole sheet, so adding and editing behave the same. */
   expense?: Expense | null;
 }) {
-  useSheetLayer();
+  const sheetRef = useRef<SheetHandle>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  // Fullscreen form is an overlay root too: same topmost-Escape, trap and
-  // return-focus contract as GlassModal (see overlay-stack).
-  const dialogRef = useRef<HTMLDivElement | null>(null);
-  useOverlayBehavior(dialogRef, onClose);
   const isEdit = !!expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
   const [category, setCategory] = useState(expense?.category || "meal");
@@ -84,13 +71,10 @@ export default function AddExpenseModal({
   const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
-  const eachPays = splitMembers.length > 0 ? parsedAmount / splitMembers.length : 0;
+  const valid = parsedAmount > 0 && splitMembers.length > 0;
 
-  // A legacy exact/percentage expense keeps its shape on edit: the parent
-  // rescales the original amounts instead of re-splitting evenly, and that only
-  // happens while the same people are involved. The panel below has to describe
-  // whichever of the two is actually going to be saved — it used to always say
-  // "Split equally", which was wrong for every uneven expense.
+  // A legacy exact/percentage expense keeps its shape on edit while the same
+  // people are involved; the preview has to describe whichever will be saved.
   const originalSplits = expense?.splits ?? [];
   const sameMembers =
     originalSplits.length === splitMembers.length &&
@@ -99,21 +83,28 @@ export default function AddExpenseModal({
   const previewSplits = keepsCustomSplit
     ? rescaleSplits(originalSplits, parsedAmount)
     : splitEqually(parsedAmount, splitMembers);
-  const memberName = (uid: string) => (uid === currentUid ? "You" : group.members[uid]?.displayName || "User");
+  const shareOf = (uid: string) => previewSplits.find((s) => s.uid === uid)?.amount ?? 0;
+  const memberName = (uid: string) =>
+    uid === currentUid ? "You" : group.members[uid]?.displayName || "Member";
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.id === category)?.label || "Expense";
-  const categoryEmoji = EXPENSE_CATEGORIES.find((c) => c.id === category)?.emoji || "🧾";
+
+  const dirty = isEdit
+    ? amount !== String(expense!.amount) ||
+      note !== (expense!.description || "") ||
+      category !== (expense!.category || "meal") ||
+      paidBy !== expense!.paidBy ||
+      !sameMembers ||
+      receiptFiles.length > 0
+    : !!amount || !!note.trim() || receiptFiles.length > (prefillReceipt ? 1 : 0);
 
   function toggleSplit(uid: string) {
+    hapticTap();
     setSplitMembers((prev) => (prev.includes(uid) ? prev.filter((m) => m !== uid) : [...prev, uid]));
   }
 
-  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
-    setReceiptFiles((prev) => [...prev, ...Array.from(e.target.files || [])]);
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (parsedAmount <= 0 || splitMembers.length === 0) {
+  async function handleSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    if (!valid) {
       setError("Enter an amount and pick who's splitting.");
       return;
     }
@@ -129,14 +120,14 @@ export default function AddExpenseModal({
       receiptFiles,
     };
 
-    // Optimistic path: parent persists + reconciles; close instantly.
+    // Optimistic path: the parent persists and reconciles; close at once.
     if (onSubmit) {
       onSubmit(input);
-      onClose();
+      sheetRef.current?.dismiss();
       return;
     }
 
-    // Fallback path (e.g. share-receipt): persist here.
+    // Fallback path (share-receipt): persist here.
     setBusy(true);
     try {
       let receiptUrls: string[] = [];
@@ -153,9 +144,9 @@ export default function AddExpenseModal({
         receiptUrls,
         category,
       });
-      showToast({ message: `${categoryEmoji} Expense added · ${formatCurrency(parsedAmount)}` });
+      showToast({ message: `Expense added · ${formatCurrency(parsedAmount)}` });
       hapticSuccess();
-      onClose();
+      sheetRef.current?.dismiss();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add expense");
     } finally {
@@ -164,261 +155,173 @@ export default function AddExpenseModal({
   }
 
   return (
-    <div
-      ref={dialogRef}
-      role="dialog"
-      aria-modal="true"
-      aria-label={isEdit ? "Edit Expense" : "Add Expense"}
-      className="fixed inset-0 z-50 bg-[var(--background)] flex flex-col animate-modal-in"
+    <Sheet
+      ref={sheetRef}
+      large
+      title={isEdit ? "Edit Expense" : "Add Expense"}
+      subtitle={group.name}
+      dirty={dirty && !busy}
+      onClose={onClose}
+      trailing={
+        <SheetIconButton
+          icon="checkmark"
+          label={isEdit ? "Save expense" : "Add expense"}
+          prominent
+          disabled={!valid || busy}
+          onClick={() => formRef.current?.requestSubmit()}
+        />
+      }
     >
-      <form ref={formRef} onSubmit={handleSubmit} className="flex-1 flex flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto scroll-momentum max-w-md w-full mx-auto px-5 pt-[max(0.75rem,env(safe-area-inset-top))] pb-[max(2.5rem,env(safe-area-inset-bottom))]">
-          {/* Header: the commit lives in the nav bar (Cancel leading, Save
-              trailing), never pinned to the bottom edge — the tab bar owns
-              that edge, and a second action bar there covers content rows. */}
-          <div className="flex items-center justify-between pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="min-h-[44px] px-2 -ml-2 text-[17px] text-[var(--brand)] tap-shrink"
-            >
-              Cancel
-            </button>
-            <div className="text-center">
-              <p className="text-[18px] font-bold text-[var(--text-primary)]">{isEdit ? "Edit Expense" : "Add Expense"}</p>
-              <p className="text-[13px] text-[var(--text-tertiary)]">{group.name}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => formRef.current?.requestSubmit()}
-              disabled={busy}
-              className="min-h-[44px] px-2 -mr-2 text-[17px] font-semibold text-[var(--brand)] tap-shrink disabled:opacity-40"
-            >
-              {busy ? "Saving…" : isEdit ? "Save" : "Add"}
-            </button>
-          </div>
-          {/* Keyboard submission now that the visible commit sits outside any
-              implicit form flow. */}
-          <button type="submit" hidden aria-hidden tabIndex={-1} />
+      <form ref={formRef} onSubmit={handleSubmit} noValidate>
+        {/* Amount */}
+        <AmountField
+          id="expense-amount"
+          value={amount}
+          onChange={setAmount}
+          autoFocus={!isEdit}
+          caption={
+            splitMembers.length > 0 && parsedAmount > 0 && !keepsCustomSplit
+              ? `${formatCurrency(shareOf(splitMembers[0]))} each · ${splitMembers.length} ${
+                  splitMembers.length === 1 ? "person" : "people"
+                }`
+              : keepsCustomSplit
+              ? "Each person keeps their original share"
+              : "Indian rupees"
+          }
+        />
 
-          {/* Amount hero */}
-          <div className="relative mt-5">
-            <span className="absolute right-0 top-1/2 -translate-y-1/2 text-[52px] opacity-60 select-none pointer-events-none" aria-hidden>{categoryEmoji}</span>
-            <p className="text-[15px] font-semibold text-[var(--brand)]">How much was it?</p>
-            <div className="flex items-center mt-1">
-              <span className="text-[46px] font-extrabold text-[var(--text-primary)]">₹</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="0.01"
-                autoFocus
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0"
-                className="w-full bg-transparent outline-none text-[46px] font-extrabold text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-              />
-            </div>
-            <span className="inline-flex items-center gap-1 mt-2 rounded-full bg-[var(--fill)] px-3 py-1 text-[13px] font-semibold text-[var(--text-secondary)]">
-              INR
-            </span>
-          </div>
-
-          {/* Category */}
-          <div className="mt-6 bg-[var(--surface)] rounded-[var(--radius-card)] p-4 shadow-[var(--shadow-card)]">
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">What was this for?</p>
-            <div className="grid grid-cols-3 gap-2.5">
-              {EXPENSE_CATEGORIES.map((c) => {
-                const active = category === c.id;
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setCategory(c.id)}
-                    className={`flex flex-col items-center gap-1.5 rounded-2xl py-3 border tap-shrink ${
-                      active ? "bg-[var(--tint-accent)] border-[var(--brand)]" : "bg-[var(--surface)] border-[var(--border-subtle)]"
-                    }`}
-                  >
-                    <CategoryIcon id={c.id} active={active} />
-                    <span className={`text-[12px] font-medium ${active ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>{c.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Who paid */}
-          <div className="mt-6">
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">Who paid?</p>
-            <div className="flex gap-4 overflow-x-auto scroll-momentum -mx-5 px-5 pb-1">
-              {group.memberIds.map((uid) => {
-                const active = paidBy === uid;
-                return (
-                  <button
-                    key={uid}
-                    type="button"
-                    onClick={() => setPaidBy(uid)}
-                    className="flex flex-col items-center gap-1.5 shrink-0 tap-shrink w-16"
-                  >
-                    <span className="relative">
-                      {group.members[uid]?.photoURL ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={group.members[uid].photoURL} alt="" className={`w-14 h-14 rounded-full object-cover ${active ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-[var(--background)]" : ""}`} />
-                      ) : (
-                        <span className={`w-14 h-14 rounded-full bg-[var(--fill)] flex items-center justify-center text-[18px] font-semibold text-[var(--text-secondary)] ${active ? "ring-2 ring-indigo-500 ring-offset-2 ring-offset-[var(--background)]" : ""}`}>
-                          {memberName(uid).charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                      {active && (
-                        <span className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-[var(--brand-solid)] border-2 border-[var(--background)] flex items-center justify-center">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                        </span>
-                      )}
-                    </span>
-                    <span className={`text-[13px] font-medium truncate w-full text-center ${active ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>
-                      {memberName(uid)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Split between */}
-          <div className="mt-6">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[15px] font-semibold text-[var(--text-primary)]">Split between</p>
-              <span className="text-[14px] font-semibold text-[var(--brand)]">Equal split</span>
-            </div>
-            <div className="flex gap-2 flex-wrap mb-3">
-              {group.memberIds.map((uid) => {
-                const inSplit = splitMembers.includes(uid);
-                return (
-                  <button
-                    key={uid}
-                    type="button"
-                    onClick={() => toggleSplit(uid)}
-                    aria-pressed={inSplit}
-                    className={`flex items-center gap-1.5 rounded-full border pl-1.5 pr-2.5 py-1 tap-shrink ${
-                      inSplit
-                        ? "bg-[var(--tint-accent)] border-[var(--brand)]"
-                        : "bg-[var(--surface)] border-[var(--border-subtle)]"
-                    }`}
-                  >
-                    <span className="relative shrink-0">
-                      {group.members[uid]?.photoURL ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={group.members[uid].photoURL} alt="" className="w-6 h-6 rounded-full object-cover" />
-                      ) : (
-                        <span className="w-6 h-6 rounded-full bg-[var(--fill)] flex items-center justify-center text-[10px] font-medium text-[var(--text-secondary)]">
-                          {memberName(uid).charAt(0).toUpperCase()}
-                        </span>
-                      )}
-                      {inSplit && (
-                        <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-[var(--brand-solid)] border border-[var(--surface)] flex items-center justify-center">
-                          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
-                        </span>
-                      )}
-                    </span>
-                    <span className={`text-[13px] font-medium ${inSplit ? "text-[var(--brand)]" : "text-[var(--text-secondary)]"}`}>
-                      {memberName(uid)}
-                    </span>
-                    {!inSplit && <span className="text-[var(--text-tertiary)] text-[15px] leading-none">+</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--fill-soft)] p-3.5">
-              <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
-              </span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                  {keepsCustomSplit ? "Custom split kept" : "Split equally"}
-                </p>
-                <p className="text-[13px] text-[var(--text-tertiary)]">
-                  {keepsCustomSplit
-                    ? "Each person keeps their original share of the total"
-                    : `${splitMembers.length} way split`}
-                </p>
-              </div>
-              {!keepsCustomSplit && (
-                <div className="text-right">
-                  <p className="text-[12px] text-[var(--text-tertiary)]">Each pays</p>
-                  <p className="text-[16px] font-bold text-[var(--brand)]">{formatCurrency(eachPays)}</p>
-                </div>
-              )}
-            </div>
-            {keepsCustomSplit && (
-              <ul className="mt-2 rounded-[var(--radius-inner)] bg-[var(--fill-soft)] divide-y divide-[var(--border-subtle)]">
-                {previewSplits.map((s) => (
-                  <li key={s.uid} className="flex items-center justify-between px-3.5 py-2.5">
-                    <span className="text-[14px] text-[var(--text-secondary)] truncate">{memberName(s.uid)}</span>
-                    <span className="text-[14px] font-semibold text-[var(--text-primary)]">
-                      {formatCurrency(s.amount)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-
-          {/* Add to (group, fixed) */}
-          <div className="mt-6">
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-3">Add to</p>
-            <div className="flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--surface)] p-3.5 shadow-[var(--shadow-sm)]">
-              {group.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={group.photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-              ) : (
-                <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center text-[16px] font-bold text-[var(--brand)] shrink-0">
-                  {group.name.charAt(0).toUpperCase()}
-                </span>
-              )}
-              <div className="flex-1 min-w-0">
-                <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{group.name}</p>
-                <p className="text-[13px] text-[var(--text-tertiary)]">{group.memberIds.length} members</p>
-              </div>
-            </div>
-          </div>
-
-          {/* Note */}
-          <div className="mt-6">
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-2">Note (optional)</p>
+        {/* Description */}
+        <List>
+          <label className="row" style={{ cursor: "text" }}>
+            <CategoryTile id={category} />
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="Add a note (e.g. Lunch at the beach)"
-              className="w-full rounded-[var(--radius-inner)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-3 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--brand)]"
+              placeholder={`What was it for? (${categoryLabel})`}
+              aria-label="Description"
+              maxLength={80}
+              className="field"
             />
-          </div>
+          </label>
+        </List>
 
-          {/* Receipt */}
-          <div className="mt-6">
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] mb-2">Receipt (optional)</p>
-            <label
-              role="button"
-              tabIndex={0}
-              aria-label="Add receipt image"
-              onKeyDown={activateFileInputOnKey}
-              className="flex items-center gap-3 rounded-[var(--radius-inner)] border border-dashed border-[var(--brand)] bg-[var(--tint-accent)] px-4 py-3.5 cursor-pointer tap-shrink"
+        {/* Category */}
+        <Section header="Category">
+          <div className="grid grid-cols-3 gap-2">
+            {EXPENSE_CATEGORIES.map((c) => {
+              const active = category === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    if (!active) hapticTap();
+                    setCategory(c.id);
+                  }}
+                  className={`relative flex flex-col items-center gap-1.5 rounded-[18px] py-3 transition-[background-color,box-shadow] duration-200 ${
+                    active
+                      ? "bg-[var(--cell-elevated)] shadow-[0_0_0_2px_var(--tint)]"
+                      : "bg-[var(--cell-elevated)]"
+                  }`}
+                >
+                  <CategoryTile id={c.id} size="lg" />
+                  <span className={`t-footnote ${active ? "font-semibold text-tint" : "text-label"}`}>{c.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* Paid by */}
+        <Section header="Paid by">
+          <List>
+            <Menu
+              align="end"
+              title="Who paid?"
+              items={group.memberIds.map((uid) => ({
+                label: memberName(uid),
+                checked: paidBy === uid,
+                onSelect: () => setPaidBy(uid),
+              }))}
             >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m21.44 11.05-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95L9.9 18.07a1.5 1.5 0 1 1-2.12-2.12l8.49-8.49" /></svg>
-              <div className="flex-1">
-                <p className="text-[14px] font-semibold text-[var(--brand)]">
-                  {receiptFiles.length > 0 ? `${receiptFiles.length} file(s) selected` : "Add receipt"}
-                </p>
-                <p className="text-[12px] text-[var(--text-tertiary)]">Upload image (Max 10MB)</p>
-              </div>
-              <span className="w-10 h-10 rounded-xl bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="4" /></svg>
-              </span>
-              <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
-            </label>
-          </div>
+              {(props) => (
+                <button type="button" {...props} className="row is-pressable" style={sepInset(16)}>
+                  <Avatar
+                    name={group.members[paidBy]?.displayName || memberName(paidBy)}
+                    photoURL={group.members[paidBy]?.photoURL}
+                    size={30}
+                  />
+                  <span className="row-main">
+                    <span className="row-title">{memberName(paidBy)}</span>
+                  </span>
+                  <span className="flex items-center gap-1 text-label-2">
+                    <span className="t-subhead">Change</span>
+                    <Icon name="chevron.up.down" size={15} strokeWidth={2.2} />
+                  </span>
+                </button>
+              )}
+            </Menu>
+          </List>
+        </Section>
 
-          {error && <p className="text-sm text-[var(--danger)] mt-4">{error}</p>}
-        </div>
+        {/* Split between */}
+        <Section
+          header="Split between"
+          footer={
+            keepsCustomSplit
+              ? "This expense had a custom split. Each person keeps their original share of the new total."
+              : splitMembers.length === 0
+              ? "Pick at least one person."
+              : `Split equally between ${splitMembers.length} ${splitMembers.length === 1 ? "person" : "people"}.`
+          }
+        >
+          <List>
+            {group.memberIds.map((uid) => {
+              const inSplit = splitMembers.includes(uid);
+              return (
+                <button
+                  key={uid}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={inSplit}
+                  onClick={() => toggleSplit(uid)}
+                  className="row is-pressable"
+                  style={sepInset(58)}
+                >
+                  <span className={inSplit ? "text-tint" : "text-label-3"} aria-hidden>
+                    <Icon
+                      name={inSplit ? "checkmark.circle.fill" : "circle"}
+                      size={26}
+                      strokeWidth={1.6}
+                    />
+                  </span>
+                  <span className="row-main">
+                    <span className="row-title">{memberName(uid)}</span>
+                  </span>
+                  <span className={`num t-body shrink-0 ${inSplit ? "text-label" : "text-label-3"}`}>
+                    {inSplit ? formatCurrency(shareOf(uid)) : "—"}
+                  </span>
+                </button>
+              );
+            })}
+          </List>
+        </Section>
+
+        {/* Receipt */}
+        <Section header="Receipt">
+          <Attachments
+            files={receiptFiles}
+            onChange={setReceiptFiles}
+            label="Add Receipt Photo"
+            addMoreLabel="Add Another Photo"
+            footer="Images up to 10 MB."
+          />
+        </Section>
+
+        {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
+        <button type="submit" hidden aria-hidden tabIndex={-1} />
       </form>
-    </div>
+    </Sheet>
   );
 }

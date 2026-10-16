@@ -1,720 +1,1801 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   SplitIt — iOS 26 "Liquid Glass" inspired design tokens
+   SplitIt — iOS 27 design system.
+
+   iOS 27 is a readability pass on iOS 26's Liquid Glass: denser glass, a
+   darker rim, a brighter specular edge. The rules this file encodes:
+
+   - Glass is the NAVIGATION layer only (tab bar, bar buttons, menus, HUD,
+     floating controls). Content — lists, cards, rows — is opaque.
+   - Nothing depends on transparency or blur to be legible. Every glass token
+     is opaque enough to read with backdrop-filter missing entirely, and
+     prefers-reduced-transparency swaps glass for solid cells.
+   - Semantic tokens only. Components never carry hex values.
+   - Springs, not eases. The linear() curves below are sampled from SwiftUI's
+     (duration, bounce) springs; see "Motion".
    ========================================================================== */
 
 :root {
-  /* Base surfaces */
-  --background: #f2f2f7; /* iOS systemGroupedBackground (light) */
-  --foreground: #1c1c1e; /* iOS label (light) */
-  --surface: #ffffff; /* iOS secondarySystemGroupedBackground */
-  --surface-elevated: #ffffff;
-  --border-subtle: rgba(60, 60, 67, 0.12);
+  color-scheme: light dark;
 
-  /* Brand accent — unified to indigo (see canonical scale below) */
-  --accent: var(--brand-solid);
-  --accent-foreground: var(--brand-fg);
+  /* ── Safe areas & metrics (pt) ─────────────────────────────────────────── */
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
 
-  /* Semantic */
-  --success: #34c759;
-  --danger: #ff3b30;
-  --warning: #ff9500;
+  --margin: 16px;
+  --content-max: 600px;
+  --nav-top: max(var(--sat), 6px);
+  --nav-h: 52px;
+  --nav-total: calc(var(--nav-top) + var(--nav-h));
+  --tab-h: 62px;
+  --tab-bottom: max(calc(var(--sab) - 10px), 12px);
+  --content-bottom: calc(var(--tab-h) + var(--tab-bottom) + 28px);
+  --radius-card: 26px;
+  --radius-tile: 8px;
+  --radius-sheet: 38px;
 
-  /* Text hierarchy — iOS label ramp (primary 94% / secondary 60% /
-     tertiary 30% / quaternary 18%). The single text scale for the whole app;
-     fills, tints and pos/neg below complete the system. */
+  /* Synced from window.visualViewport by PwaBootstrap: what is actually
+     visible, keyboard and Safari chrome included. */
+  --app-height: 100dvh;
 
-  /* Liquid Glass material tokens */
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.6);
-  --glass-highlight: rgba(255, 255, 255, 0.9);
-  --glass-shadow: rgba(0, 0, 0, 0.08);
+  /* ── Backgrounds ───────────────────────────────────────────────────────── */
+  --bg: #f2f2f7;
+  --cell: #ffffff;
+  --cell-2: #f2f2f7;
+  --pressed: #e5e5ea;
+  --bg-elevated: #f2f2f7;
+  --cell-elevated: #ffffff;
+  --pressed-elevated: #e5e5ea;
+
+  /* ── Labels ────────────────────────────────────────────────────────────── */
+  --label: #000000;
+  --label-2: rgba(60, 60, 67, 0.6);
+  --label-3: rgba(60, 60, 67, 0.3);
+  --label-4: rgba(60, 60, 67, 0.18);
+  --separator: rgba(60, 60, 67, 0.29);
+
+  /* ── Fills (controls) ──────────────────────────────────────────────────── */
+  --fill: rgba(120, 120, 128, 0.2);
+  --fill-2: rgba(120, 120, 128, 0.16);
+  --fill-3: rgba(118, 118, 128, 0.12);
+  --fill-4: rgba(116, 116, 128, 0.08);
+
+  /* ── System colors (iOS 26/27 palette) ─────────────────────────────────── */
+  --blue: #0088ff;
+  --green: #34c759;
+  --red: #ff383c;
+  --orange: #ff8d28;
+  --yellow: #ffcc00;
+  --indigo: #6155f5;
+  --purple: #cb30e0;
+  --teal: #00c3d0;
+  --cyan: #00c0e8;
+  --mint: #00c8b3;
+  --pink: #ff2d55;
+  --brown: #ac7f5e;
+  --gray: #8e8e93;
+
+  /* The app tint. iOS system blue: it is the colour of the app icon and the
+     launch screen, so the first frame and the app agree. One token — change
+     it here and every interactive element follows. */
+  --tint: var(--blue);
+  --on-tint: #ffffff;
+
+  /* Money is meaning, so it gets text-safe variants: systemGreen/Red are fill
+     colours and fail contrast as 15pt text on white. These are the
+     Increase-Contrast variants Apple ships for the same hues. */
+  --pos: #248a3d;
+  --neg: #d70015;
+  --warn: #c45100;
+
+  /* ── Liquid Glass (navigation layer only) ──────────────────────────────── */
+  --glass-bg: rgba(255, 255, 255, 0.74);
+  --glass-thick: rgba(250, 250, 252, 0.92);
+  --glass-rim: rgba(0, 0, 0, 0.09);
+  --glass-spec: rgba(255, 255, 255, 0.95);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
   --glass-blur: 20px;
-  --glass-saturate: 180%;
+  --lens: rgba(0, 0, 0, 0.07);
+  --dim: rgba(0, 0, 0, 0.32);
+  --sheet-shadow: 0 -2px 24px rgba(0, 0, 0, 0.12);
 
-  /* Radii matching iOS 26 continuous corner curvature */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
+  /* ── Type ──────────────────────────────────────────────────────────────── */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", var(--font-geist-sans),
+    "Inter", "Segoe UI", Roboto, system-ui, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont,
+    var(--font-geist-sans), "Inter", system-ui, sans-serif;
 
-  /* Height of the floating tab bar, excluding the safe-area inset it adds
-     underneath. Floating buttons and page bottom padding both derive their
-     offset from this so the two can never drift apart. */
-  --nav-h: 5.25rem;
-  --radius-pill: 999px;
+  /* ── Motion ────────────────────────────────────────────────────────────────
+     Sampled SwiftUI springs (duration, bounce). Each curve pairs with the
+     CSS duration it was truncated at — the point the spring is within 0.4% of
+     rest — so animations land exactly instead of stopping short. The
+     cubic-bezier fallbacks are iOS's ease-out, for engines without linear().
+     ───────────────────────────────────────────────────────────────────────── */
+  --ease-ios: cubic-bezier(0.32, 0.72, 0, 1);
+  --spring-smooth: var(--ease-ios);
+  --spring-snappy: cubic-bezier(0.2, 0.9, 0.25, 1.04);
+  --spring-bouncy: cubic-bezier(0.2, 0.9, 0.3, 1.12);
+  --spring-sheet: var(--ease-ios);
+  --spring-push: var(--ease-ios);
+  --spring-press: cubic-bezier(0.2, 0.9, 0.3, 1.12);
+  --dur-smooth: 611ms;
+  --dur-snappy: 420ms;
+  --dur-bouncy: 564ms;
+  --dur-sheet: 510ms;
+  --dur-push: 562ms;
+  --dur-press: 316ms;
+}
 
-  /* ── Canonical semantic scale (used by every screen).
-     Light values are the iOS label ramp; dark values adapt for legibility
-     on dark surfaces. ── */
-  --text-primary: rgba(0, 0, 0, 0.94);
-  --text-secondary: rgba(60, 60, 67, 0.6);
-  --text-tertiary: rgba(60, 60, 67, 0.3);
-  --text-quaternary: rgba(60, 60, 67, 0.18);
-
-  --fill: #f1f5f9;              /* was slate-100 */
-  --fill-soft: #f8fafc;        /* was slate-50 */
-
-  --brand: #4f46e5;            /* indigo-600 — text/icons */
-  --brand-solid: #4f46e5;      /* indigo-600 — filled button bg */
-  --brand-fg: #ffffff;
-
-  --tint-accent: #eef2ff;      /* was indigo-50 */
-  --tint-accent-2: #e0e7ff;    /* was indigo-100 */
-  --tint-success: #dcfce7;     /* was green-100 */
-  --tint-success-soft: #ecfdf5;/* was emerald-50 */
-  --tint-danger: #fee2e2;      /* was red-100 */
-  --tint-danger-soft: #fef2f2; /* was red-50 / rose-50 */
-  --tint-warning: #fef3c7;     /* was amber-100 */
-
-  --pos: #16a34a;              /* was green-600 */
-  --neg: #ef4444;              /* was red-500 */
-
-  /* Elevation — consolidated from ad-hoc shadow recipes */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.12);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.03), 0 16px 36px -24px rgba(0, 0, 0, 0.22);
-  --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.2);
-
-  /* Card radii — consolidated (inner 18 / card 22 / xl 28 = --radius-xl) */
-  --radius-inner: 18px;
-  --radius-card: 22px;
-
-  /* ── Motion tokens. Every animation in the app derives from these so timing
-     feels like one system, and Reduce Motion collapses them in one place.
-     Springs communicate travel (push/pop/sheets); fades communicate
-     appearance (tab switches, toasts, banners). ── */
-  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --dur-instant: 150ms;
-  --dur-fast: 250ms;
-  --dur-normal: 300ms;
-  --dur-route: 380ms;
+@supports (transition-timing-function: linear(0, 1)) {
+  :root {
+    /* smooth: 0.50s, bounce 0 */
+    --spring-smooth: linear(0, 0.0162, 0.0573, 0.114, 0.1797, 0.2494, 0.3199, 0.3886, 0.454, 0.5153, 0.5718, 0.6233, 0.6699, 0.7118, 0.749, 0.7821, 0.8112, 0.8369, 0.8593, 0.8789, 0.8959, 0.9107, 0.9235, 0.9345, 0.944, 0.9522, 0.9593, 0.9653, 0.9705, 0.9749, 0.9787, 0.9819, 0.9846, 0.987, 0.989, 0.9907, 0.9921, 0.9933, 0.9944, 0.9952, 1);
+    /* snappy: 0.38s, bounce 0.14 */
+    --spring-snappy: linear(0, 0.0136, 0.0494, 0.1006, 0.162, 0.2293, 0.2993, 0.3694, 0.4378, 0.5032, 0.5646, 0.6215, 0.6735, 0.7206, 0.7628, 0.8002, 0.8332, 0.862, 0.887, 0.9084, 0.9267, 0.9422, 0.9552, 0.966, 0.9749, 0.9821, 0.988, 0.9926, 0.9963, 0.999, 1.0012, 1.0027, 1.0037, 1.0044, 1.0048, 1.005, 1.005, 1.0049, 1.0046, 1.0044, 1);
+    /* bouncy: 0.50s, bounce 0.30 */
+    --spring-bouncy: linear(0, 0.0144, 0.053, 0.1094, 0.1781, 0.2545, 0.3348, 0.4159, 0.4954, 0.5714, 0.6426, 0.708, 0.7672, 0.8199, 0.8659, 0.9056, 0.9392, 0.967, 0.9897, 1.0077, 1.0215, 1.0317, 1.0388, 1.0432, 1.0455, 1.046, 1.0451, 1.0432, 1.0404, 1.0372, 1.0337, 1.0299, 1.0262, 1.0226, 1.0191, 1.0159, 1.0129, 1.0103, 1.0079, 1.0058, 1);
+    /* sheet: 0.50s, bounce 0.06 */
+    --spring-sheet: linear(0, 0.0116, 0.0421, 0.0858, 0.1384, 0.1963, 0.257, 0.3183, 0.3787, 0.4372, 0.4929, 0.5453, 0.5942, 0.6393, 0.6807, 0.7184, 0.7525, 0.7832, 0.8107, 0.8352, 0.857, 0.8763, 0.8934, 0.9083, 0.9214, 0.9328, 0.9427, 0.9514, 0.9588, 0.9652, 0.9708, 0.9755, 0.9795, 0.983, 0.9859, 0.9884, 0.9905, 0.9922, 0.9937, 0.9949, 1);
+    /* push: 0.46s, bounce 0 — navigation never bounces */
+    --spring-push: linear(0, 0.0162, 0.0573, 0.114, 0.1796, 0.2494, 0.3198, 0.3885, 0.4539, 0.5152, 0.5717, 0.6232, 0.6698, 0.7116, 0.7489, 0.782, 0.8111, 0.8368, 0.8592, 0.8788, 0.8958, 0.9106, 0.9234, 0.9345, 0.944, 0.9522, 0.9592, 0.9653, 0.9704, 0.9749, 0.9786, 0.9819, 0.9846, 0.987, 0.989, 0.9907, 0.9921, 0.9933, 0.9944, 0.9952, 1);
+    /* press: 0.28s, bounce 0.30 */
+    --spring-press: linear(0, 0.0145, 0.0531, 0.1095, 0.1783, 0.2547, 0.335, 0.4162, 0.4957, 0.5717, 0.6429, 0.7084, 0.7676, 0.8202, 0.8662, 0.9059, 0.9394, 0.9673, 0.9899, 1.0078, 1.0216, 1.0318, 1.0388, 1.0432, 1.0455, 1.046, 1.0451, 1.0431, 1.0404, 1.0372, 1.0336, 1.0299, 1.0262, 1.0225, 1.0191, 1.0158, 1.0129, 1.0102, 1.0079, 1.0058, 1);
+  }
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #000000;
-    --foreground: #f2f2f7;
-    --surface: #1c1c1e;
-    --surface-elevated: #242426;
-    --border-subtle: rgba(255, 255, 255, 0.12);
+    --bg: #000000;
+    --cell: #1c1c1e;
+    --cell-2: #2c2c2e;
+    --pressed: #2c2c2e;
+    --bg-elevated: #1c1c1e;
+    --cell-elevated: #2c2c2e;
+    --pressed-elevated: #3a3a3c;
 
-    --accent: var(--brand-solid);
-    --accent-foreground: var(--brand-fg);
+    --label: #ffffff;
+    --label-2: rgba(235, 235, 245, 0.6);
+    --label-3: rgba(235, 235, 245, 0.3);
+    --label-4: rgba(235, 235, 245, 0.16);
+    --separator: rgba(84, 84, 88, 0.6);
 
-    --success: #30d158;
-    --danger: #ff453a;
-    --warning: #ff9f0a;
+    --fill: rgba(120, 120, 128, 0.36);
+    --fill-2: rgba(120, 120, 128, 0.32);
+    --fill-3: rgba(118, 118, 128, 0.24);
+    --fill-4: rgba(118, 118, 128, 0.18);
 
-    --glass-bg: rgba(28, 28, 30, 0.55);
-    --glass-bg-strong: rgba(28, 28, 30, 0.75);
-    --glass-border: rgba(255, 255, 255, 0.14);
-    --glass-highlight: rgba(255, 255, 255, 0.16);
-    --glass-shadow: rgba(0, 0, 0, 0.4);
+    --blue: #0091ff;
+    --green: #30d158;
+    --red: #ff4245;
+    --orange: #ff9230;
+    --yellow: #ffd600;
+    --indigo: #6d7cff;
+    --purple: #db34f2;
+    --teal: #00d2e0;
+    --cyan: #3cd3fe;
+    --mint: #00dac3;
+    --pink: #ff375f;
+    --brown: #b78a66;
 
-    /* Canonical semantic scale — dark (iOS ramp, white base) */
-    --text-primary: rgba(255, 255, 255, 0.95);
-    --text-secondary: rgba(235, 235, 245, 0.6);
-    --text-tertiary: rgba(235, 235, 245, 0.3);
-    --text-quaternary: rgba(235, 235, 245, 0.18);
+    --pos: #30d158;
+    --neg: #ff6961;
+    --warn: #ffb340;
 
-    --fill: rgba(255, 255, 255, 0.09);
-    --fill-soft: rgba(255, 255, 255, 0.05);
+    --glass-bg: rgba(38, 38, 42, 0.72);
+    --glass-thick: rgba(36, 36, 40, 0.94);
+    --glass-rim: rgba(0, 0, 0, 0.55);
+    --glass-spec: rgba(255, 255, 255, 0.16);
+    --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.4);
+    --lens: rgba(255, 255, 255, 0.12);
+    --dim: rgba(0, 0, 0, 0.5);
+    --sheet-shadow: 0 -2px 24px rgba(0, 0, 0, 0.5);
+  }
+}
 
-    --brand: #a5b4fc;          /* indigo-300 — legible on dark */
-    --brand-solid: #6366f1;    /* indigo-500 — filled buttons */
-    --brand-fg: #ffffff;
+/* Glass must stay legible with the iOS transparency slider at "tinted", and
+   with no blur at all. */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: var(--cell);
+    --glass-thick: var(--cell);
+    --glass-blur: 0px;
+  }
+}
 
-    --tint-accent: rgba(129, 140, 248, 0.18);
-    --tint-accent-2: rgba(129, 140, 248, 0.26);
-    --tint-success: rgba(48, 209, 88, 0.20);
-    --tint-success-soft: rgba(48, 209, 88, 0.12);
-    --tint-danger: rgba(255, 69, 58, 0.20);
-    --tint-danger-soft: rgba(255, 69, 58, 0.12);
-    --tint-warning: rgba(255, 159, 10, 0.20);
-
-    --pos: #4ade80;
-    --neg: #ff6b6b;
-
-    /* Elevation — deeper on dark so surfaces still read */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.5);
-    --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), 0 16px 36px -24px rgba(0, 0, 0, 0.6);
-    --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.6);
+@media (prefers-contrast: more) {
+  :root {
+    --label-2: rgba(60, 60, 67, 0.85);
+    --separator: rgba(60, 60, 67, 0.5);
+    --glass-rim: rgba(0, 0, 0, 0.3);
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root {
+    --label-2: rgba(235, 235, 245, 0.85);
+    --separator: rgba(84, 84, 88, 0.9);
   }
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-  --color-surface-elevated: var(--surface-elevated);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-success: var(--success);
-  --color-danger: var(--danger);
-  --color-warning: var(--warning);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-bg: var(--bg);
+  --color-cell: var(--cell);
+  --color-cell-2: var(--cell-2);
+  --color-label: var(--label);
+  --color-label-2: var(--label-2);
+  --color-label-3: var(--label-3);
+  --color-label-4: var(--label-4);
+  --color-separator: var(--separator);
+  --color-fill: var(--fill);
+  --color-fill-2: var(--fill-2);
+  --color-fill-3: var(--fill-3);
+  --color-fill-4: var(--fill-4);
+  --color-tint: var(--tint);
+  --color-pos: var(--pos);
+  --color-neg: var(--neg);
+  --color-warn: var(--warn);
+  --color-sys-blue: var(--blue);
+  --color-sys-green: var(--green);
+  --color-sys-red: var(--red);
+  --color-sys-orange: var(--orange);
+  --color-sys-indigo: var(--indigo);
+  --font-sans: var(--font);
 }
 
-html {
-  background: var(--background);
-  color-scheme: light dark;
-  /* Full-height chain for dvh-backed sheets; env() needs viewport-fit=cover
-     (set in layout viewport) to resolve to non-zero on iOS. */
-  height: 100%;
-}
+/* Element defaults live in the base layer, after Tailwind's preflight, so
+   any utility class can still override them. */
+@layer base {
+  /* ==========================================================================
+     Base
+     ========================================================================== */
 
-/* Synced from window.visualViewport by PwaBootstrap. Tracks the keyboard and
-   Safari chrome so fixed overlays (sheets, chat) size to what's actually
-   visible instead of what 100vh claims. Falls back to dynamic viewport. */
-:root {
-  --app-height: 100dvh;
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    var(--font-sans), "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
-  /* Tabular numerals app-wide: amounts never shift width while scrolling or
-     typing, the way currency figures behave on iOS. */
-  font-variant-numeric: tabular-nums;
-  /* Stop rubber-band chaining the page behind sheets/modals on iOS. Inner
-     scrollers keep their own momentum via .scroll-momentum. */
-  overscroll-behavior-y: none;
-}
-
-/* iOS tap snappiness: no double-tap-zoom wait on controls. Inputs are
-   excluded so pinch-zoom and text selection keep working. */
-button,
-a,
-[role="button"] {
-  touch-action: manipulation;
-}
-
-/* iOS form controls are sized at 16px+ at the component level (auto-zoom
-   starts below 16px). No global guard here on purpose: one would also shrink
-   the large amount heroes. Keep every input/select/textarea ≥16px. */
-
-/* ==========================================================================
-   Keyboard focus — a single, visible ring across every interactive control.
-   :focus-visible keeps mouse/touch focus clean; the outline follows each
-   element's border-radius and is not clipped by overflow-hidden.
-   ========================================================================== */
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible,
-textarea:focus-visible,
-[role="button"]:focus-visible,
-[tabindex]:not([tabindex="-1"]):focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-/* ==========================================================================
-   Liquid Glass material — the core reusable surface for floating chrome
-   (top bars, tab bars, modals, floating action buttons). Never apply to
-   content lists/cards; those use the plain --surface token instead.
-   ========================================================================== */
-
-.glass {
-  position: relative;
-  background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  border: 0.5px solid var(--glass-border);
-  box-shadow:
-    0 1px 2px var(--glass-shadow),
-    0 8px 24px -8px var(--glass-shadow),
-    inset 0 1px 0 var(--glass-highlight);
-}
-
-.glass-strong {
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(28px) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(28px) saturate(var(--glass-saturate));
-}
-
-/* ==========================================================================
-   Sheet — the surface for modals and bottom sheets.
-
-   Deliberately OPAQUE, unlike .glass. Sheets carry the densest text in the app
-   (amounts, member names, ledger rows), and a translucent panel let whatever
-   was underneath show through and wreck the contrast. Glass stays for chrome
-   that floats over content it doesn't need to be read against: top bar, tab
-   bar, FAB.
-   ========================================================================== */
-.sheet {
-  background: var(--surface-elevated);
-  border: 0.5px solid var(--border-subtle);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    0 -16px 44px -20px rgba(0, 0, 0, 0.35);
-}
-
-/* Fallback for browsers without backdrop-filter support */
-@supports not (backdrop-filter: blur(1px)) {
-  .glass,
-  .glass-strong {
-    background: var(--glass-bg-strong);
+  html {
+    background: var(--bg);
+    height: 100%;
+    -webkit-text-size-adjust: 100%;
   }
+
+  body {
+    /* Transparent on purpose: the html background paints the canvas, and an
+       opaque body box would cover the navigation-transition ghost that sits
+       beneath an incoming screen. */
+    background: transparent;
+    color: var(--label);
+    font-family: var(--font);
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.43px;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    /* Money never changes width while scrolling or typing. */
+    font-variant-numeric: tabular-nums;
+    /* Stop rubber-band chaining behind sheets; inner scrollers keep momentum. */
+    overscroll-behavior-y: none;
+    min-height: 100%;
+  }
+
+  button,
+  a,
+  [role="button"],
+  label {
+    touch-action: manipulation;
+  }
+
+  button {
+    font: inherit;
+    letter-spacing: inherit;
+    color: inherit;
+  }
+
+  /* One visible keyboard ring for every control; touch and mouse stay clean. */
+  :where(button, a, input, select, textarea, [role="button"], [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--tint);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--tint) 28%, transparent);
+  }
+
+  /* Every field is ≥ 16px: iOS zooms into anything smaller on focus. */
+  input,
+  textarea,
+  select {
+    font: inherit;
+    font-size: 17px;
+    letter-spacing: -0.43px;
+    color: var(--label);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--label-3);
+    opacity: 1;
+  }
+
 }
 
-/* ==========================================================================
-   Liquid Glass tab capsule (iOS 26 floating tab bar).
-   Frost + refractive rim + top sheen, pure CSS: SVG-displacement refraction
-   only works in Chromium, and this app's audience is Safari — so the depth
-   comes from the rim light, not a displacement filter. The blur is fenced
-   with contain+isolate so it never repaints the page (INP-safe).
-   ========================================================================== */
-.liquid-tab {
-  position: relative;
-  isolation: isolate;
-  contain: layout paint;
-  border-radius: 999px;
-  /* Frosted, not clear: Apple moved bars more opaque in the iOS 26 betas
-     because translucent bars wash out over content. */
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
-  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.55),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18),
-    inset 1px 0 1px rgba(255, 255, 255, 0.12),
-    inset -1px 0 1px rgba(255, 255, 255, 0.12),
-    0 20px 44px -20px rgba(0, 0, 0, 0.5);
-}
-.liquid-tab::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
-  pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.28) 0%,
-    rgba(255, 255, 255, 0.05) 30%,
-    transparent 55%
-  );
-  mix-blend-mode: screen;
-}
-@media (prefers-color-scheme: dark) {
-  .liquid-tab {
-    background: rgba(28, 28, 30, 0.66);
-    border-color: rgba(255, 255, 255, 0.14);
+/* Kit classes live in the components layer: utilities always win, so a
+   one-off `text-*` or `bg-*` on a kit element behaves the way it reads. */
+@layer components {
+  /* ==========================================================================
+     Typography (SF Pro text styles)
+     ========================================================================== */
+
+  .t-large-title { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: 0.37px; }
+  .t-title1 { font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: 0.36px; }
+  .t-title2 { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -0.26px; }
+  .t-title3 { font-size: 20px; line-height: 25px; font-weight: 600; letter-spacing: -0.45px; }
+  .t-headline { font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.43px; }
+  .t-body { font-size: 17px; line-height: 22px; font-weight: 400; letter-spacing: -0.43px; }
+  .t-callout { font-size: 16px; line-height: 21px; font-weight: 400; letter-spacing: -0.31px; }
+  .t-subhead { font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: -0.23px; }
+  .t-footnote { font-size: 13px; line-height: 18px; font-weight: 400; letter-spacing: -0.08px; }
+  .t-caption { font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: 0; }
+  .t-caption2 { font-size: 11px; line-height: 13px; font-weight: 500; letter-spacing: 0.06px; }
+
+  /* Rounded figures for money, the way Wallet and Apple Cash set amounts. */
+  .num {
+    font-family: var(--font-rounded);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+  }
+
+  /* ==========================================================================
+     Liquid Glass — navigation layer only
+     ========================================================================== */
+
+  .glass {
+    background: var(--glass-bg);
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+    backdrop-filter: blur(var(--glass-blur)) saturate(190%);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.06),
-      0 20px 44px -20px rgba(0, 0, 0, 0.8);
+      inset 0 1px 0.5px var(--glass-spec),
+      0 0 0 0.5px var(--glass-rim),
+      var(--glass-shadow);
   }
-  .liquid-tab::after {
+  .glass-thick {
+    background: var(--glass-thick);
+    -webkit-backdrop-filter: blur(calc(var(--glass-blur) + 10px)) saturate(190%);
+    backdrop-filter: blur(calc(var(--glass-blur) + 10px)) saturate(190%);
+    box-shadow:
+      inset 0 1px 0.5px var(--glass-spec),
+      0 0 0 0.5px var(--glass-rim),
+      var(--glass-shadow);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .glass,
+    .glass-thick {
+      background: var(--glass-thick);
+    }
+  }
+
+  /* ==========================================================================
+     Screen + navigation bar
+     ========================================================================== */
+
+  .screen {
+    position: relative;
+    min-height: 100dvh;
+    /* A screen sliding in sits up to a full width off to the side. Without
+       this, that transformed overflow counts as page width: mobile browsers
+       widen the layout viewport mid-push (Chromium even re-zooms), and the
+       visual viewport is left at the old scroll offset after Next resets it.
+       `clip` (not hidden) so the screen doesn't become a scroll container. */
+    overflow-x: clip;
+  }
+
+  .screen-body {
+    position: relative;
+    min-height: 100dvh;
+    background: var(--bg);
+    padding-top: var(--nav-total);
+    padding-bottom: calc(var(--sab) + 32px);
+    padding-left: calc(var(--margin) + var(--sal));
+    padding-right: calc(var(--margin) + var(--sar));
+  }
+  .screen-body.has-tabbar {
+    padding-bottom: var(--content-bottom);
+  }
+  .screen-inner {
+    max-width: var(--content-max);
+    margin: 0 auto;
+  }
+
+  /* Full-height screens that scroll internally (the conversation). */
+  .screen-fixed {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+  }
+  .screen-fixed > .nav-bar {
+    position: absolute;
+  }
+  /* Tracks the visual viewport, so the composer rides above an iOS keyboard and
+     the header stays put when Safari pans the page. */
+  .screen-fixed.is-viewport {
+    top: var(--vv-top, 0px);
+    bottom: var(--kb-inset, 0px);
+  }
+
+  /* "Add to Home Screen" hint: a glass card riding above the tab bar. */
+  .install-hint {
+    position: fixed;
+    z-index: 45;
+    left: calc(12px + var(--sal));
+    right: calc(12px + var(--sar));
+    bottom: calc(var(--tab-bottom) + var(--tab-h) + 12px);
+    max-width: 460px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 6px 10px 12px;
+    border-radius: 22px;
+  }
+
+  .nav-bar {
+    position: fixed;
+    z-index: 30;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--nav-total);
+    padding: var(--nav-top) calc(var(--margin) + var(--sar)) 0 calc(var(--margin) + var(--sal));
+    pointer-events: none;
+  }
+  /* Scroll-edge effect: an opaque-to-clear wash under the bar once content
+     scrolls beneath it, so rows never collide with the glass buttons. */
+  .nav-bar::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 -22px 0;
     background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.12) 0%,
-      rgba(255, 255, 255, 0.02) 30%,
-      transparent 55%
+      to bottom,
+      var(--bg) 0%,
+      var(--bg) 60%,
+      color-mix(in srgb, var(--bg) 70%, transparent) 80%,
+      color-mix(in srgb, var(--bg) 0%, transparent) 100%
     );
+    opacity: 0;
+    transition: opacity 0.25s ease;
+    pointer-events: none;
   }
-}
-/* Solid when transparency is reduced or blur is unavailable. */
-@media (prefers-reduced-transparency: reduce) {
-  .liquid-tab {
-    background: var(--surface);
+  .nav-bar[data-scrolled="true"]::before {
+    opacity: 1;
   }
-  .liquid-tab::after {
+  .nav-bar-row {
+    position: relative;
+    height: var(--nav-h);
+    max-width: calc(var(--content-max) + 8px);
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: minmax(44px, 1fr) auto minmax(44px, 1fr);
+    align-items: center;
+    gap: 8px;
+  }
+  .nav-bar-row > * {
+    pointer-events: auto;
+  }
+  .nav-leading { display: flex; align-items: center; gap: 8px; justify-self: start; min-width: 0; }
+  .nav-trailing { display: flex; align-items: center; gap: 8px; justify-self: end; min-width: 0; }
+  .nav-title {
+    font-size: 17px;
+    line-height: 22px;
+    font-weight: 600;
+    letter-spacing: -0.43px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60vw;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.3s var(--spring-snappy);
+  }
+  .nav-bar[data-inline-title="hidden"] .nav-title {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  .large-title {
+    padding: 2px 4px 10px;
+    overflow-wrap: anywhere;
+  }
+  .large-title-sub {
+    padding: 0 4px 14px;
+    margin-top: -6px;
+  }
+
+  /* Glass bar buttons: circles for glyphs, capsules for words. */
+  .bar-btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 44px;
+    min-width: 44px;
+    border-radius: 999px;
+    color: var(--label);
+    transition: transform var(--dur-press) var(--spring-press), opacity 0.2s ease;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .bar-btn.is-text {
+    padding: 0 16px;
+    font-size: 17px;
+    font-weight: 500;
+  }
+  .bar-btn.is-prominent {
+    background: var(--tint);
+    color: var(--on-tint);
+    box-shadow: inset 0 1px 0.5px rgba(255, 255, 255, 0.35), 0 6px 16px color-mix(in srgb, var(--tint) 35%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .bar-btn:active {
+    transform: scale(0.9);
+    transition-duration: 80ms;
+  }
+  .bar-btn:disabled,
+  .bar-btn[aria-disabled="true"] {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .bar-btn-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--red);
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+    font-weight: 700;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--bg);
+  }
+
+  /* ==========================================================================
+     Inset-grouped lists
+     ========================================================================== */
+
+  .section {
+    margin-top: 28px;
+  }
+  .section:first-child,
+  .section.is-tight {
+    margin-top: 12px;
+  }
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 16px 7px;
+    font-size: 13px;
+    line-height: 18px;
+    letter-spacing: -0.08px;
+    text-transform: uppercase;
+    color: var(--label-2);
+  }
+  .section-header.is-prominent {
+    text-transform: none;
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 700;
+    letter-spacing: -0.26px;
+    color: var(--label);
+    padding: 0 4px 10px;
+  }
+  .section-header-action {
+    text-transform: none;
+    font-size: 15px;
+    letter-spacing: -0.23px;
+    color: var(--tint);
+    font-weight: 400;
+  }
+  .section-footer {
+    padding: 7px 16px 0;
+    font-size: 13px;
+    line-height: 18px;
+    letter-spacing: -0.08px;
+    color: var(--label-2);
+  }
+
+  .card {
+    position: relative;
+    background: var(--cell);
+    border-radius: var(--radius-card);
+    overflow: hidden;
+    isolation: isolate;
+  }
+  .sheet-panel .card {
+    background: var(--cell-elevated);
+  }
+
+  .row {
+    --sep-inset: 16px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    padding: 11px 16px;
+    text-align: left;
+    color: var(--label);
+    background: transparent;
+    transition: background-color 0.4s ease;
+  }
+  .row.is-tall {
+    min-height: 60px;
+  }
+  /* Hairlines between the rows of a list card, inset to the text column (each
+     row sets --sep-inset to clear its leading tile or avatar). Only `.list`
+     cards get them, so stat cards never grow stray dividers. */
+  .list > * {
+    position: relative;
+  }
+  .list > * + *::before {
+    content: "";
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    left: var(--sep-inset, 16px);
+    right: 0;
+    height: 0.5px;
+    background: var(--separator);
+    pointer-events: none;
+  }
+  .row.is-pressable {
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Press = an immediate flash that fades on release. Rows never scale. */
+  .row.is-pressable:active {
+    background-color: var(--pressed);
+    transition-duration: 0s;
+  }
+  .sheet-panel .row.is-pressable:active {
+    background-color: var(--pressed-elevated);
+  }
+  .row-main {
+    min-width: 0;
+    flex: 1;
+  }
+  .row-title {
+    display: block;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.43px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-subtitle {
+    display: block;
+    margin-top: 1px;
+    font-size: 15px;
+    line-height: 20px;
+    letter-spacing: -0.23px;
+    color: var(--label-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-subtitle.is-wrap,
+  .row-title.is-wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .row-detail {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    line-height: 18px;
+    letter-spacing: -0.08px;
+    color: var(--label-2);
+  }
+  .row-value {
+    flex-shrink: 0;
+    max-width: 55%;
+    text-align: right;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.43px;
+    color: var(--label-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-chevron {
+    flex-shrink: 0;
+    margin-left: -4px;
+    margin-right: -4px;
+    color: var(--label-3);
+  }
+  .row.is-action .row-title {
+    color: var(--tint);
+  }
+  .row.is-destructive .row-title {
+    color: var(--red);
+  }
+  .row.is-centered {
+    justify-content: center;
+  }
+  .row.is-centered .row-title {
+    text-align: center;
+  }
+  .row[aria-disabled="true"],
+  .row:disabled {
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  /* Leading elements */
+  .tile {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-tile);
+    color: #fff;
+  }
+  .tile.is-lg {
+    width: 40px;
+    height: 40px;
+    border-radius: 11px;
+  }
+  .tile.is-xl {
+    width: 56px;
+    height: 56px;
+    border-radius: 15px;
+  }
+  .avatar {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    overflow: hidden;
+    font-weight: 600;
+    color: #fff;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .avatar > img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .avatar-stack {
+    display: inline-flex;
+    align-items: center;
+  }
+  .avatar-stack > * + * {
+    margin-left: -8px;
+  }
+  .avatar-stack > * {
+    box-shadow: 0 0 0 2px var(--bg);
+  }
+
+  /* Status capsule: tinted, sparing. */
+  .capsule {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0;
+    white-space: nowrap;
+  }
+  .capsule.is-tint { background: color-mix(in srgb, var(--tint) 15%, transparent); color: var(--tint); }
+  .capsule.is-green { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--pos); }
+  .capsule.is-red { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--neg); }
+  .capsule.is-orange { background: color-mix(in srgb, var(--orange) 18%, transparent); color: var(--warn); }
+  .capsule.is-gray { background: var(--fill-3); color: var(--label-2); }
+
+  .dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    flex-shrink: 0;
+  }
+
+  /* ==========================================================================
+     Controls
+     ========================================================================== */
+
+  .btn {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 50px;
+    padding: 0 22px;
+    border-radius: 999px;
+    font-size: 17px;
+    line-height: 22px;
+    font-weight: 600;
+    letter-spacing: -0.43px;
+    white-space: nowrap;
+    transition: transform var(--dur-press) var(--spring-press), opacity 0.2s ease, background-color 0.2s ease;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .btn:active {
+    transform: scale(0.97);
+    transition-duration: 80ms;
+  }
+  .btn.is-block { width: 100%; }
+  .btn.is-sm {
+    height: 34px;
+    padding: 0 14px;
+    font-size: 15px;
+    letter-spacing: -0.23px;
+  }
+  .btn.is-md {
+    height: 44px;
+    padding: 0 18px;
+  }
+  .btn-prominent { background: var(--tint); color: var(--on-tint); }
+  .btn-tinted { background: color-mix(in srgb, var(--tint) 15%, transparent); color: var(--tint); }
+  .btn-gray { background: var(--fill-3); color: var(--label); }
+  .btn-plain { background: transparent; color: var(--tint); }
+  .btn-destructive { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--neg); }
+  .btn-destructive-prominent { background: var(--red); color: #fff; }
+  .btn-success { background: var(--green); color: #fff; }
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    background: var(--fill-3);
+    color: var(--label-3);
+    pointer-events: none;
+  }
+  .btn.is-busy {
+    pointer-events: none;
+    opacity: 0.7;
+  }
+
+  /* Segmented control: sliding thumb, max four short segments. */
+  .segmented {
+    position: relative;
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    height: 36px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--fill-3);
+    isolation: isolate;
+  }
+  .segmented-thumb {
+    position: absolute;
+    z-index: -1;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    border-radius: 999px;
+    background: var(--cell-elevated);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+    transition: transform var(--dur-snappy) var(--spring-snappy);
+  }
+  @media (prefers-color-scheme: dark) {
+    .segmented-thumb { background: #636366; }
+  }
+  .segmented-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 0;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 14px;
+    line-height: 18px;
+    font-weight: 500;
+    letter-spacing: -0.15px;
+    color: var(--label);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: opacity 0.2s ease;
+  }
+  .segmented-item[aria-selected="true"] {
+    font-weight: 600;
+  }
+  .segmented-item:active {
+    opacity: 0.6;
+  }
+  .segmented-count {
+    font-variant-numeric: tabular-nums;
+    color: var(--label-2);
+    font-weight: 500;
+  }
+
+  /* Switch (iOS 26: capsule thumb that stretches under the finger). */
+  .switch {
+    position: relative;
+    flex-shrink: 0;
+    width: 64px;
+    height: 28px;
+    border-radius: 999px;
+    background: var(--fill);
+    transition: background-color 0.25s ease;
+  }
+  .switch[aria-checked="true"] {
+    background: var(--green);
+  }
+  .switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 38px;
+    height: 24px;
+    border-radius: 999px;
+    background: #fff;
+    box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.16);
+    transition: transform var(--dur-snappy) var(--spring-snappy), width var(--dur-snappy) var(--spring-snappy);
+  }
+  .switch[aria-checked="true"] .switch-thumb {
+    transform: translateX(22px);
+  }
+  .switch:active .switch-thumb {
+    width: 44px;
+  }
+  .switch[aria-checked="true"]:active .switch-thumb {
+    transform: translateX(16px);
+  }
+  .switch:disabled {
+    opacity: 0.5;
+  }
+
+  /* Fields: the row is the field — no borders. */
+  .field {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    padding: 0;
+    font-size: 17px;
+    line-height: 22px;
+  }
+  .field:focus-visible {
+    outline: none;
+  }
+  .field.is-right {
+    text-align: right;
+  }
+  textarea.field {
+    resize: none;
+  }
+
+  /* iOS 26 search field: a capsule. */
+  .search-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 999px;
+    background: var(--fill-3);
+    color: var(--label-2);
+  }
+  .search-field input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    background: transparent;
+    border: 0;
+    outline: none;
+  }
+  .search-field input::-webkit-search-cancel-button {
     display: none;
   }
-}
 
-/* Viewport-stable sheet cap: 88vh jumps when Safari chrome shows/hides;
-   dvh tracks it, and --app-height (visualViewport-synced) tracks the keyboard
-   too. Order matters — capable engines use the last declaration they parse. */
-.sheet-viewport {
-  max-height: 88vh;
-  max-height: 88dvh;
-  max-height: calc(var(--app-height, 100dvh) * 0.88);
-}
-
-/* Specular highlight sweep used on primary glass buttons/pills */
-.glass-specular {
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.35) 0%,
-    rgba(255, 255, 255, 0.05) 35%,
-    rgba(255, 255, 255, 0) 60%
-  );
-  pointer-events: none;
-}
-
-@media (prefers-color-scheme: dark) {
-  .glass-specular {
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.12) 0%,
-      rgba(255, 255, 255, 0.02) 35%,
-      rgba(255, 255, 255, 0) 60%
-    );
+  .meter {
+    position: relative;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--fill-3);
+    overflow: hidden;
   }
-}
+  .meter > span {
+    position: absolute;
+    inset: 0 auto 0 0;
+    border-radius: 999px;
+    background: var(--green);
+    transition: width var(--dur-smooth) var(--spring-smooth);
+  }
 
-/* Press feedback: instant scale + dim, never a colour change — the control
-   reacts the moment the finger lands, which is what makes it feel direct. */
-.tap-shrink {
-  transition: transform var(--dur-instant) cubic-bezier(0.34, 1.56, 0.64, 1), opacity var(--dur-instant) ease;
-}
-.tap-shrink:active {
-  transform: scale(0.96);
-  opacity: 0.85;
-}
+  /* Hero amount block used by summaries and money sheets. */
+  .amount-hero {
+    font-family: var(--font-rounded);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.05;
+  }
 
-/* Smooth iOS-like momentum scrolling */
-.scroll-momentum {
-  -webkit-overflow-scrolling: touch;
-}
+  /* ==========================================================================
+     Empty states & skeletons
+     ========================================================================== */
 
-@keyframes glass-modal-in {
-  from {
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 44px 24px;
+    gap: 6px;
+  }
+  .empty-state-glyph {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    margin-bottom: 10px;
+    border-radius: 999px;
+    background: var(--fill-4);
+    color: var(--label-2);
+  }
+
+  .skeleton {
+    background: var(--fill-3);
+    border-radius: 8px;
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  /* ==========================================================================
+     Tab bar — floating Liquid Glass capsule, navigation only
+     ========================================================================== */
+
+  .tab-bar {
+    position: fixed;
+    z-index: 50;
+    left: calc(20px + var(--sal));
+    right: calc(20px + var(--sar));
+    bottom: var(--tab-bottom);
+    max-width: 460px;
+    margin: 0 auto;
+    height: var(--tab-h);
+    border-radius: 999px;
+    padding: 4px;
+    isolation: isolate;
+    contain: layout paint;
+  }
+  .tab-bar-items {
+    position: relative;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    height: 100%;
+  }
+  .tab-lens {
+    position: absolute;
+    z-index: -1;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    border-radius: 999px;
+    background: var(--lens);
+    transition: transform var(--dur-snappy) var(--spring-snappy);
+  }
+  .tab-item {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    border-radius: 999px;
+    color: var(--label);
+    -webkit-user-select: none;
+    user-select: none;
+    transition: transform var(--dur-press) var(--spring-press), color 0.2s ease;
+  }
+  .tab-item[aria-current="page"] {
+    color: var(--tint);
+  }
+  .tab-item:active {
+    transform: scale(0.92);
+    transition-duration: 80ms;
+  }
+  .tab-item svg {
+    transition: transform var(--dur-bouncy) var(--spring-bouncy);
+  }
+  .tab-item[aria-current="page"] svg {
+    transform: scale(1.06);
+  }
+  .tab-item-label {
+    max-width: 100%;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tab-badge {
+    position: absolute;
+    top: -3px;
+    right: -6px;
+    min-width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: var(--red);
+    box-shadow: 0 0 0 2px var(--glass-thick);
+  }
+  .tab-bar.is-leaving {
+    animation: tab-bar-out var(--dur-push) var(--spring-push) both;
+    pointer-events: none;
+  }
+  .tab-bar.is-entering {
+    animation: tab-bar-in var(--dur-push) var(--spring-push) both;
+  }
+
+  /* ==========================================================================
+     Sheets
+     ========================================================================== */
+
+  .sheet-root {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .sheet-backdrop {
+    position: absolute;
+    inset: 0;
+    background: var(--dim);
+    animation: fade-in 0.3s ease both;
+  }
+  .sheet-root[data-state="closing"] .sheet-backdrop {
+    animation: fade-out 0.28s ease both;
+  }
+  .sheet-root.is-large {
+    align-items: flex-start;
+  }
+  .sheet-panel {
+    --sheet-inset: 8px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: calc(100% - 2 * var(--sheet-inset) - var(--sal) - var(--sar));
+    max-width: 560px;
+    /* Rides above an iOS keyboard (PwaBootstrap measures the overlap). */
+    margin-bottom: max(var(--sheet-inset), calc(var(--sab) - 4px), calc(var(--kb-inset, 0px) + 8px));
+    max-height: calc(var(--app-height, 100dvh) - var(--nav-top) - 24px);
+    border-radius: var(--radius-sheet);
+    background: var(--bg-elevated);
+    box-shadow: var(--sheet-shadow);
+    overflow: hidden;
+    animation: sheet-in var(--dur-sheet) var(--spring-sheet) both;
+    will-change: transform;
+  }
+  .sheet-panel.is-large {
+    --sheet-inset: 0px;
+    width: 100%;
+    margin-top: calc(var(--nav-top) + 10px);
+    margin-bottom: 0;
+    /* Top-anchored and sized to the visible viewport: the keyboard shortens the
+       sheet instead of covering its fields. */
+    height: calc(var(--app-height, 100dvh) - var(--nav-top) - 10px);
+    max-height: none;
+    border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  }
+  .sheet-root[data-state="closing"] .sheet-panel {
+    animation: sheet-out 0.3s var(--ease-ios) both;
+  }
+  .sheet-panel.is-dragging {
+    animation: none;
+    transition: none;
+  }
+  .sheet-panel.is-settling {
+    animation: none;
+    transition: transform var(--dur-snappy) var(--spring-snappy);
+  }
+  @media (min-width: 700px) {
+    .sheet-root {
+      align-items: center;
+    }
+    .sheet-panel,
+    .sheet-panel.is-large {
+      --sheet-inset: 16px;
+      width: 100%;
+      max-width: 520px;
+      height: auto;
+      max-height: min(780px, calc(100dvh - 64px));
+      margin-bottom: 0;
+      border-radius: var(--radius-sheet);
+    }
+  }
+  .sheet-grabber {
+    position: absolute;
+    top: 5px;
+    left: 50%;
+    width: 36px;
+    height: 5px;
+    margin-left: -18px;
+    border-radius: 999px;
+    background: var(--label-3);
+    opacity: 0.7;
+  }
+  .sheet-header {
+    position: relative;
+    flex-shrink: 0;
+    display: grid;
+    grid-template-columns: minmax(44px, 1fr) minmax(0, auto) minmax(44px, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 16px 16px 8px;
+    touch-action: none;
+    cursor: grab;
+  }
+  .sheet-title {
+    min-width: 0;
+    max-width: 62vw;
+    text-align: center;
+  }
+  .sheet-title > :first-child {
+    display: block;
+    font-size: 17px;
+    line-height: 22px;
+    font-weight: 600;
+    letter-spacing: -0.43px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sheet-title > :nth-child(2) {
+    display: block;
+    font-size: 13px;
+    line-height: 16px;
+    color: var(--label-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .sheet-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 16px calc(20px + var(--sab));
+  }
+  .sheet-panel:not(.is-large) .sheet-body {
+    padding-bottom: 20px;
+  }
+  /* Content scrolling under the pinned buttons fades out (the scroll-edge
+     effect) instead of being sliced off at a hard line. The extra padding
+     lets the last line scroll clear of the fade. */
+  .sheet-panel .sheet-body.has-footer {
+    padding-bottom: 28px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+    mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
+  }
+  .sheet-footer {
+    flex-shrink: 0;
+    padding: 8px 16px max(16px, var(--sab));
+    background: var(--bg-elevated);
+  }
+  .sheet-panel:not(.is-large) .sheet-footer {
+    padding-bottom: 16px;
+  }
+
+
+  /* ==========================================================================
+     Action sheet (confirmations)
+     ========================================================================== */
+
+  .action-sheet {
+    position: relative;
+    width: calc(100% - 16px - var(--sal) - var(--sar));
+    max-width: 440px;
+    margin-bottom: max(8px, calc(var(--sab) - 4px));
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    animation: sheet-in var(--dur-sheet) var(--spring-sheet) both;
+  }
+  .sheet-root[data-state="closing"] .action-sheet {
+    animation: sheet-out 0.28s var(--ease-ios) both;
+  }
+  .action-group {
+    border-radius: 28px;
+    overflow: hidden;
+  }
+  .action-head {
+    padding: 16px 20px 14px;
+    text-align: center;
+  }
+  .action-btn {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 56px;
+    padding: 0 20px;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.43px;
+    color: var(--tint);
+    transition: background-color 0.35s ease;
+  }
+  .action-btn::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 0.5px;
+    background: var(--separator);
+  }
+  .action-btn:active {
+    background: var(--fill-3);
+    transition-duration: 0s;
+  }
+  .action-group > .action-btn:first-child::before { display: none; }
+  .action-btn.is-destructive { color: var(--red); }
+  .action-btn.is-cancel { font-weight: 600; }
+  .action-btn.is-cancel::before { display: none; }
+  .action-btn:disabled { opacity: 0.45; }
+
+  /* ==========================================================================
+     Menus — glass panels that spring out of their trigger's corner
+     ========================================================================== */
+
+  .menu-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+  }
+  .menu-panel {
+    position: fixed;
+    width: 254px;
+    max-height: calc(var(--app-height, 100dvh) - 24px);
+    overflow-y: auto;
+    padding: 6px 0;
+    border-radius: 24px;
+    animation: menu-in var(--dur-snappy) var(--spring-snappy) both;
+  }
+  .menu-layer[data-state="closing"] .menu-panel {
+    animation: menu-out 0.14s ease both;
+  }
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 46px;
+    padding: 0 16px 0 14px;
+    text-align: left;
+    font-size: 17px;
+    line-height: 22px;
+    letter-spacing: -0.43px;
+    color: var(--label);
+    transition: background-color 0.25s ease;
+  }
+  .menu-item:active,
+  .menu-item:focus-visible {
+    background: var(--fill-3);
+    transition-duration: 0s;
+    outline: none;
+  }
+  .menu-item.is-destructive { color: var(--red); }
+  .menu-item:disabled { opacity: 0.4; }
+  .menu-check {
+    flex-shrink: 0;
+    width: 18px;
+    display: inline-flex;
+    justify-content: center;
+  }
+  .menu-item-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .menu-item-sub {
+    display: block;
+    font-size: 13px;
+    line-height: 16px;
+    color: var(--label-2);
+  }
+  .menu-sep {
+    height: 8px;
+    margin: 2px 0;
+    background: var(--fill-4);
+  }
+  .menu-title {
+    padding: 6px 16px 8px;
+    font-size: 13px;
+    line-height: 16px;
+    color: var(--label-2);
+  }
+
+  /* ==========================================================================
+     HUD — success feedback, top centre, glass capsule
+     ========================================================================== */
+
+  .hud-layer {
+    position: fixed;
+    z-index: 80;
+    top: calc(var(--nav-top) + 4px);
+    left: 0;
+    right: 0;
+    display: flex;
+    justify-content: center;
+    padding: 0 16px;
+    pointer-events: none;
+  }
+  .hud {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 100%;
+    min-height: 48px;
+    padding: 6px 8px 6px 16px;
+    border-radius: 999px;
+    animation: hud-in var(--dur-snappy) var(--spring-snappy) both;
+    touch-action: none;
+  }
+  .hud.is-leaving {
+    animation: hud-out 0.24s var(--ease-ios) both;
+  }
+  .hud-text {
+    min-width: 0;
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 600;
+    letter-spacing: -0.23px;
+    padding-right: 8px;
+  }
+
+  /* ==========================================================================
+     Swipe actions
+     ========================================================================== */
+
+  .swipe-row {
+    position: relative;
+    overflow: hidden;
+  }
+  .swipe-content {
+    position: relative;
+    z-index: 1;
+    background: var(--cell);
+    touch-action: pan-y;
+  }
+  .swipe-row.is-collapsing {
+    transition: height 0.24s var(--ease-ios);
+  }
+  .swipe-content.is-animating {
+    transition: transform var(--dur-snappy) var(--spring-snappy);
+  }
+  /* Exactly as wide as the strip the content has revealed, so the actions
+     always fill it; actions[0] is the trailing-most, as in UIKit. */
+  .swipe-actions {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: row-reverse;
+    align-items: stretch;
+    overflow: hidden;
+  }
+  .swipe-actions.is-animating {
+    transition: width var(--dur-snappy) var(--spring-snappy);
+  }
+  .swipe-action {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    justify-content: flex-start;
+    color: #fff;
+    transition: flex-grow 0.2s var(--ease-ios);
+  }
+  /* Armed for a full swipe: the first action takes the whole strip. */
+  .swipe-actions.is-armed > .swipe-action:not(:first-child) {
+    flex-grow: 0;
+  }
+  .swipe-action-inner {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 84px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  /* ==========================================================================
+     Navigation transitions (see lib/nav-transitions.ts)
+
+     The departing screen is a static clone ("ghost") held over or under the
+     arriving one for the length of the move: push slides the new screen in from
+     the trailing edge while the old one parallaxes to −30% and dims; pop is the
+     exact reverse. Nothing here is keyed on the route, and the old React tree is
+     gone the moment the new one commits.
+     ========================================================================== */
+
+  .nt-ghost {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    background: var(--bg);
+    contain: strict;
+  }
+  .nt-ghost > .nt-ghost-content {
+    position: absolute;
+    left: 0;
+    right: 0;
+  }
+  .nt-ghost.is-under {
+    z-index: -1;
+  }
+  .nt-ghost.is-over {
+    z-index: 40;
+    box-shadow: -6px 0 28px rgba(0, 0, 0, 0.16);
+  }
+  .nt-dim {
+    position: absolute;
+    inset: 0;
+    background: #000;
     opacity: 0;
-    transform: translateY(16px);
+    pointer-events: none;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.animate-modal-in {
-  animation: glass-modal-in var(--dur-normal) var(--ease-spring);
-}
-
-@keyframes glass-fade-in {
-  from {
+  .nt-dim-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 39;
+    background: #000;
     opacity: 0;
+    pointer-events: none;
   }
-  to {
-    opacity: 1;
+  .nt-part-elevated {
+    box-shadow: -6px 0 28px rgba(0, 0, 0, 0.14);
   }
-}
 
-.animate-fade-in {
-  animation: glass-fade-in 0.2s ease-out;
-}
 
-/* iOS banner toast: short rise, no scale — quieter than a sheet entrance. */
-@keyframes toast-in {
-  from {
+  .nt-push-in { animation: nt-slide-in-from-right var(--dur-push) var(--spring-push) both; }
+  .nt-push-out { animation: nt-slide-out-to-left var(--dur-push) var(--spring-push) both; }
+  .nt-pop-in { animation: nt-slide-in-from-left var(--dur-push) var(--spring-push) both; }
+  .nt-pop-out { animation: nt-slide-out-to-right var(--dur-push) var(--spring-push) both; }
+  .nt-dim.nt-dim-in { animation: nt-dim-in var(--dur-push) var(--spring-push) both; }
+  .nt-dim-layer.nt-dim-out { animation: nt-dim-out var(--dur-push) var(--spring-push) both; }
+  .nt-tab-out { animation: nt-fade-out 160ms ease-out both; }
+
+  /* ==========================================================================
+     Launch splash — matches the static apple-touch-startup-image, so the first
+     web frame continues the launch screen instead of replacing it.
+     ========================================================================== */
+
+  .splash {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    background: linear-gradient(180deg, #0a84ff 0%, #005bd8 100%);
+    color: #fff;
+  }
+  .splash-icon {
+    width: 86px;
+    height: 86px;
+    border-radius: 20px;
+    box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.35);
+    animation: splash-icon-in 0.6s var(--spring-bouncy) both;
+  }
+  .splash-name {
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    animation: fade-in 0.4s ease 0.1s both;
+  }
+  .splash.is-leaving {
+    animation: splash-out 0.25s ease-in forwards;
+  }
+
+  /* Navigation pending hint (components/NavHint.tsx): appears only if a
+     navigation outlasts 100 ms, so prefetched taps stay visually silent. */
+  .nav-hint {
     opacity: 0;
-    transform: translateY(8px);
+    animation: nav-hint-in 0.15s ease-out 0.1s forwards;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.animate-toast-in {
-  animation: toast-in var(--dur-fast) var(--ease-spring);
-}
-
-/* Directional push/pop for routed content. Both layers stay mounted through
-   the transition — that continuity is what makes a push read as travel rather
-   than a pan: incoming full travel, outgoing a short parallax plus dim. */
-@keyframes page-push-in {
-  from {
-    opacity: 0.4;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-@keyframes page-push-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0.55;
-    transform: translateX(-32%);
-  }
-}
-@keyframes page-pop-in {
-  from {
-    opacity: 0.55;
-    transform: translateX(-32%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-@keyframes page-pop-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0.4;
-    transform: translateX(100%);
-  }
-}
-@keyframes page-fade-out {
-  from {
-    opacity: 1;
-  }
-  to {
+  .nav-hint-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2.5px;
+    z-index: 90;
     opacity: 0;
+    background: linear-gradient(90deg, transparent, var(--tint) 40%, var(--tint) 60%, transparent);
+    background-size: 40% 100%;
+    background-repeat: no-repeat;
+    animation: nav-hint-in 0.15s ease-out 0.1s forwards, nav-hint-sweep 1s ease-in-out 0.1s infinite;
+    pointer-events: none;
   }
-}
-.route-stage {
-  position: relative;
-}
-.route-incoming {
-  position: relative;
-  z-index: 1;
-}
-.route-outgoing {
-  position: absolute;
-  inset: 0 0 auto 0;
-  z-index: 0;
-  pointer-events: none;
-}
-.page-push-in {
-  animation: page-push-in var(--dur-route) var(--ease-spring) backwards;
-}
-.page-push-out {
-  animation: page-push-out var(--dur-route) var(--ease-spring) both;
-}
-.page-pop-in {
-  animation: page-pop-in var(--dur-route) var(--ease-spring) backwards;
-}
-.page-pop-out {
-  animation: page-pop-out var(--dur-route) var(--ease-spring) both;
-}
-.page-fade-out {
-  animation: page-fade-out var(--dur-fast) ease-out both;
-}
 
-/* Staggered list entrance: rows arrive in sequence so a long list reads as
-   flowing in, capped at 7 steps — beyond that everything just appears.
-   Pure CSS, no measuring, collapses under Reduce Motion with the rest. */
-.stagger > * {
-  animation: glass-fade-in var(--dur-fast) var(--ease-out) backwards;
+  /* Small one-shot entrances for content that genuinely arrives later (an
+     inline banner, a newly revealed row). Never used on first paint of lists. */
+  .rise-in {
+    animation: rise-in 0.36s var(--spring-snappy) both;
+  }
+
+  .spinner {
+    animation: spin 0.9s steps(8) infinite;
+  }
+
 }
-.stagger > *:nth-child(1) { animation-delay: 0ms; }
-.stagger > *:nth-child(2) { animation-delay: 30ms; }
-.stagger > *:nth-child(3) { animation-delay: 60ms; }
-.stagger > *:nth-child(4) { animation-delay: 90ms; }
-.stagger > *:nth-child(5) { animation-delay: 120ms; }
-.stagger > *:nth-child(6) { animation-delay: 150ms; }
-.stagger > *:nth-child(7) { animation-delay: 180ms; }
 
 /* ==========================================================================
-   Skeleton loaders — shaped placeholders that match final layout, so content
-   resolves in place (no "Loading…" text, no ₹0→value flash / layout shift).
+   Keyframes
    ========================================================================== */
+
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
-}
-.skeleton {
-  background: var(--fill);
-  border-radius: var(--radius-sm);
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .skeleton { animation: none; }
+  50% { opacity: 0.5; }
 }
 
-/* ==========================================================================
-   Splash screen — animated brand reveal on launch
-   ========================================================================== */
-
-@keyframes splash-logo-in {
-  0% {
-    opacity: 0;
-    transform: translateY(10px) scale(0.86);
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(0) scale(1.03);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+@keyframes tab-bar-out {
+  to { transform: translateX(-30%); opacity: 0; }
 }
 
-@keyframes splash-shimmer {
-  0% {
-    transform: translateX(-120%) skewX(-18deg);
-  }
-  100% {
-    transform: translateX(220%) skewX(-18deg);
-  }
+@keyframes tab-bar-in {
+  from { transform: translateX(-30%); opacity: 0; }
 }
 
-@keyframes splash-dot {
-  0%, 80%, 100% {
-    opacity: 0.25;
-    transform: scale(0.8);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
+@keyframes sheet-in {
+  from { transform: translateY(calc(100% + 40px)); }
+}
+
+@keyframes sheet-out {
+  to { transform: translateY(calc(100% + 40px)); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes menu-in {
+  from { transform: scale(0.5); opacity: 0; }
+}
+
+@keyframes menu-out {
+  to { transform: scale(0.96); opacity: 0; }
+}
+
+@keyframes hud-in {
+  from { transform: translateY(-90px) scale(0.9); opacity: 0; }
+}
+
+@keyframes hud-out {
+  to { transform: translateY(-90px) scale(0.9); opacity: 0; }
+}
+
+@keyframes nt-slide-in-from-right {
+  from { transform: translate3d(100%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes nt-slide-out-to-left {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(-30%, 0, 0); }
+}
+
+@keyframes nt-slide-in-from-left {
+  from { transform: translate3d(-30%, 0, 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+
+@keyframes nt-slide-out-to-right {
+  from { transform: translate3d(var(--nt-from, 0px), 0, 0); }
+  to { transform: translate3d(100%, 0, 0); }
+}
+
+@keyframes nt-dim-in {
+  from { opacity: 0; }
+  to { opacity: 0.12; }
+}
+
+@keyframes nt-dim-out {
+  from { opacity: var(--nt-dim-from, 0.12); }
+  to { opacity: 0; }
+}
+
+@keyframes nt-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes splash-icon-in {
+  from { transform: scale(0.92); opacity: 0.6; }
 }
 
 @keyframes splash-out {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.04);
-  }
+  to { opacity: 0; transform: scale(1.06); }
 }
 
-.animate-splash-logo {
-  animation: splash-logo-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.animate-splash-shimmer {
-  animation: splash-shimmer 1.6s ease-in-out 0.4s infinite;
-}
-
-/* Class version of the loader dots (was inline style, which bypassed the
-   reduced-motion guard below). Stagger via inline animation-delay only. */
-.animate-splash-dot {
-  animation: splash-dot 1.2s ease-in-out infinite;
-}
-
-/* Duration must match FADE_MS in components/SplashGate.tsx: the gate unmounts on
-   a timer, so a longer animation here would be cut off mid-fade. */
-.animate-splash-out {
-  animation: splash-out 0.25s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-splash-logo,
-  .animate-splash-shimmer,
-  .animate-splash-dot,
-  .animate-splash-out {
-    animation: none;
-  }
-}
-
-/* ==========================================================================
-   Page enter transition — routed content fades/rises in on navigation
-   (keyed by pathname in PageTransition), replacing the hard cut.
-   ========================================================================== */
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.page-enter {
-  animation: page-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-
-/* ==========================================================================
-   Navigation pending indicator (see components/NavHint.tsx).
-
-   `tap-shrink` only responds to :active, so all press feedback ended the instant
-   the finger lifted — after which a slow navigation gave the user nothing at all
-   and read as "the tap did nothing".
-
-   The indicator starts fully transparent and fades in only after a delay, so a
-   fast navigation never flashes a spinner: if the route is already prefetched
-   and commits in ~20ms, this is removed from the tree before its animation-delay
-   has even elapsed and the user sees nothing. It only ever appears when the
-   navigation is genuinely slow enough to need explaining.
-   ========================================================================== */
 @keyframes nav-hint-in {
-  to {
-    opacity: 1;
-  }
-}
-.nav-hint {
-  opacity: 0;
-  animation: nav-hint-in 0.15s ease-out 0.1s forwards;
-}
-/* Sweeping bar pinned under the status bar — the conventional mobile idiom for
-   "a screen is on its way", and it costs no layout space. */
-.nav-hint-bar {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 2.5px;
-  z-index: 60;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--brand-solid, var(--brand)) 40%,
-    var(--brand-solid, var(--brand)) 60%,
-    transparent
-  );
-  background-size: 40% 100%;
-  background-repeat: no-repeat;
-  animation: nav-hint-in 0.15s ease-out 0.1s forwards,
-    nav-hint-sweep 1s ease-in-out 0.1s infinite;
-  pointer-events: none;
-}
-@keyframes nav-hint-sweep {
-  from {
-    background-position: -40% 0;
-  }
-  to {
-    background-position: 140% 0;
-  }
+  to { opacity: 1; }
 }
 
-/* Honor reduced-motion across every animated surface: all travel becomes a
-   cross-fade, staggering disappears. */
+@keyframes nav-hint-sweep {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ==========================================================================
+   Reduce Motion: every move becomes instant. State still changes; only the
+   travel is removed. Information-carrying indicators stay visible.
+   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
-  .page-enter,
-  .page-push-in,
-  .page-push-out,
-  .page-pop-in,
-  .page-pop-out,
-  .page-fade-out,
-  .animate-modal-in,
-  .animate-toast-in,
-  .animate-fade-in {
-    animation: glass-fade-in var(--dur-fast) ease-out !important;
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+    transition-delay: 0ms !important;
   }
-  .stagger > * {
+  .skeleton {
     animation: none !important;
   }
-  .tap-shrink {
-    transition: none !important;
-  }
-  /* Keep the indicator visible but still: it carries information, so it must not
-     be animated away entirely the way decorative motion is. */
   .nav-hint,
   .nav-hint-bar {
     opacity: 1;
     animation: none !important;
+  }
+  .spinner {
+    animation: spin 0.9s steps(8) infinite !important;
   }
 }

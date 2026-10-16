@@ -1,6 +1,6 @@
 "use client";
 import { Suspense, useMemo, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
@@ -11,9 +11,18 @@ import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { toCsv, downloadTextFile } from "@/lib/report";
 import { Expense, Group, Settlement } from "@/lib/types";
-import BottomNav from "@/components/home/BottomNav";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import Skeleton from "@/components/ui/Skeleton";
+import Screen from "@/components/kit/Screen";
+import { Card, List, RowLink, Section, sepInset } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { CategoryTile, GroupAvatar } from "@/components/kit/Tile";
+import { EmptyState, Meter, Segmented } from "@/components/kit/Controls";
+import { Menu } from "@/components/kit/Menu";
+import { Icon } from "@/components/kit/Icon";
+import { NavLink } from "@/components/kit/nav";
+import { replaceSamePath } from "@/lib/nav-transitions";
 
 const ALL = "all";
 
@@ -45,35 +54,32 @@ function rowWording(row: StatementRow, otherName: string): string {
   }
 }
 
+/** The two-column ledger: each row lands in "You gave" or "You got". */
 function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: string }) {
   if (stmt.rows.length === 0) {
     return (
-      <p className="text-[14px] text-[var(--text-tertiary)] px-4 py-6 text-center">
-        Nothing shared with {otherName} here yet.
-      </p>
+      <Card>
+        <EmptyState compact icon="doc.text" title="Nothing Here Yet" message={`Nothing shared with ${otherName} in this scope.`} />
+      </Card>
     );
   }
   const gave = stmt.rows.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0);
   const got = stmt.rows.filter((r) => r.delta < 0).reduce((s, r) => s - r.delta, 0);
   return (
-    <div>
-      {/* Column key, spelled out — the two columns are the whole idea. */}
-      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--fill-soft)]">
-        <span className="text-[11px] font-bold tracking-wide text-[var(--text-tertiary)]">DATE &amp; DETAILS</span>
-        <span className="text-[11px] font-bold tracking-wide text-[var(--pos)] text-right w-[72px]">YOU GAVE</span>
-        <span className="text-[11px] font-bold tracking-wide text-[var(--neg)] text-right w-[72px]">YOU GOT</span>
+    <Card>
+      <div className="grid grid-cols-[1fr_80px_80px] gap-2 border-b-[0.5px] border-[var(--separator)] px-4 py-2.5">
+        <span className="t-caption2 uppercase text-label-2">Date &amp; details</span>
+        <span className="t-caption2 text-right uppercase text-pos">You gave</span>
+        <span className="t-caption2 text-right uppercase text-neg">You got</span>
       </div>
-      <ul>
+      <ul className="list">
         {[...stmt.rows].reverse().map((row) => (
-          <li
-            key={row.key}
-            className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-3 border-b border-[var(--border-subtle)]"
-          >
+          <li key={row.key} className="grid grid-cols-[1fr_80px_80px] gap-2 px-4 py-3" style={sepInset(16)}>
             <div className="min-w-0">
-              <p className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{row.label}</p>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{fullDate(row.ts)}</p>
-              <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{rowWording(row, otherName)}</p>
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+              <p className="t-subhead truncate font-semibold">{row.label}</p>
+              <p className="t-caption mt-0.5 text-label-2">{fullDate(row.ts)}</p>
+              <p className="t-caption mt-0.5 text-label-2">{rowWording(row, otherName)}</p>
+              <p className="t-caption mt-1 text-label-3">
                 {isSettled(row.balance)
                   ? "Balance: settled"
                   : row.balance > 0
@@ -81,112 +87,96 @@ function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: s
                   : `Balance: you owe ${otherName} ${formatCurrency(-row.balance)}`}
               </p>
             </div>
-            <span className="text-[14px] font-semibold text-[var(--pos)] text-right w-[72px]">
+            <span className="num t-subhead text-right font-semibold text-pos">
               {row.delta > 0.001 ? formatCurrency(row.delta) : ""}
             </span>
-            <span className="text-[14px] font-semibold text-[var(--neg)] text-right w-[72px]">
+            <span className="num t-subhead text-right font-semibold text-neg">
               {row.delta < -0.001 ? formatCurrency(-row.delta) : ""}
             </span>
           </li>
         ))}
       </ul>
-      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-3 bg-[var(--fill-soft)]">
-        <span className="text-[13px] font-bold text-[var(--text-primary)]">Total</span>
-        <span className="text-[13px] font-bold text-[var(--pos)] text-right w-[72px]">{formatCurrency(gave)}</span>
-        <span className="text-[13px] font-bold text-[var(--neg)] text-right w-[72px]">{formatCurrency(got)}</span>
+      <div className="grid grid-cols-[1fr_80px_80px] gap-2 border-t-[0.5px] border-[var(--separator)] bg-[var(--fill-4)] px-4 py-3">
+        <span className="t-subhead font-semibold">Total</span>
+        <span className="num t-subhead text-right font-bold text-pos">{formatCurrency(gave)}</span>
+        <span className="num t-subhead text-right font-bold text-neg">{formatCurrency(got)}</span>
       </div>
-    </div>
+    </Card>
   );
 }
 
-/** Horizontal proportion bar used by the category and payer breakdowns. */
-function SpendBar({
+/** A pop-up menu row: label left, current choice right, ⌃⌄ glyph. */
+function PickerRow({
   label,
-  emoji,
   value,
-  max,
-  sub,
-}: {
-  label: string;
-  emoji?: string;
-  value: number;
-  max: number;
-  sub?: string;
-}) {
-  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
-  return (
-    <div className="py-2">
-      <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[14px] font-medium text-[var(--text-primary)] truncate">
-          {emoji ? `${emoji} ` : ""}
-          {label}
-        </span>
-        <span className="text-[14px] font-semibold text-[var(--text-primary)] shrink-0">
-          {formatCurrency(value)}
-        </span>
-      </div>
-      <div className="mt-1.5 h-2 rounded-full bg-[var(--fill)] overflow-hidden">
-        <div className="h-full rounded-full bg-[var(--brand-solid)]" style={{ width: `${pct}%` }} />
-      </div>
-      {sub && <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{sub}</p>}
-    </div>
-  );
-}
-
-function FilterChips({
   options,
-  value,
   onChange,
-  label,
 }: {
-  options: { id: string; name: string }[];
-  value: string;
-  onChange: (id: string) => void;
   label: string;
+  value: string;
+  options: { id: string; name: string }[];
+  onChange: (id: string) => void;
+}) {
+  const current = options.find((o) => o.id === value)?.name ?? options[0]?.name;
+  return (
+    <Menu
+      align="end"
+      title={label}
+      items={options.map((o) => ({ label: o.name, checked: o.id === value, onSelect: () => onChange(o.id) }))}
+    >
+      {(props) => (
+        <button type="button" {...props} className="row is-pressable" style={sepInset(16)}>
+          <span className="row-main">
+            <span className="row-title">{label}</span>
+          </span>
+          <span className="flex min-w-0 items-center gap-1 text-label-2">
+            <span className="t-body max-w-[46vw] truncate">{current}</span>
+            <Icon name="chevron.up.down" size={15} strokeWidth={2.2} />
+          </span>
+        </button>
+      )}
+    </Menu>
+  );
+}
+
+/** Proportion rows for the spending breakdowns. */
+function SpendRows({
+  rows,
+}: {
+  rows: { key: string; leading: React.ReactNode; label: string; value: number; max: number; sub?: string }[];
 }) {
   return (
-    <div className="mt-4">
-      <p className="text-[11px] font-bold tracking-wide text-[var(--text-tertiary)] mb-2">{label}</p>
-      <div className="flex gap-2 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
-        {options.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => onChange(o.id)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
-              value === o.id
-                ? "bg-[var(--brand-solid)] text-white"
-                : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-            }`}
-          >
-            {o.name}
-          </button>
-        ))}
-      </div>
-    </div>
+    <List>
+      {rows.map((r) => (
+        <div key={r.key} className="row is-tall" style={sepInset(58)}>
+          {r.leading}
+          <span className="row-main">
+            <span className="flex items-baseline justify-between gap-3">
+              <span className="row-title">{r.label}</span>
+              <span className="num t-subhead shrink-0 font-semibold">{formatCurrency(r.value)}</span>
+            </span>
+            <span className="mt-1.5 block">
+              <Meter value={r.max > 0 ? Math.max(2, Math.round((r.value / r.max) * 100)) : 0} color="var(--tint)" label={r.label} />
+            </span>
+            {r.sub && <span className="row-detail">{r.sub}</span>}
+          </span>
+        </div>
+      ))}
+    </List>
   );
 }
 
 /**
- * Spending dashboard: pick a group, optionally pick a person, see what was
- * spent. With a person selected the figures cover only the expenses the two of
- * you shared, which is a different question from "what did this group spend".
+ * Pick a group, optionally a person, see what was spent. With a person picked
+ * the figures cover only expenses the two of you shared — a different
+ * question from "what did this group spend".
  */
-function SpendingDashboard({
-  meUid,
-  groups,
-  datasets,
-}: {
-  meUid: string;
-  groups: Group[];
-  datasets: GroupDataset[];
-}) {
+function SpendingDashboard({ meUid, groups, datasets }: { meUid: string; groups: Group[]; datasets: GroupDataset[] }) {
   const [groupId, setGroupId] = useState("all");
   const [personUid, setPersonUid] = useState("all");
 
   const scopedGroups = groupId === "all" ? groups : groups.filter((g) => g.id === groupId);
-  const expenses = scopedGroups.flatMap(
-    (g) => datasets.find((d) => d.group.id === g.id)?.expenses ?? []
-  );
+  const expenses = scopedGroups.flatMap((g) => datasets.find((d) => d.group.id === g.id)?.expenses ?? []);
 
   // Everyone who shares one of the groups in scope.
   const peopleMap = new Map<string, string>();
@@ -196,134 +186,143 @@ function SpendingDashboard({
       peopleMap.set(uid, g.members?.[uid]?.displayName || "Member");
     }
   }
-  const people = Array.from(peopleMap, ([id, name]) => ({ id, name })).sort((a, b) =>
-    a.name.localeCompare(b.name)
-  );
-  // Switching group can strip out the person who was selected; fall back to
-  // everyone rather than reporting zero against someone who isn't here.
+  const people = Array.from(peopleMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  // Switching group can strip out the selected person; fall back to everyone
+  // rather than reporting zero against someone who isn't here.
   const activePerson = personUid !== "all" && peopleMap.has(personUid) ? personUid : null;
   const summary = summariseSpending(meUid, expenses, activePerson);
   const otherName = activePerson ? peopleMap.get(activePerson) : null;
   const maxCategory = summary.byCategory[0]?.total ?? 0;
   const maxPayer = summary.byPayer[0]?.paid ?? 0;
-  const nameOf = (uid: string) =>
-    uid === meUid ? "You" : peopleMap.get(uid) || "Former member";
+  const nameOf = (uid: string) => (uid === meUid ? "You" : peopleMap.get(uid) || "Former member");
+  const photoOf = (uid: string) => {
+    for (const g of scopedGroups) {
+      const p = g.members?.[uid]?.photoURL;
+      if (p) return p;
+    }
+    return undefined;
+  };
 
   return (
-    <div>
-      <FilterChips
-        label="GROUP"
-        value={groupId}
-        onChange={setGroupId}
-        options={[{ id: "all", name: "All groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
-      />
-      {people.length > 0 && (
-        <FilterChips
-          label="SPENT WITH"
-          value={activePerson ?? "all"}
-          onChange={setPersonUid}
-          options={[{ id: "all", name: "Everyone" }, ...people]}
-        />
-      )}
+    <>
+      <Section tight>
+        <List>
+          <PickerRow
+            label="Group"
+            value={groupId}
+            onChange={setGroupId}
+            options={[{ id: "all", name: "All Groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
+          />
+          {people.length > 0 && (
+            <PickerRow
+              label="Spent with"
+              value={activePerson ?? "all"}
+              onChange={setPersonUid}
+              options={[{ id: "all", name: "Everyone" }, ...people]}
+            />
+          )}
+        </List>
+      </Section>
 
-      <div className="mt-5 rounded-[var(--radius-card)] bg-[var(--surface)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[13px] text-[var(--text-tertiary)]">
-          {otherName ? `Spent on things you and ${otherName} shared` : "Total spent"}
-          {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
-        </p>
-        <p className="text-[34px] font-extrabold text-[var(--brand)] leading-tight mt-1">
-          {formatCurrency(summary.total)}
-        </p>
-        <p className="text-[13px] text-[var(--text-secondary)] mt-1">
-          {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
-          {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} on average`}
-        </p>
-        {summary.firstTs && summary.lastTs && (
-          <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
-            {fullDate(summary.firstTs)} — {fullDate(summary.lastTs)}
+      <Section>
+        <Card className="p-4">
+          <p className="t-footnote text-label-2">
+            {otherName ? `Spent on things you and ${otherName} shared` : "Total spent"}
+            {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
           </p>
-        )}
-
-        {summary.expenseCount > 0 && (
-          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] grid grid-cols-2 gap-y-3 gap-x-4">
-            <div>
-              <p className="text-[12px] text-[var(--text-tertiary)]">Your share</p>
-              <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                {formatCurrency(summary.myShare)}
-              </p>
+          <p className="amount-hero mt-1 truncate text-[34px]">{formatCurrency(summary.total)}</p>
+          <p className="t-footnote mt-1 text-label-2">
+            {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
+            {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} on average`}
+          </p>
+          {summary.firstTs && summary.lastTs && (
+            <p className="t-caption mt-0.5 text-label-2">
+              {fullDate(summary.firstTs)} – {fullDate(summary.lastTs)}
+            </p>
+          )}
+          {summary.expenseCount > 0 && (
+            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t-[0.5px] border-[var(--separator)] pt-4">
+              <div>
+                <p className="t-caption text-label-2">Your share</p>
+                <p className="num t-headline">{formatCurrency(summary.myShare)}</p>
+              </div>
+              <div>
+                <p className="t-caption text-label-2">You paid up front</p>
+                <p className="num t-headline">{formatCurrency(summary.iPaid)}</p>
+              </div>
+              {otherName && (
+                <>
+                  <div>
+                    <p className="t-caption truncate text-label-2">{otherName}&rsquo;s share</p>
+                    <p className="num t-headline">{formatCurrency(summary.theirShare)}</p>
+                  </div>
+                  <div>
+                    <p className="t-caption truncate text-label-2">{otherName} paid up front</p>
+                    <p className="num t-headline">{formatCurrency(summary.theyPaid)}</p>
+                  </div>
+                </>
+              )}
             </div>
-            <div>
-              <p className="text-[12px] text-[var(--text-tertiary)]">You paid up front</p>
-              <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                {formatCurrency(summary.iPaid)}
-              </p>
-            </div>
-            {otherName && (
-              <>
-                <div>
-                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName}&rsquo;s share</p>
-                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                    {formatCurrency(summary.theirShare)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName} paid up front</p>
-                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                    {formatCurrency(summary.theyPaid)}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </Card>
+      </Section>
 
       {summary.expenseCount === 0 ? (
-        <p className="text-[14px] text-[var(--text-tertiary)] mt-5">
-          {otherName
-            ? `No expenses shared with ${otherName} in this scope yet.`
-            : "No expenses in this scope yet."}
+        <p className="section-footer mt-2">
+          {otherName ? `No expenses shared with ${otherName} in this scope yet.` : "No expenses in this scope yet."}
         </p>
       ) : (
         <>
-          <section className="mt-6">
-            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Where it went</h2>
-            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
-              {summary.byCategory.map((c) => (
-                <SpendBar
-                  key={c.id}
-                  label={c.label}
-                  emoji={c.emoji}
-                  value={c.total}
-                  max={maxCategory}
-                  sub={`${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-6">
-            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Who put the money in</h2>
-            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
-              {summary.byPayer.map((p) => (
-                <SpendBar
-                  key={p.uid}
-                  label={nameOf(p.uid)}
-                  value={p.paid}
-                  max={maxPayer}
-                  sub={`paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`}
-                />
-              ))}
-            </div>
-          </section>
+          <Section header="Where it went">
+            <SpendRows
+              rows={summary.byCategory.map((c) => ({
+                key: c.id,
+                leading: <CategoryTile id={c.id} />,
+                label: c.label,
+                value: c.total,
+                max: maxCategory,
+                sub: `${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`,
+              }))}
+            />
+          </Section>
+          <Section header="Who put the money in">
+            <SpendRows
+              rows={summary.byPayer.map((p) => ({
+                key: p.uid,
+                leading: <Avatar name={nameOf(p.uid)} photoURL={photoOf(p.uid)} size={30} />,
+                label: nameOf(p.uid),
+                value: p.paid,
+                max: maxPayer,
+                sub: `paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`,
+              }))}
+            />
+          </Section>
         </>
       )}
-    </div>
+    </>
+  );
+}
+
+function ReportsSkeleton() {
+  return (
+    <Screen title="Reports" large tabBar>
+      <Skeleton className="h-9 w-full rounded-full" />
+      <div className="card list mt-4" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <div key={i} className="row is-tall" style={sepInset(68)}>
+            <Skeleton className="h-10 w-10 rounded-full" />
+            <div className="flex-1">
+              <Skeleton className="h-4 w-32 rounded-md" />
+              <Skeleton className="mt-2 h-3 w-48 rounded-md" />
+            </div>
+          </div>
+        ))}
+      </div>
+    </Screen>
   );
 }
 
 function ReportsInner() {
-  const router = useRouter();
   const params = useSearchParams();
   const { user, loading } = useAuth();
   const { groups, datasets, allLoaded, groupsLoaded } = useGroupData();
@@ -332,11 +331,9 @@ function ReportsInner() {
   const personParam = params.get("person");
   const groupParam = params.get("group");
   const tabParam = params.get("tab") === "spending" ? "spending" : "statements";
-  // Switching person keeps this component mounted, so a scope left over from the
-  // previous person would carry across: if that group isn't shared with the new
-  // person the statement renders empty, and when they share fewer than two groups
-  // the chip row is hidden, leaving no way to clear it. Tagging the choice with
-  // the person it was made for lets it expire by derivation.
+  // Tagging the scope with the person it was chosen for lets it expire by
+  // derivation when the person changes (a stale scope could otherwise render
+  // an empty statement with no way to clear it).
   const [pickedScope, setPickedScope] = useState<{ person: string | null; value: string } | null>(null);
   const scope = pickedScope?.person === personParam ? pickedScope.value : groupParam || ALL;
   const setScope = (value: string) => setPickedScope({ person: personParam, value });
@@ -347,100 +344,90 @@ function ReportsInner() {
     [uid, datasets, transfers]
   );
 
-  if (loading || (!groupsLoaded && user)) {
-    return <p className="p-6 text-[15px] text-[var(--text-tertiary)]">Loading…</p>;
-  }
+  if (loading || (!groupsLoaded && user)) return <ReportsSkeleton />;
   if (!user) return <LoginScreen />;
   const meUid = user.uid;
 
-  // ── Person list ────────────────────────────────────────────
+  // ── People ───────────────────────────────────────────────────
   if (!personParam) {
-    const people = counterparties.filter(
-      (c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0)
-    );
+    const people = counterparties.filter((c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0));
     return (
-      <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-        <main className="flex-1 max-w-md w-full mx-auto px-4 pt-6 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
-          <h1 className="text-[30px] font-extrabold text-[var(--text-primary)]">Reports</h1>
-          <div className="flex gap-2 mt-4 mb-1">
-            {[
-              { id: "statements", label: "Statements" },
-              { id: "spending", label: "Spending" },
-            ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() =>
-                  router.replace(t.id === "spending" ? "/reports?tab=spending" : "/reports", {
-                    scroll: false,
-                  })
-                }
-                className={`rounded-full px-4 py-1.5 text-[14px] font-semibold tap-shrink ${
-                  tabParam === t.id
-                    ? "bg-[var(--brand-solid)] text-white"
-                    : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {tabParam === "spending" ? (
-            <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
-          ) : (
-          <>
-          <p className="text-[15px] text-[var(--text-tertiary)] mt-2 mb-5">
-            A running account with each person, entry by entry — who paid for what, and what&rsquo;s
-            left between you.
-          </p>
-          {!allLoaded && (
-            <p className="text-[13px] text-[var(--text-tertiary)] mb-3">Still loading every group…</p>
-          )}
-          {people.length === 0 ? (
-            <p className="text-[14px] text-[var(--text-tertiary)]">
-              No shared expenses yet. Add one in a group and it&rsquo;ll show up here.
-            </p>
-          ) : (
-            <div className="space-y-2.5 stagger">
-              {people.map((p) => (
-                <button
-                  key={p.uid}
-                  onClick={() => router.push(`/reports?person=${p.uid}`)}
-                  className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-4 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink"
-                >
-                  {p.photoURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.photoURL} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" />
-                  ) : (
-                    <span className="w-11 h-11 rounded-full bg-[var(--fill)] flex items-center justify-center text-[16px] font-semibold text-[var(--text-secondary)] shrink-0">
-                      {p.displayName.charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[16px] font-semibold text-[var(--text-primary)] truncate">
-                      {p.displayName}
-                    </p>
-                    <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
-                      {describeNet(-p.net, p.displayName, formatCurrency)}
-                      {!isSettled(p.directNet || 0)
-                        ? ` (incl. ${formatCurrency(Math.abs(p.directNet))} direct)`
-                        : ""}
-                    </p>
-                    <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                      {p.sharedGroupCount > 0
-                        ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
-                        : "Direct payment"}
-                    </p>
-                  </div>
-                  <span className="text-[var(--text-quaternary)] text-lg shrink-0">›</span>
-                </button>
-              ))}
-            </div>
-          )}
-          </>
-          )}
-        </main>
-        <BottomNav active="reports" />
-      </div>
+      <Screen key="list" title="Reports" large tabBar>
+        <Segmented
+          label="Report type"
+          value={tabParam}
+          // A query-only change on this static page: the History API (which the
+          // router follows) rather than router.replace, which in Next 16.2 can
+          // restore a cold-start query instead (see replaceSamePath).
+          onChange={(id) => replaceSamePath(id === "spending" ? "/reports?tab=spending" : "/reports")}
+          options={[
+            { id: "statements", label: "Statements" },
+            { id: "spending", label: "Spending" },
+          ]}
+        />
+        {tabParam === "spending" ? (
+          <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
+        ) : (
+          <Section
+            footer={
+              <>
+                A running account with each person, entry by entry — who paid for what, and what&rsquo;s left
+                between you.
+                {!allLoaded && " Still loading every group…"}
+              </>
+            }
+          >
+            {people.length === 0 ? (
+              <Card>
+                <EmptyState
+                  compact
+                  icon="doc.text"
+                  title="No Statements Yet"
+                  message="Add an expense in a group and a statement with each person appears here."
+                />
+              </Card>
+            ) : (
+              <List>
+                {people.map((p) => {
+                  const settled = isSettled(p.net);
+                  const iOwe = !settled && p.net > 0;
+                  const groupsText =
+                    p.sharedGroupCount > 0
+                      ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
+                      : "Direct payments";
+                  return (
+                    <RowLink
+                      key={p.uid}
+                      href={`/reports?person=${p.uid}`}
+                      inset="avatar"
+                      tall
+                      leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} />}
+                      title={p.displayName}
+                      titleClassName="font-semibold"
+                      subtitle={
+                        !isSettled(p.directNet || 0)
+                          ? `${groupsText} · ${formatCurrency(Math.abs(p.directNet))} direct`
+                          : groupsText
+                      }
+                      trailing={
+                        <span className="flex shrink-0 flex-col items-end">
+                          <span className="t-caption text-label-2">
+                            {settled ? "" : iOwe ? "you owe" : "owes you"}
+                          </span>
+                          <span className={`num t-headline ${settled ? "text-label-3" : iOwe ? "text-neg" : "text-pos"}`}>
+                            {settled ? "Settled" : formatCurrency(Math.abs(p.net))}
+                          </span>
+                        </span>
+                      }
+                      ariaLabel={`${p.displayName}, ${describeNet(-p.net, p.displayName, formatCurrency)}. View statement`}
+                    />
+                  );
+                })}
+              </List>
+            )}
+          </Section>
+        )}
+      </Screen>
     );
   }
 
@@ -448,12 +435,9 @@ function ReportsInner() {
   const person = counterparties.find((c) => c.uid === personParam);
   const otherName = person?.displayName || "This person";
   const sharedGroups = groups.filter((g) => g.memberIds?.includes(personParam) && g.memberIds?.includes(meUid));
-  // Second guard, for the render that happens before the reset effect commits:
-  // a scope this person doesn't share falls back to showing every shared group.
-  const effectiveScope =
-    scope === ALL || sharedGroups.some((g) => g.id === scope) ? scope : ALL;
-  const scopedGroups =
-    effectiveScope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === effectiveScope);
+  // A scope this person doesn't share falls back to every shared group.
+  const effectiveScope = scope === ALL || sharedGroups.some((g) => g.id === scope) ? scope : ALL;
+  const scopedGroups = effectiveScope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === effectiveScope);
 
   const expenses: Expense[] = [];
   const settlements: Settlement[] = [];
@@ -463,10 +447,11 @@ function ReportsInner() {
     expenses.push(...d.expenses);
     settlements.push(...d.settlements);
   }
-  // Direct payments belong to no group: show them when viewing all shared
-  // groups, hide them when scoped to one group.
+  // Direct payments belong to no group: shown across all shared groups,
+  // hidden when scoped to one.
   const scopedTransfers = effectiveScope === ALL ? transfers : [];
   const stmt = buildPairStatement(meUid, personParam, expenses, settlements, scopedTransfers);
+  const net = stmt.net;
 
   async function handleDownload() {
     const rows: (string | number)[][] = [
@@ -495,95 +480,104 @@ function ReportsInner() {
     }
   }
 
-  return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={() => router.push("/reports")}
-            aria-label="Back to statements"
-            className="w-10 h-10 rounded-full bg-[var(--surface)] shadow-[var(--shadow-sm)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          </button>
-          <h1 className="text-[22px] font-extrabold text-[var(--text-primary)] truncate">{otherName}</h1>
-        </div>
+  const tileCls =
+    "flex h-16 flex-col items-center justify-center gap-1 rounded-[18px] bg-[var(--cell)] text-tint transition-transform duration-150 active:scale-95";
 
-        {/* The bottom line, in words */}
-        <div
-          className={`mt-4 rounded-[var(--radius-card)] p-5 ${
-            isSettled(stmt.net)
-              ? "bg-[var(--fill-soft)]"
-              : stmt.net > 0
-              ? "bg-[var(--tint-success-soft)]"
-              : "bg-[var(--tint-danger-soft)]"
-          }`}
+  return (
+    <Screen key={`person-${personParam}`} title={otherName} back="/reports" heroTitle tabBar>
+      <div className="flex flex-col items-center px-2 pt-1 text-center">
+        <Avatar name={otherName} photoURL={person?.photoURL} size={84} />
+        <h2 data-hero-title className="t-title2 mt-3 max-w-full [overflow-wrap:anywhere]">{otherName}</h2>
+        <p className={`t-headline mt-1 ${isSettled(net) ? "text-label-2" : net > 0 ? "text-pos" : "text-neg"}`}>
+          {describeNet(net, otherName, formatCurrency)}
+        </p>
+      </div>
+
+      {/* Contacts-style action tiles. */}
+      <div className="mt-5 grid grid-cols-3 gap-2">
+        <NavLink href={`/chat/${personParam}`} className={tileCls}>
+          <Icon name="message" size={22} />
+          <span className="t-caption font-medium">Message</span>
+        </NavLink>
+        <NavLink href={`/chat/${personParam}?pay=1`} className={tileCls}>
+          <Icon name="indianrupee" size={22} />
+          <span className="t-caption font-medium">Pay</span>
+        </NavLink>
+        <button
+          type="button"
+          onClick={() => void handleDownload()}
+          disabled={stmt.rows.length === 0}
+          className={`${tileCls} disabled:text-label-3`}
         >
-          <p className="text-[13px] text-[var(--text-tertiary)]">As things stand</p>
-          <p className="text-[20px] font-extrabold text-[var(--text-primary)] mt-1">
-            {describeNet(stmt.net, otherName, formatCurrency)}
-          </p>
-          <p className="text-[13px] text-[var(--text-secondary)] mt-2">
-            You covered {formatCurrency(stmt.iCoveredForThem)} of {otherName}&rsquo;s share.{" "}
-            {otherName} covered {formatCurrency(stmt.theyCoveredForMe)} of yours.
+          <Icon name="square.and.arrow.down" size={22} />
+          <span className="t-caption font-medium">Export CSV</span>
+        </button>
+      </div>
+
+      <Section header="As things stand">
+        <Card className="p-4">
+          <p className="t-subhead text-label-2">
+            You covered <span className="num font-semibold text-label">{formatCurrency(stmt.iCoveredForThem)}</span> of{" "}
+            {otherName}&rsquo;s share. {otherName} covered{" "}
+            <span className="num font-semibold text-label">{formatCurrency(stmt.theyCoveredForMe)}</span> of yours.
           </p>
           {!isSettled(stmt.directNet || 0) && (
-            <p className="text-[13px] text-[var(--text-secondary)] mt-1">
-              {formatCurrency(Math.abs(stmt.directNet))} is direct (not in any group)
-              {stmt.directNet > 0
-                ? ` ${otherName} owes you`
-                : ` you owe ${otherName}`}
-              .
+            <p className="t-subhead mt-2 text-label-2">
+              {formatCurrency(Math.abs(stmt.directNet))} is direct (not in any group) —{" "}
+              {stmt.directNet > 0 ? `${otherName} owes you` : `you owe ${otherName}`}.
             </p>
           )}
           {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
-            <p className="text-[13px] text-[var(--warning)] mt-2">
+            <p className="t-footnote mt-2 text-warn">
               A payment is still waiting to be approved, so it isn&rsquo;t counted above.
             </p>
           )}
-        </div>
+        </Card>
+      </Section>
 
-        {/* Group scope */}
-        {sharedGroups.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto scroll-momentum -mx-4 px-4 mt-4 pb-1">
-            {[{ id: ALL, name: "All groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))].map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setScope(opt.id)}
-                className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
-                  effectiveScope === opt.id
-                    ? "bg-[var(--brand-solid)] text-white"
-                    : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-                }`}
-              >
-                {opt.name}
-              </button>
+      {sharedGroups.length > 1 && (
+        <Section>
+          <List>
+            <PickerRow
+              label="Groups"
+              value={effectiveScope}
+              onChange={setScope}
+              options={[{ id: ALL, name: "All Shared Groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))]}
+            />
+          </List>
+          {effectiveScope !== ALL && (
+            <p className="section-footer">Direct payments aren&rsquo;t part of any group, so they&rsquo;re hidden here.</p>
+          )}
+        </Section>
+      )}
+
+      <Section header="Statement">
+        <StatementTable stmt={stmt} otherName={otherName} />
+      </Section>
+
+      {sharedGroups.length > 0 && (
+        <Section header="Shared groups">
+          <List>
+            {sharedGroups.map((g) => (
+              <RowLink
+                key={g.id}
+                href={`/groups/${g.id}`}
+                inset={58}
+                leading={<GroupAvatar id={g.id} name={g.name} photoURL={g.photoURL} size={30} />}
+                title={g.name}
+              />
             ))}
-          </div>
-        )}
-
-        <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-card)] overflow-hidden shadow-[var(--shadow-card)]">
-          <StatementTable stmt={stmt} otherName={otherName} />
-        </div>
-
-        {stmt.rows.length > 0 && (
-          <button
-            onClick={handleDownload}
-            className="mt-4 w-full rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] px-4 py-3 text-[15px] font-semibold text-[var(--text-primary)] tap-shrink"
-          >
-            Export this statement (CSV)
-          </button>
-        )}
-      </main>
-      <BottomNav active="reports" />
-    </div>
+          </List>
+        </Section>
+      )}
+    </Screen>
   );
 }
 
 export default function ReportsPage() {
   // useSearchParams needs a Suspense boundary for static rendering.
   return (
-    <Suspense fallback={<p className="p-6 text-[15px] text-[var(--text-tertiary)]">Loading…</p>}>
+    <Suspense fallback={<ReportsSkeleton />}>
       <ReportsInner />
     </Suspense>
   );

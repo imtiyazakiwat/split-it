@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
-import GlassModal from "@/components/ui/GlassModal";
 import { useToast } from "@/components/ui/Toast";
+import { Sheet } from "@/components/kit/Sheet";
+import { Button, Spinner } from "@/components/kit/Controls";
 
 /** The join URL for a code, on whichever host the app is served from. */
 function inviteLink(code: string): string {
@@ -10,13 +11,13 @@ function inviteLink(code: string): string {
 }
 
 /**
- * Invite sheet: a scannable QR code for sharing a group in person, plus the
- * raw code and link for everything else.
+ * Invite sheet: a scannable QR for sharing in person, plus the code and the
+ * link for everything else.
  *
- * The QR is rendered as a PNG data URL and drawn into an <img> rather than
- * injected as inline SVG markup, so nothing from the library reaches the DOM as
- * HTML. It is generated at 2x the display size to stay crisp — and scannable —
- * on high-density screens.
+ * The QR is a PNG data URL in an <img>, not injected SVG markup, so nothing
+ * from the library reaches the DOM as HTML. Generated at 2× display size so it
+ * stays crisp — and scannable — on dense screens. Always on a white plate: a
+ * dark-mode surface behind a dark QR does not scan.
  */
 export default function InviteQrSheet({
   groupName,
@@ -27,16 +28,9 @@ export default function InviteQrSheet({
   inviteCode: string;
   onClose: () => void;
 }) {
-  // The result is tagged with the code that produced it, so a rotated invite
-  // code invalidates the previous QR by derivation rather than by clearing state
-  // in the effect. Clearing it there would leave the old code's QR (or a stale
-  // failure message) on screen for a render, and would show the wrong code
-  // entirely if generation for the new one failed.
-  const [result, setResult] = useState<{
-    code: string;
-    dataUrl?: string;
-    failed?: boolean;
-  } | null>(null);
+  // Tagged with the code that produced it, so a rotated invite code
+  // invalidates the previous QR by derivation rather than by clearing state.
+  const [result, setResult] = useState<{ code: string; dataUrl?: string; failed?: boolean } | null>(null);
   const current = result?.code === inviteCode ? result : null;
   const dataUrl = current?.dataUrl ?? "";
   const failed = current?.failed ?? false;
@@ -85,11 +79,7 @@ export default function InviteQrSheet({
     };
     if (nav.share) {
       try {
-        await nav.share({
-          title: groupName,
-          text: `Join “${groupName}” on split it`,
-          url: link,
-        });
+        await nav.share({ title: groupName, text: `Join “${groupName}” on SplitIt`, url: link });
         return;
       } catch (err) {
         if ((err as Error)?.name === "AbortError") return;
@@ -100,67 +90,53 @@ export default function InviteQrSheet({
   }
 
   return (
-    <GlassModal title="Invite to this group" onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-[14px] text-[var(--text-secondary)]">
-          Have them scan this, or send them the link. They&rsquo;ll join{" "}
-          <span className="font-semibold text-[var(--text-primary)]">{groupName}</span>.
-        </p>
-
-        {/* White plate regardless of theme: QR contrast has to be fixed, and a
-            dark-mode surface behind a dark QR does not scan. */}
-        <div className="flex justify-center">
-          <div className="rounded-[var(--radius-inner)] bg-white p-3 shadow-[var(--shadow-card)]">
-            {dataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={dataUrl}
-                alt={`QR code to join ${groupName}`}
-                width={232}
-                height={232}
-                className="block w-[232px] h-[232px]"
-              />
-            ) : (
-              <div className="w-[232px] h-[232px] grid place-items-center text-center px-4">
-                <p className="text-[13px] text-neutral-500">
-                  {failed ? "Couldn’t draw the QR code — use the code below." : "Generating…"}
-                </p>
-              </div>
-            )}
-          </div>
+    <Sheet title="Invite People" subtitle={groupName} onClose={onClose}>
+      <div className="flex flex-col items-center pt-2">
+        <div className="rounded-[28px] bg-white p-4 shadow-[0_8px_30px_-12px_rgba(0,0,0,0.25)]">
+          {dataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={dataUrl}
+              alt={`QR code to join ${groupName}`}
+              width={220}
+              height={220}
+              className="block h-[220px] w-[220px]"
+            />
+          ) : (
+            <div className="grid h-[220px] w-[220px] place-items-center px-4 text-center text-neutral-500">
+              {failed ? (
+                <p className="t-footnote">Couldn&rsquo;t draw the QR code — use the code below.</p>
+              ) : (
+                <Spinner />
+              )}
+            </div>
+          )}
         </div>
+        <p className="t-footnote mt-3 text-center text-label-2">Scan with the iPhone or Android camera to join.</p>
 
         {/* The code itself, for anyone whose camera won't cooperate. */}
         <button
           type="button"
           onClick={() => copy(inviteCode, "code")}
-          className="w-full rounded-[var(--radius-inner)] bg-[var(--fill-soft)] px-4 py-3 tap-shrink"
+          className="mt-4 flex w-full flex-col items-center rounded-[22px] bg-[var(--cell-elevated)] px-4 py-3 transition-transform duration-150 active:scale-[0.98]"
+          aria-label={`Invite code ${inviteCode.split("").join(" ")}. Tap to copy`}
         >
-          <span className="block text-[11px] font-semibold tracking-wide text-[var(--text-tertiary)]">
-            INVITE CODE {copied === "code" ? "· COPIED" : "· TAP TO COPY"}
-          </span>
-          <span className="block text-[26px] font-extrabold tracking-[0.2em] text-[var(--text-primary)] mt-0.5">
-            {inviteCode}
-          </span>
+          <span className="t-footnote text-label-2">{copied === "code" ? "Copied" : "Invite code · tap to copy"}</span>
+          <span className="num mt-0.5 text-[28px] font-bold tracking-[0.24em]">{inviteCode}</span>
         </button>
 
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={share}
-            className="flex-1 rounded-full bg-[var(--brand-solid)] text-white px-4 py-3 text-[15px] font-semibold tap-shrink"
-          >
-            Share link
-          </button>
-          <button
-            type="button"
-            onClick={() => copy(inviteLink(inviteCode), "link")}
-            className="flex-1 rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] px-4 py-3 text-[15px] font-semibold text-[var(--text-primary)] tap-shrink"
-          >
-            {copied === "link" ? "Copied!" : "Copy link"}
-          </button>
+        <div className="mt-4 grid w-full grid-cols-2 gap-2">
+          <Button icon="share" onClick={share}>
+            Share Link
+          </Button>
+          <Button variant="tinted" icon={copied === "link" ? "checkmark" : "link"} onClick={() => copy(inviteLink(inviteCode), "link")}>
+            {copied === "link" ? "Copied" : "Copy Link"}
+          </Button>
         </div>
       </div>
-    </GlassModal>
+      <span className="sr-only" aria-live="polite">
+        {copied ? `${copied === "code" ? "Code" : "Link"} copied` : ""}
+      </span>
+    </Sheet>
   );
 }

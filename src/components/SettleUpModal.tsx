@@ -1,14 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Expense } from "@/lib/types";
 import { addSettlementRequest, resolveUpiId } from "@/lib/firestore";
 import { uploadMultipleReceipts } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
 import { roundMoney } from "@/lib/money";
-import { hapticSuccess } from "@/lib/haptics";
+import { hapticSuccess, hapticTap } from "@/lib/haptics";
 import {
-  UPI_APPS,
   UpiApp,
   UpiPaymentParams,
   copyToClipboard,
@@ -17,17 +16,26 @@ import {
   isValidUpiId,
   launchUpi,
 } from "@/lib/upi";
-import { UpiAppIcon } from "@/components/UpiAppIcon";
-import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
 import { useToast } from "@/components/ui/Toast";
-import { activateFileInputOnKey } from "@/lib/keyboard";
+import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
+import { AmountField } from "@/components/kit/AmountField";
+import { Attachments } from "@/components/kit/Attachments";
+import { FieldRow, Button } from "@/components/kit/Controls";
+import { List, Section, sepInset } from "@/components/kit/List";
+import { Avatar } from "@/components/kit/Avatar";
+import { Icon } from "@/components/kit/Icon";
+import UpiPayPanel from "@/components/pay/UpiPayPanel";
 
 interface ExpenseWithSelection {
   expense: Expense;
   selected: boolean;
 }
 
+/**
+ * Settle up with one person in a group: pay them over UPI (hand-off), then
+ * record it. Recording sends a request the payee approves — only then does
+ * the balance move.
+ */
 export default function SettleUpModal({
   groupId,
   fromUid,
@@ -47,13 +55,13 @@ export default function SettleUpModal({
   expensesOwed: Expense[];
   onClose: () => void;
 }) {
-  // The amount owed is the netted balance. The expense list below is shown for
-  // reference (which expenses this settlement covers) and never changes the
-  // amount — ticking items only tags them, it doesn't "jump the rate".
+  // The amount owed is the netted balance. The expense list is for reference
+  // (what this covers) and never changes the amount.
   const [items, setItems] = useState<ExpenseWithSelection[]>(
     expensesOwed.map((e) => ({ expense: e, selected: true }))
   );
-  const [amount, setAmount] = useState(suggestedAmount > 0 ? suggestedAmount.toFixed(2) : "");
+  const initialAmount = suggestedAmount > 0 ? suggestedAmount.toFixed(2) : "";
+  const [amount, setAmount] = useState(initialAmount);
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -61,24 +69,19 @@ export default function SettleUpModal({
   const [paidExternally, setPaidExternally] = useState(false);
   const [resolvedUpiId, setResolvedUpiId] = useState<string | undefined>(toUpiId);
   const [upiChecked, setUpiChecked] = useState(false);
+  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
 
-  // Snapped to whole paise, so a settlement can't leave behind a fraction of a
-  // paise that no payment could ever clear.
+  // Whole paise, so a settlement can't leave a fraction no payment can clear.
   const parsedAmount = roundMoney(parseFloat(amount) || 0);
-  // Paying more than you owe flips the balance rather than failing, which is how
-  // a group ends up looking permanently unsettled after everyone thinks they've
-  // paid up. Flag it while the number can still be changed.
+  // Overpaying flips the balance rather than failing — flag it while the
+  // number can still change.
   const overpayBy = suggestedAmount > 0 ? roundMoney(parsedAmount - suggestedAmount) : 0;
-  // Both Android (intent://) and iOS (app-specific schemes) can hand off to a
-  // named UPI app; desktop can't, and there the copy-the-ID route is the answer.
   const canHandOff = isLikelyAndroid() || isLikelyIOS();
 
   /**
-   * The group document's copy of a member's UPI ID is a mirror that can be
-   * missing (it was never written before the profile-sync fix) or stale, which
-   * is why "Pay with UPI" never appeared even after the payee had saved an ID.
-   * Fall back to reading their user document directly.
+   * The group's copy of a member's UPI ID can be missing or stale; fall back
+   * to their user document.
    */
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +96,6 @@ export default function SettleUpModal({
   }, [toUid, toUpiId]);
 
   const upiUsable = !!resolvedUpiId && isValidUpiId(resolvedUpiId);
-
   const upiParams: UpiPaymentParams | null = resolvedUpiId
     ? {
         payeeVpa: resolvedUpiId,
@@ -103,19 +105,11 @@ export default function SettleUpModal({
       }
     : null;
 
+  const dirty = amount !== initialAmount || !!note.trim() || receiptFiles.length > 0 || paidExternally;
+
   function toggleItem(index: number) {
-    setItems((prev) =>
-      prev.map((it, i) => (i === index ? { ...it, selected: !it.selected } : it))
-    );
-  }
-
-  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files || []);
-    setReceiptFiles((prev) => [...prev, ...files]);
-  }
-
-  function removeReceipt(index: number) {
-    setReceiptFiles((prev) => prev.filter((_, i) => i !== index));
+    hapticTap();
+    setItems((prev) => prev.map((it, i) => (i === index ? { ...it, selected: !it.selected } : it)));
   }
 
   function handlePayWithApp(app: UpiApp) {
@@ -128,8 +122,8 @@ export default function SettleUpModal({
       setError(`${toName}'s UPI ID doesn't look valid, so no app can open it.`);
       return;
     }
-    // Handing off via `window.location` (see lib/upi) works in installed PWAs,
-    // where a synthesised anchor click on a non-http scheme is ignored.
+    // Hand-off via window.location (lib/upi) works in installed PWAs, where a
+    // synthesised anchor click on a non-http scheme is ignored.
     if (!launchUpi(app, upiParams)) {
       setError("Couldn't open a UPI app. Copy the UPI ID and pay manually.");
       return;
@@ -144,8 +138,7 @@ export default function SettleUpModal({
     showToast({ message: ok ? "UPI ID copied" : "Couldn't copy — long-press to select" });
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit() {
     if (parsedAmount <= 0) {
       setError("Enter a valid amount.");
       return;
@@ -168,9 +161,9 @@ export default function SettleUpModal({
         receiptUrls,
         expenseIds: expenseIds.length > 0 ? expenseIds : undefined,
       });
-      showToast({ message: `Settlement request sent to ${toName}` });
+      showToast({ message: `Request sent to ${toName}` });
       hapticSuccess();
-      onClose();
+      sheetRef.current?.dismiss();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to send settlement request");
     } finally {
@@ -179,207 +172,116 @@ export default function SettleUpModal({
   }
 
   return (
-    <GlassModal title={`Settle with ${toName}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-            Amount
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          />
-          {suggestedAmount > 0 && (
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
-              You owe {toName} {formatCurrency(suggestedAmount)}
-            </p>
-          )}
-          {overpayBy > 0 && (
-            <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-              <p className="text-[13px] text-[var(--text-secondary)]">
-                That&rsquo;s {formatCurrency(overpayBy)} more than you owe. Once{" "}
-                {toName} approves it,{" "}
-                <span className="font-medium">
-                  they&rsquo;ll owe you {formatCurrency(overpayBy)}
-                </span>{" "}
-                and this group will still show a balance.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAmount(suggestedAmount.toFixed(2))}
-                className="mt-2 rounded-full bg-[var(--surface)] px-3 py-1.5 text-[13px] font-semibold text-[var(--accent)] tap-shrink"
-              >
-                Pay exactly {formatCurrency(suggestedAmount)}
-              </button>
-            </div>
-          )}
-        </div>
-
-        {items.length > 0 && (
-          <div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-              What this covers
-            </p>
-            <div className="space-y-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-1 max-h-52 overflow-y-auto">
-              {items.map((item, i) => {
-                const myShare = item.expense.splits.find((s) => s.uid === fromUid)?.amount || 0;
-                return (
-                  <label
-                    key={item.expense.id}
-                    className="flex items-center gap-2.5 py-2 px-2.5 rounded-[var(--radius-sm)] tap-shrink"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.selected}
-                      onChange={() => toggleItem(i)}
-                      className="rounded accent-[var(--accent)] w-4 h-4 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--text-primary)] truncate font-medium">
-                        {item.expense.description}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)]">
-                        {formatCurrency(myShare)} of {formatCurrency(item.expense.amount)}
-                      </p>
-                    </div>
-                    <span className="text-[14px] font-medium text-[var(--text-primary)] shrink-0">
-                      {formatCurrency(myShare)}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {upiUsable ? (
-          <div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-              Pay with UPI
-            </p>
-            <div className="grid grid-cols-2 gap-2">
-              {UPI_APPS.map((app) => (
-                <button
-                  key={app.id}
-                  type="button"
-                  onClick={() => handlePayWithApp(app)}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
-                >
-                  <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
-                  <span className="truncate">{app.label}</span>
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={handleCopyUpi}
-              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] tap-shrink"
-            >
-              Copy UPI ID · {resolvedUpiId}
-            </button>
-            {!canHandOff ? (
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                UPI apps can only be opened from a phone. On desktop, copy{" "}
-                {toName}&rsquo;s UPI ID above and pay from your bank app.
-              </p>
-            ) : (
-              paidExternally && (
-                // The browser can't tell us whether the hand-off worked, so
-                // always offer the manual route once we've tried.
-                <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                  Nothing opened? Copy the UPI ID above and pay from your bank app.
-                </p>
-              )
-            )}
-          </div>
-        ) : resolvedUpiId ? (
-          <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-            <p className="text-[13px] text-[var(--text-secondary)]">
-              {toName}&rsquo;s saved UPI ID (
-              <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
-              handle@bank address, so UPI apps can&rsquo;t open it. Ask them to fix it in
-              Settings.
-            </p>
-          </div>
-        ) : (
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            {upiChecked
-              ? `${toName} hasn't added a UPI ID, so pay them directly (cash, UPI, etc.) and record it here.`
-              : "Checking for a UPI ID…"}
+    <Sheet
+      ref={sheetRef}
+      large
+      title="Settle Up"
+      subtitle={`with ${toName}`}
+      dirty={dirty && !busy}
+      onClose={onClose}
+      footer={
+        <>
+          <Button block busy={busy} disabled={parsedAmount <= 0} onClick={() => void handleSubmit()}>
+            {parsedAmount > 0 ? `Record ${formatCurrency(parsedAmount)} Payment` : "Record Payment"}
+          </Button>
+          <p className="t-caption mt-2 text-center text-label-2">
+            {toName} approves it before it changes the balance.
           </p>
-        )}
+        </>
+      }
+    >
+      <div className="flex justify-center pt-3">
+        <Avatar name={toName} size={56} />
+      </div>
+      <AmountField
+        id="settle-amount"
+        value={amount}
+        onChange={setAmount}
+        caption={suggestedAmount > 0 ? `You owe ${toName} ${formatCurrency(suggestedAmount)}` : undefined}
+      />
 
-        <div>
-          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-            Note (optional)
-          </label>
-          <input
-            type="text"
+      {overpayBy > 0 && (
+        <div className="card mb-1 flex items-start gap-3 p-4 rise-in">
+          <span className="mt-0.5 text-[var(--orange)]">
+            <Icon name="exclamationmark.triangle" size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="t-footnote text-label-2">
+              That&rsquo;s {formatCurrency(overpayBy)} more than you owe. Once {toName} approves it,{" "}
+              <span className="font-semibold text-label">they&rsquo;ll owe you {formatCurrency(overpayBy)}</span> and
+              this group will still show a balance.
+            </p>
+            <Button size="sm" variant="tinted" className="mt-2" onClick={() => setAmount(suggestedAmount.toFixed(2))}>
+              Pay Exactly {formatCurrency(suggestedAmount)}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <UpiPayPanel
+        toName={toName}
+        upiId={resolvedUpiId}
+        checked={upiChecked}
+        usable={upiUsable}
+        canHandOff={canHandOff}
+        handedOff={paidExternally}
+        onPay={handlePayWithApp}
+        onCopy={handleCopyUpi}
+      />
+
+      {items.length > 0 && (
+        <Section header="What this covers" footer="For reference only — it doesn't change the amount.">
+          <List>
+            {items.map((item, i) => {
+              const myShare = item.expense.splits.find((s) => s.uid === fromUid)?.amount || 0;
+              return (
+                <button
+                  key={item.expense.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={item.selected}
+                  onClick={() => toggleItem(i)}
+                  className="row is-pressable is-tall"
+                  style={sepInset(58)}
+                >
+                  <span className={item.selected ? "text-tint" : "text-label-3"} aria-hidden>
+                    <Icon name={item.selected ? "checkmark.circle.fill" : "circle"} size={26} strokeWidth={1.6} />
+                  </span>
+                  <span className="row-main">
+                    <span className="row-title">{item.expense.description}</span>
+                    <span className="row-subtitle">
+                      Your share of {formatCurrency(item.expense.amount)}
+                    </span>
+                  </span>
+                  <span className="num t-body shrink-0">{formatCurrency(myShare)}</span>
+                </button>
+              );
+            })}
+          </List>
+        </Section>
+      )}
+
+      <Section header="Note">
+        <List>
+          <FieldRow
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="For: dinner on Friday…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
+            aria-label="Note"
+            maxLength={120}
           />
-        </div>
+        </List>
+      </Section>
 
-        <div>
-          <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-            Payment screenshots (optional)
-          </p>
-          <label
-            role="button"
-            tabIndex={0}
-            aria-label="Add payment screenshots"
-            onKeyDown={activateFileInputOnKey}
-            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-tertiary)] tap-shrink"
-          >
-            {receiptFiles.length > 0
-              ? `${receiptFiles.length} file(s) selected — tap to add more`
-              : paidExternally
-              ? "Add a screenshot of your payment"
-              : "Tap to select screenshots"}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleReceipts}
-              className="hidden"
-            />
-          </label>
-          {receiptFiles.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {receiptFiles.map((f, i) => (
-                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--text-secondary)]">
-                  <span className="truncate">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeReceipt(i)}
-                    className="text-[var(--danger)] ml-2 shrink-0 tap-shrink"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <Section header="Payment screenshot">
+        <Attachments
+          files={receiptFiles}
+          onChange={setReceiptFiles}
+          label={paidExternally ? "Add a Screenshot of Your Payment" : "Add Screenshot"}
+        />
+      </Section>
 
-        <p className="text-[13px] text-[var(--text-tertiary)]">
-          This sends a settlement request to {toName}. They will need to approve
-          it for it to be reflected in the group balance.
-        </p>
-
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-        <GlassButton disabled={busy} className="w-full">
-          {busy ? "Sending…" : "Send Settlement Request"}
-        </GlassButton>
-      </form>
-    </GlassModal>
+      {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
+    </Sheet>
   );
 }

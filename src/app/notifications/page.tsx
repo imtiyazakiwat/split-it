@@ -1,47 +1,37 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
-import { hasUnread } from "@/lib/chat";
-import {
-  updateSettlementStatus,
-} from "@/lib/firestore";
-import {
-  activeExpenses,
-  canRespondToSettlement,
-  formatCurrency,
-  settlementCreator,
-} from "@/lib/balance";
+import { hasUnread } from "@/lib/chat-thread";
+import { activeExpenses, canRespondToSettlement, formatCurrency, settlementCreator } from "@/lib/balance";
 import { groupItemLink } from "@/lib/statement";
 import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
 import { hapticSuccess } from "@/lib/haptics";
+import Screen from "@/components/kit/Screen";
+import { List, RowLink, Section, sepInset } from "@/components/kit/List";
+import { IconTile } from "@/components/kit/Tile";
+import { Button, EmptyState } from "@/components/kit/Controls";
+import { NavLink } from "@/components/kit/nav";
 
 type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
 
 interface NotificationItem {
   key: string;
   ts: number;
-  /**
-   * Empty for notifications that don't belong to a group — a direct transfer or
-   * a chat message. Those carry `href` instead, since there is no group item to
-   * deep-link into.
-   */
+  /** Empty for direct transfers and chat, which carry `href` instead. */
   groupId: string;
   groupName: string;
   kind: NotificationKind;
   title: React.ReactNode;
   subtitle: string;
   settlement?: Settlement;
-  /** The expense this notification is about, when it is about one. */
   expenseId?: string;
-  /** Explicit navigation target, used when there is no group item to link to. */
   href?: string;
 }
 
@@ -52,63 +42,30 @@ function dateBucket(ts: number): string {
   const days = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (days < 7) return d.toLocaleDateString("en-IN", { weekday: "long" });
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
 }
 
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-function KindIcon({ kind }: { kind: NotificationKind }) {
-  if (kind === "request")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-warning)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
-        </svg>
-      </span>
-    );
-  if (kind === "status")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" />
-        </svg>
-      </span>
-    );
-  if (kind === "transfer")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 3v18M8 7h5.5a2.5 2.5 0 0 1 0 5H8M8 12h8M8 16.5h8" />
-        </svg>
-      </span>
-    );
-  if (kind === "message")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 11.5a8 8 0 0 1-8 8H8l-4 3v-4.6A8 8 0 0 1 13 3.5a8 8 0 0 1 8 8Z" />
-        </svg>
-      </span>
-    );
-  return (
-    <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9 8h6M9 12h6" />
-      </svg>
-    </span>
-  );
+function KindTile({ kind }: { kind: NotificationKind }) {
+  if (kind === "request") return <IconTile icon="clock" color="var(--orange)" />;
+  if (kind === "status") return <IconTile icon="checkmark" color="var(--green)" />;
+  if (kind === "transfer") return <IconTile icon="indianrupee" color="var(--teal)" />;
+  if (kind === "message") return <IconTile icon="message" color="var(--blue)" />;
+  return <IconTile icon="receipt" color="var(--indigo)" />;
 }
+
+const B = ({ children }: { children: React.ReactNode }) => <span className="font-semibold">{children}</span>;
+const M = ({ children }: { children: React.ReactNode }) => <span className="text-label-2">{children}</span>;
 
 export default function NotificationsPage() {
   const { user, loading } = useAuth();
-  const router = useRouter();
   const showToast = useToast();
   const { datasets } = useGroupData();
-  // Direct transfers and chat live outside any group, so they were invisible
-  // here: this page only ever walked group expenses and settlements.
+  // Direct transfers and chat live outside any group.
   const { transfers, threads } = usePayments();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [seenAt] = useState<number>(() => {
@@ -126,9 +83,7 @@ export default function NotificationsPage() {
         target === uid ? "You" : group.members?.[target]?.displayName || "Someone";
 
       for (const s of settlements) {
-        // Either side can raise a settlement: a payment you say you made, or
-        // a payment someone recorded against you. Whoever did NOT create it is
-        // the one who has to act.
+        // Whoever did NOT create a settlement is the one who has to act.
         if (canRespondToSettlement(s, uid)) {
           const creator = settlementCreator(s);
           const isOffset = s.kind === "offset";
@@ -140,22 +95,16 @@ export default function NotificationsPage() {
             kind: "request",
             title: isOffset ? (
               <>
-                <span className="font-semibold">{name(creator)}</span>
-                <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
-                <span className="font-semibold">{formatCurrency(s.amount)}</span>
-                <span className="text-[var(--text-tertiary)]"> in {group.name}</span>
+                <B>{name(creator)}</B> <M>wants to cancel out</M> <B>{formatCurrency(s.amount)}</B>{" "}
+                <M>in {group.name}</M>
               </>
             ) : s.fromUid === creator ? (
               <>
-                <span className="font-semibold">{name(s.fromUid)}</span>
-                <span className="text-[var(--text-tertiary)]"> says they paid you </span>
-                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+                <B>{name(s.fromUid)}</B> <M>says they paid you</M> <B>{formatCurrency(s.amount)}</B>
               </>
             ) : (
               <>
-                <span className="font-semibold">{name(creator)}</span>
-                <span className="text-[var(--text-tertiary)]"> recorded your payment of </span>
-                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+                <B>{name(creator)}</B> <M>recorded your payment of</M> <B>{formatCurrency(s.amount)}</B>
               </>
             ),
             subtitle: `${group.name}${s.note ? ` · ${s.note}` : ""}`,
@@ -170,23 +119,14 @@ export default function NotificationsPage() {
             kind: "status",
             title: (
               <>
-                <span className="text-[var(--text-tertiary)]">Your settlement with </span>
-                <span className="font-semibold">
-                  {name(s.fromUid === uid ? s.toUid : s.fromUid)}
-                </span>
-                <span className="text-[var(--text-tertiary)]"> was </span>
-                <span
-                  className={
-                    s.status === "approved"
-                      ? "font-semibold text-[var(--pos)]"
-                      : "font-semibold text-[var(--neg)]"
-                  }
-                >
+                <M>Your settlement with</M> <B>{name(s.fromUid === uid ? s.toUid : s.fromUid)}</B> <M>was</M>{" "}
+                <span className={s.status === "approved" ? "font-semibold text-pos" : "font-semibold text-neg"}>
                   {s.status}
                 </span>
               </>
             ),
             subtitle: `${formatCurrency(s.amount)} · ${group.name}`,
+            settlement: s,
           });
         }
       }
@@ -202,11 +142,7 @@ export default function NotificationsPage() {
           expenseId: e.id,
           title: (
             <>
-              <span className="font-semibold">{name(e.createdBy)}</span>
-              <span className="text-[var(--text-tertiary)]">
-                {e.editAction === "edited" ? " updated " : " added "}
-              </span>
-              <span className="font-semibold text-[var(--brand)]">{e.description}</span>
+              <B>{name(e.createdBy)}</B> <M>{e.editAction === "edited" ? "updated" : "added"}</M> <B>{e.description}</B>
             </>
           ),
           subtitle: `${formatCurrency(e.amount)} · ${group.name}`,
@@ -214,9 +150,7 @@ export default function NotificationsPage() {
       }
     }
 
-    // ── Direct transfers ──────────────────────────────────────────────
-    // Names come from the shared-group profile mirror; someone you only ever
-    // paid directly falls back to a generic label rather than a raw uid.
+    // ── Direct transfers ──
     const nameByUid = new Map(
       computeCounterpartyBalances(uid, datasets, transfers).map((c) => [c.uid, c.displayName])
     );
@@ -227,8 +161,7 @@ export default function NotificationsPage() {
       const other = incoming ? t.fromUid : t.toUid;
 
       if (incoming && t.status === "pending") {
-        // The one genuinely actionable transfer state: money is claimed to have
-        // arrived and only this user can say what it was.
+        // The one actionable transfer state: only this user can say what it was.
         items.push({
           key: `tr-req-${t.id}`,
           ts: t.updatedAt || t.createdAt,
@@ -238,10 +171,7 @@ export default function NotificationsPage() {
           href: `/chat/${other}`,
           title: (
             <>
-              <span className="font-semibold">{personName(other)}</span>
-              <span className="text-[var(--text-tertiary)]"> sent you </span>
-              <span className="font-semibold">{formatCurrency(t.amount)}</span>
-              <span className="text-[var(--text-tertiary)]"> — confirm it</span>
+              <B>{personName(other)}</B> <M>sent you</M> <B>{formatCurrency(t.amount)}</B> <M>— confirm it</M>
             </>
           ),
           subtitle: t.note ? `Direct payment · ${t.note}` : "Direct payment",
@@ -249,7 +179,7 @@ export default function NotificationsPage() {
         continue;
       }
 
-      // The sender hearing back about what happened to their payment.
+      // The sender hearing back about their payment.
       if (!incoming && t.status !== "pending") {
         const legs = transferAllocations(t);
         const groupNameOf = (groupId: string) =>
@@ -273,20 +203,8 @@ export default function NotificationsPage() {
           href: `/chat/${other}`,
           title: (
             <>
-              <span className="text-[var(--text-tertiary)]">Your </span>
-              <span className="font-semibold">{formatCurrency(t.amount)}</span>
-              <span className="text-[var(--text-tertiary)]"> to </span>
-              <span className="font-semibold">{personName(other)}</span>
-              <span
-                className={
-                  t.status === "declined"
-                    ? " text-[var(--neg)]"
-                    : " text-[var(--text-tertiary)]"
-                }
-              >
-                {" "}
-                {outcome}
-              </span>
+              <M>Your</M> <B>{formatCurrency(t.amount)}</B> <M>to</M> <B>{personName(other)}</B>{" "}
+              <span className={t.status === "declined" ? "text-neg" : "text-label-2"}>{outcome}</span>
             </>
           ),
           subtitle: "Direct payment",
@@ -294,10 +212,7 @@ export default function NotificationsPage() {
       }
     }
 
-    // ── Chat ──────────────────────────────────────────────────────────
-    // One row per conversation, not per message: a thread with nine unread
-    // messages is one thing to deal with, and only the thread summary is loaded
-    // on this screen anyway.
+    // ── Chat: one row per conversation, not per message ──
     for (const thread of threads) {
       if (!thread.lastMessageAt || !thread.lastMessage) continue;
       if (thread.lastMessageFrom === uid) continue;
@@ -312,10 +227,7 @@ export default function NotificationsPage() {
         href: `/chat/${other}`,
         title: (
           <>
-            <span className="font-semibold">{personName(other)}</span>
-            <span className="text-[var(--text-tertiary)]">
-              {hasUnread(thread, uid) ? " messaged you" : " said"}
-            </span>
+            <B>{personName(other)}</B> <M>{hasUnread(thread, uid) ? "messaged you" : "said"}</M>
           </>
         ),
         subtitle: thread.lastMessage,
@@ -333,131 +245,121 @@ export default function NotificationsPage() {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)]">Loading…</p>
-      </div>
+      <Screen title="Notifications" back="/" tabBar>
+        <div />
+      </Screen>
     );
   }
   if (!user) return <LoginScreen />;
 
-  // groupId comes from the notification item, which was built from the group
-  // whose subcollection the settlement was actually read out of. `s.groupId` is
-  // a denormalized copy on the document, so a stale or wrong value there would
-  // send the write to the wrong group's path.
-  async function respond(
-    s: Settlement,
-    groupId: string,
-    status: "approved" | "rejected"
-  ) {
+  // groupId comes from the item, built from the group whose subcollection the
+  // settlement was read out of — `s.groupId` is a denormalised copy that could
+  // send the write to the wrong path.
+  async function respond(s: Settlement, groupId: string, status: "approved" | "rejected") {
     setBusyId(s.id);
     try {
+      const { updateSettlementStatus } = await import("@/lib/firestore");
       await updateSettlementStatus(groupId, s.id, status);
       hapticSuccess();
-      showToast({
-        message:
-          status === "approved"
-            ? "Settlement approved"
-            : "Request declined",
-      });
+      showToast({ message: status === "approved" ? "Settlement approved" : "Request declined" });
     } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update",
-      });
+      showToast({ message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update" });
     } finally {
       setBusyId(null);
     }
   }
 
-  const rows = allItems.map((item, i) => {
-    const bucket = dateBucket(item.ts);
-    const prevBucket = i > 0 ? dateBucket(allItems[i - 1].ts) : null;
-    return { item, bucket, showBucket: bucket !== prevBucket, unread: item.ts > seenAt };
-  });
+  const hrefOf = (item: NotificationItem) =>
+    item.href ??
+    groupItemLink(
+      item.groupId,
+      item.expenseId
+        ? { kind: "expense", id: item.expenseId }
+        : item.settlement
+        ? { kind: "settlement", id: item.settlement.id }
+        : undefined
+    );
+
+  const requests = allItems.filter((i) => i.kind === "request" && i.settlement);
+  const rest = allItems.filter((i) => !(i.kind === "request" && i.settlement));
+  const buckets: { label: string; items: NotificationItem[] }[] = [];
+  for (const item of rest) {
+    const label = dateBucket(item.ts);
+    const last = buckets[buckets.length - 1];
+    if (last && last.label === label) last.items.push(item);
+    else buckets.push({ label, items: [item] });
+  }
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={() => router.push("/")}
-            aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          </button>
-          <h1 className="text-[24px] font-extrabold text-[var(--text-primary)]">Notifications</h1>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-10 scroll-momentum">
-        {allItems.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="w-16 h-16 rounded-full bg-[var(--tint-accent)] flex items-center justify-center mx-auto mb-3">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
-              </svg>
-            </div>
-            <p className="text-[16px] font-semibold text-[var(--text-primary)]">You&rsquo;re all caught up</p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Payments, messages and new expenses will show up here.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {rows.map(({ item, bucket, showBucket, unread }) => (
-              <div key={item.key}>
-                {showBucket && (
-                  <p className="text-[12px] font-semibold text-[var(--text-tertiary)] mb-2 mt-2">{bucket}</p>
-                )}
-                <div
-                  onClick={() =>
-                    router.push(
-                      item.href ??
-                        groupItemLink(
-                          item.groupId,
-                          item.expenseId
-                            ? { kind: "expense", id: item.expenseId }
-                            : item.settlement
-                            ? { kind: "settlement", id: item.settlement.id }
-                            : undefined
-                        )
-                    )
-                  }
-                  className={`flex items-start gap-3 rounded-[var(--radius-inner)] p-3.5 cursor-pointer tap-shrink ${
-                    unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-                  }`}
-                >
-                  <KindIcon kind={item.kind} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[15px] text-[var(--text-primary)] leading-snug">{item.title}</p>
-                    <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5 truncate">{item.subtitle}</p>
-                    {item.kind === "request" && item.settlement && (
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "approved"); }}
-                          className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
-                        >
+    <Screen title="Notifications" back="/" tabBar>
+      {allItems.length === 0 ? (
+        <EmptyState
+          icon="bell"
+          title="You're All Caught Up"
+          message="Payments, messages and new expenses will show up here."
+        />
+      ) : (
+        <>
+          {requests.length > 0 && (
+            <Section header="Needs your response" tight>
+              <List>
+                {requests.map((item) => {
+                  const s = item.settlement!;
+                  const busy = busyId === s.id;
+                  return (
+                    <div key={item.key} className="px-4 py-3" style={sepInset(58)}>
+                      <NavLink href={hrefOf(item)} className="flex items-start gap-3">
+                        <KindTile kind={item.kind} />
+                        <span className="min-w-0 flex-1">
+                          <span className="t-body block">{item.title}</span>
+                          <span className="t-subhead block truncate text-label-2">
+                            {item.subtitle} · {timeLabel(item.ts)}
+                          </span>
+                        </span>
+                        {item.ts > seenAt && <span className="dot mt-2 bg-[var(--tint)]" aria-label="New" />}
+                      </NavLink>
+                      <div className="mt-3 flex gap-2 pl-[42px]">
+                        <Button size="sm" busy={busy} onClick={() => void respond(s, item.groupId, "approved")}>
                           Approve
-                        </button>
-                        <button
-                          disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "rejected"); }}
-                          className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
-                        >
-                          Reject
-                        </button>
+                        </Button>
+                        <Button size="sm" variant="gray" disabled={busy} onClick={() => void respond(s, item.groupId, "rejected")}>
+                          Decline
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[12px] text-[var(--text-tertiary)]">{timeLabel(item.ts)}</span>
-                    {unread && <span className="w-2 h-2 rounded-full bg-[var(--brand-solid)]" />}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+                    </div>
+                  );
+                })}
+              </List>
+            </Section>
+          )}
+
+          {buckets.map((bucket, i) => (
+            <Section key={bucket.label} header={bucket.label} tight={i === 0 && requests.length === 0}>
+              <List>
+                {bucket.items.map((item) => (
+                  <RowLink
+                    key={item.key}
+                    href={hrefOf(item)}
+                    inset="tile"
+                    tall
+                    chevron={false}
+                    leading={<KindTile kind={item.kind} />}
+                    title={item.title}
+                    wrap
+                    subtitle={item.subtitle}
+                    trailing={
+                      <span className="flex shrink-0 flex-col items-end gap-1.5 self-start pt-0.5">
+                        <span className="t-caption text-label-2">{timeLabel(item.ts)}</span>
+                        {item.ts > seenAt && <span className="dot bg-[var(--tint)]" aria-label="New" />}
+                      </span>
+                    }
+                  />
+                ))}
+              </List>
+            </Section>
+          ))}
+        </>
+      )}
+    </Screen>
   );
 }

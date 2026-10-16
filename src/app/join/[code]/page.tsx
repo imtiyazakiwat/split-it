@@ -1,14 +1,21 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getGroupByInviteCode, joinGroupByCode } from "@/lib/firestore";
+import LoginScreen from "@/components/LoginScreen";
+import { Button, EmptyState, Spinner } from "@/components/kit/Controls";
+import { useNav } from "@/components/kit/nav";
 
+/**
+ * Joining by invite link is a redirect in disguise: resolve the code, join,
+ * then replace this URL with the group (so Back doesn't land here again).
+ */
 export default function JoinPage() {
   const { code } = useParams<{ code: string }>();
-  const router = useRouter();
-  const { user, loading, signInWithGoogle } = useAuth();
+  const nav = useNav();
+  const { user, loading } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -30,7 +37,7 @@ export default function JoinPage() {
         }
         setGroupName(group.name);
         if (group.memberIds.includes(currentUser.uid)) {
-          router.replace(`/groups/${group.id}`);
+          nav.replace(`/groups/${group.id}`);
           return;
         }
         const id = await joinGroupByCode(code, currentUser.uid, {
@@ -39,7 +46,7 @@ export default function JoinPage() {
           photoURL: currentUser.photoURL || "",
         });
         if (cancelled) return;
-        if (id) router.replace(`/groups/${id}`);
+        if (id) nav.replace(`/groups/${id}`);
         else setError("Failed to join group.");
       } catch {
         if (!cancelled) setError("Something went wrong.");
@@ -52,54 +59,41 @@ export default function JoinPage() {
     return () => {
       cancelled = true;
     };
-  }, [code, user, loading, router]);
+    // `nav` is a fresh object each render; the router inside it is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [code, user, loading]);
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)]">Loading…</p>
-      </div>
+      <main className="flex min-h-dvh items-center justify-center bg-[var(--bg)] text-label-2">
+        <Spinner size={24} />
+      </main>
     );
   }
 
   if (!user) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
-        <p className="text-[var(--text-secondary)] text-center">
-          Sign in to join this group
-        </p>
-        <button
-          onClick={signInWithGoogle}
-          className="glass rounded-full px-6 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink"
-        >
-          Sign in with Google
-        </button>
-      </div>
-    );
+    return <LoginScreen title="You're Invited" note="Sign in to join the group." />;
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4">
-      <div className="text-center">
-        {busy ? (
-          <>
-            <div className="w-12 h-12 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin mx-auto mb-3" />
-            <p className="text-[var(--text-secondary)]">
-              {groupName ? `Joining ${groupName}…` : "Looking up group…"}
-            </p>
-          </>
-        ) : error ? (
-          <>
-            <p className="text-[var(--danger)] text-[15px] mb-2">{error}</p>
-            <button
-              onClick={() => router.push("/")}
-              className="text-[var(--accent)] text-sm tap-shrink"
-            >
-              Go home
-            </button>
-          </>
-        ) : null}
-      </div>
-    </div>
+    <main className="flex min-h-dvh items-center justify-center bg-[var(--bg)] px-6">
+      {error ? (
+        <EmptyState
+          icon="person.2"
+          title="Couldn't Join"
+          message={error}
+          action={
+            <Button size="md" onClick={() => nav.replace("/")}>
+              Go to Groups
+            </Button>
+          }
+        />
+      ) : (
+        <div className="flex flex-col items-center gap-3 text-center text-label-2" role="status">
+          <Spinner size={28} />
+          <p className="t-callout">{busy && groupName ? `Joining ${groupName}…` : "Looking up the group…"}</p>
+        </div>
+      )}
+    </main>
   );
 }

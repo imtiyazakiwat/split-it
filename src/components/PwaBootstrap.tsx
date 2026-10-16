@@ -1,8 +1,15 @@
 "use client";
 
+import Image from "next/image";
+import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Icon } from "@/components/kit/Icon";
+
+/** Only on the Groups screen, where it's least in the way, once per session. */
+const HINT_ROUTES = new Set(["/"]);
 
 export default function PwaBootstrap() {
+  const pathname = usePathname();
   const [state, setState] = useState({
     mounted: false,
     isIOS: false,
@@ -11,79 +18,81 @@ export default function PwaBootstrap() {
   });
 
   useEffect(() => {
-    // Runs only on the client, after the initial (SSR-matching) render, so
-    // there's no server/client markup mismatch from reading window/navigator.
-    // This is intentionally deferred to an effect (rather than computed
-    // during render) because `window`/`navigator` don't exist during SSR —
-    // computing this eagerly would cause a hydration mismatch.
+    // Deferred to an effect (not computed during render) because window and
+    // navigator don't exist during SSR; reading them eagerly would cause a
+    // hydration mismatch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({
       mounted: true,
-      // iPadOS 13+ reports a desktop UA ("Macintosh…") with touch — detect it
-      // via maxTouchPoints rather than the platform string alone.
+      // iPadOS 13+ reports a desktop UA ("Macintosh…") with touch.
       isIOS:
         (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-          (navigator.userAgent.includes("Macintosh") &&
-            navigator.maxTouchPoints > 1)) &&
+          (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1)) &&
         !("MSStream" in window),
       isStandalone: window.matchMedia("(display-mode: standalone)").matches,
       dismissed: sessionStorage.getItem("pwa-install-dismissed") === "1",
     });
 
-    // Ask the OS to spare our origin under storage pressure (Safari evicts
-    // least-recently-used origins when space runs low). Firestore's own
-    // persistent cache holds the data; this keeps the evictor off our back.
+    // Ask the OS to spare our origin under storage pressure. Firestore's own
+    // persistent cache holds the data; this keeps the evictor off it.
     if (navigator.storage?.persist) {
-      navigator.storage.persist().catch(() => {
-        // Best-effort: eviction policy is the OS's call either way.
-      });
+      navigator.storage.persist().catch(() => {});
     }
 
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
-        // Non-fatal: app still works without the service worker,
-        // just loses share-target file capture and offline caching.
+        // Non-fatal: the app works without it, minus share-target and offline.
       });
     }
   }, []);
 
-  // Tracks the visible viewport (keyboard, Safari chrome) into --app-height so
-  // dvh-backed sheets size to what's actually on screen. Read-only: no layout
-  // writes besides the single CSS variable.
+  // Tracks the visible viewport into --app-height (keyboard and Safari chrome
+  // included) and the keyboard's overlap into --kb-inset, so bottom sheets can
+  // sit above an iOS keyboard instead of behind it. Read-only apart from the
+  // two CSS variables.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const sync = () =>
-      document.documentElement.style.setProperty("--app-height", `${vv.height}px`);
+    const root = document.documentElement;
+    const sync = () => {
+      root.style.setProperty("--app-height", `${vv.height}px`);
+      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      root.style.setProperty("--kb-inset", `${Math.round(overlap)}px`);
+      // Where the visible area starts when iOS pans the page for the keyboard,
+      // so a full-height screen (the conversation) can track it exactly.
+      root.style.setProperty("--vv-top", `${Math.round(Math.max(0, vv.offsetTop))}px`);
+    };
     sync();
     vv.addEventListener("resize", sync);
-    return () => vv.removeEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    return () => {
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+    };
   }, []);
 
   const { mounted, isIOS, isStandalone, dismissed } = state;
-
-  if (!mounted || isStandalone || dismissed || !isIOS) return null;
+  if (!mounted || isStandalone || dismissed || !isIOS || !HINT_ROUTES.has(pathname)) return null;
 
   return (
-    <div className="glass glass-strong fixed bottom-4 left-4 right-4 max-w-md mx-auto rounded-[var(--radius-lg)] p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] text-sm flex items-center justify-between gap-3 z-30 animate-modal-in">
-      <p className="text-[var(--text-primary)]">
-        Install SplitIt: tap Share{" "}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline -mt-0.5" aria-label="Share">
-          <path d="M12 3v13" />
-          <path d="m7 8 5-5 5 5" />
-          <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
-        </svg>{" "}
-        then &ldquo;Add to Home Screen&rdquo;.
+    <div className="install-hint glass-thick rise-in" role="note">
+      <Image src="/icon-192.png" alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-[10px]" />
+      <p className="t-footnote min-w-0 flex-1 text-label">
+        <span className="block font-semibold">Install SplitIt</span>
+        <span className="text-label-2">
+          Tap <Icon name="share" size={14} className="-mt-0.5 inline" /> then “Add to Home Screen”.
+        </span>
       </p>
       <button
+        type="button"
         onClick={() => {
           sessionStorage.setItem("pwa-install-dismissed", "1");
           setState((s) => ({ ...s, dismissed: true }));
         }}
-        className="text-[var(--text-tertiary)] text-lg leading-none tap-shrink shrink-0"
+        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-label-2"
         aria-label="Dismiss"
       >
-        ×
+        <Icon name="xmark" size={18} strokeWidth={2.2} />
       </button>
     </div>
   );
