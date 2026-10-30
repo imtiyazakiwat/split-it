@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import GlassModal from "./GlassModal";
+import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useSheetLayer } from "@/lib/sheet-layer";
+import { useOverlayBehavior } from "@/lib/overlay-stack";
+import { ActionSheetInline } from "./GlassModal";
 
 /**
- * Styled replacement for native confirm()/alert(). The confirm action may be
- * async: while it runs the dialog shows a busy state and locks dismissal, and
- * if it throws, the error is shown inline instead of closing (so failed
- * mutations no longer need a separate alert()).
+ * Confirmation as an iOS action sheet: title + message, the action (red when
+ * destructive), and a separate Cancel. The confirm action may be async: while
+ * it runs the sheet locks, and if it throws the error shows inline instead of
+ * closing.
  */
 export default function ConfirmDialog({
   title,
@@ -26,8 +29,13 @@ export default function ConfirmDialog({
   onConfirm: () => void | Promise<void>;
   onClose: () => void;
 }) {
+  useSheetLayer();
+  const ref = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  useOverlayBehavior(ref, () => {
+    if (!busy) onClose();
+  });
 
   async function handleConfirm() {
     setBusy(true);
@@ -41,36 +49,19 @@ export default function ConfirmDialog({
     }
   }
 
-  return (
-    <GlassModal title={title} onClose={busy ? () => {} : onClose}>
-      <div className="space-y-4">
-        {message && (
-          <p className="text-[14px] leading-relaxed text-[var(--text-secondary)] whitespace-pre-line">
-            {message}
-          </p>
-        )}
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-        <div className="flex gap-2.5">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="flex-1 rounded-full bg-[var(--text-tertiary)]/15 px-4 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink disabled:opacity-50"
-          >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={handleConfirm}
-            disabled={busy}
-            className={`flex-1 rounded-full px-4 py-2.5 text-[15px] font-semibold text-white tap-shrink disabled:opacity-50 ${
-              destructive ? "bg-[var(--danger)]" : "bg-[var(--accent)]"
-            }`}
-          >
-            {busy ? "Working…" : confirmLabel}
-          </button>
-        </div>
-      </div>
-    </GlassModal>
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    <div ref={ref}>
+      <ActionSheetInline
+        title={title}
+        message={message}
+        error={error}
+        busy={busy}
+        cancelLabel={cancelLabel}
+        onCancel={onClose}
+        actions={[{ label: confirmLabel, destructive, onClick: handleConfirm }]}
+      />
+    </div>,
+    document.body
   );
 }

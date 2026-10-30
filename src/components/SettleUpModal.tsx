@@ -19,7 +19,9 @@ import {
 } from "@/lib/upi";
 import { UpiAppIcon } from "@/components/UpiAppIcon";
 import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
+import { ButtonRow, FieldRow, ListSection, Row } from "@/components/ui/List";
+import { AmountInput } from "@/components/ui/Controls";
+import { Checkmark, Copy, Paperclip } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 
@@ -179,206 +181,155 @@ export default function SettleUpModal({
   }
 
   return (
-    <GlassModal title={`Settle with ${toName}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-            Amount
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            inputMode="decimal"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          />
+    <GlassModal
+      title="Settle Up"
+      large
+      onClose={onClose}
+      dirty={!busy && (receiptFiles.length > 0 || note.trim() !== "" || paidExternally)}
+      footer={
+        <button type="submit" form="settle-form" disabled={busy || parsedAmount <= 0} className="btn-prominent w-full">
+          {busy ? "Sending…" : `Record ${parsedAmount > 0 ? formatCurrency(parsedAmount) : "Payment"}`}
+        </button>
+      }
+    >
+      <form id="settle-form" onSubmit={handleSubmit}>
+        <div className="flex flex-col items-center pt-3 pb-1 text-center">
+          <p className="t-subhead text-[var(--text-secondary)]">Paying {toName}</p>
+          <AmountInput value={amount} onChange={setAmount} />
           {suggestedAmount > 0 && (
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
-              You owe {toName} {formatCurrency(suggestedAmount)}
-            </p>
-          )}
-          {overpayBy > 0 && (
-            <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-              <p className="text-[13px] text-[var(--text-secondary)]">
-                That&rsquo;s {formatCurrency(overpayBy)} more than you owe. Once{" "}
-                {toName} approves it,{" "}
-                <span className="font-medium">
-                  they&rsquo;ll owe you {formatCurrency(overpayBy)}
-                </span>{" "}
-                and this group will still show a balance.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAmount(suggestedAmount.toFixed(2))}
-                className="mt-2 rounded-full bg-[var(--surface)] px-3 py-1.5 text-[13px] font-semibold text-[var(--accent)] tap-shrink"
-              >
-                Pay exactly {formatCurrency(suggestedAmount)}
-              </button>
-            </div>
+            <p className="t-footnote text-[var(--text-secondary)]">You owe {formatCurrency(suggestedAmount)}</p>
           )}
         </div>
 
-        {items.length > 0 && (
-          <div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-              What this covers
-            </p>
-            <div className="space-y-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-1 max-h-52 overflow-y-auto">
-              {items.map((item, i) => {
-                const myShare = item.expense.splits.find((s) => s.uid === fromUid)?.amount || 0;
-                return (
-                  <label
-                    key={item.expense.id}
-                    className="flex items-center gap-2.5 py-2 px-2.5 rounded-[var(--radius-sm)] tap-shrink"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={item.selected}
-                      onChange={() => toggleItem(i)}
-                      className="rounded accent-[var(--accent)] w-4 h-4 shrink-0"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--text-primary)] truncate font-medium">
-                        {item.expense.description}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)]">
-                        {formatCurrency(myShare)} of {formatCurrency(item.expense.amount)}
-                      </p>
-                    </div>
-                    <span className="text-[14px] font-medium text-[var(--text-primary)] shrink-0">
-                      {formatCurrency(myShare)}
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </div>
+        {overpayBy > 0 && (
+          <ListSection elevated footer={`Once ${toName} approves it, they'll owe you ${formatCurrency(overpayBy)} and this group will still show a balance.`}>
+            <Row title={<span className="text-[var(--warning)]">{formatCurrency(overpayBy)} more than you owe</span>} />
+            <ButtonRow onClick={() => setAmount(suggestedAmount.toFixed(2))} title={`Pay Exactly ${formatCurrency(suggestedAmount)}`} action />
+          </ListSection>
         )}
 
         {upiUsable ? (
-          <div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-              Pay with UPI
-            </p>
-            <div className="grid grid-cols-2 gap-2">
+          <ListSection
+            elevated
+            header="Pay with UPI"
+            footer={
+              !canHandOff
+                ? `UPI apps open only on a phone. Copy ${toName}'s UPI ID and pay from your bank app.`
+                : paidExternally
+                ? "Nothing opened? Copy the UPI ID and pay from your bank app."
+                : "Opens the app with the amount filled in. Come back here to record it."
+            }
+          >
+            <div className="grid grid-cols-4 gap-1 px-2 py-3">
               {UPI_APPS.map((app) => (
                 <button
                   key={app.id}
                   type="button"
                   onClick={() => handlePayWithApp(app)}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
+                  className="flex flex-col items-center gap-1.5 py-1 tap-shrink"
                 >
-                  <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
-                  <span className="truncate">{app.label}</span>
+                  <span className="w-12 h-12 rounded-[13px] bg-[var(--surface)] grid place-items-center shadow-[0_0_0_0.5px_var(--separator)]">
+                    <UpiAppIcon id={app.id} className="w-7 h-7" />
+                  </span>
+                  <span className="t-caption text-[var(--text-primary)] truncate max-w-full">{app.label}</span>
                 </button>
               ))}
             </div>
-            <button
-              type="button"
+            <ButtonRow
               onClick={handleCopyUpi}
-              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] tap-shrink"
-            >
-              Copy UPI ID · {resolvedUpiId}
-            </button>
-            {!canHandOff ? (
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                UPI apps can only be opened from a phone. On desktop, copy{" "}
-                {toName}&rsquo;s UPI ID above and pay from your bank app.
-              </p>
-            ) : (
-              paidExternally && (
-                // The browser can't tell us whether the hand-off worked, so
-                // always offer the manual route once we've tried.
-                <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                  Nothing opened? Copy the UPI ID above and pay from your bank app.
-                </p>
-              )
-            )}
-          </div>
-        ) : resolvedUpiId ? (
-          <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-            <p className="text-[13px] text-[var(--text-secondary)]">
-              {toName}&rsquo;s saved UPI ID (
-              <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
-              handle@bank address, so UPI apps can&rsquo;t open it. Ask them to fix it in
-              Settings.
-            </p>
-          </div>
+              leading={<span className="text-[var(--brand)]"><Copy size={19} /></span>}
+              title="Copy UPI ID"
+              detail={<span className="selectable">{resolvedUpiId}</span>}
+              action
+            />
+          </ListSection>
         ) : (
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            {upiChecked
-              ? `${toName} hasn't added a UPI ID, so pay them directly (cash, UPI, etc.) and record it here.`
-              : "Checking for a UPI ID…"}
-          </p>
+          <ListSection elevated>
+            <Row
+              title={
+                <span className="whitespace-normal t-subhead text-[var(--text-secondary)]">
+                  {resolvedUpiId
+                    ? `${toName}'s saved UPI ID (${resolvedUpiId}) isn't a valid handle@bank address, so UPI apps can't open it. Ask them to fix it in Settings.`
+                    : upiChecked
+                    ? `${toName} hasn't added a UPI ID. Pay them however you like, then record it here.`
+                    : "Checking for a UPI ID…"}
+                </span>
+              }
+            />
+          </ListSection>
         )}
 
-        <div>
-          <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-            Note (optional)
-          </label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="For: dinner on Friday…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          />
-        </div>
+        {items.length > 0 && (
+          <ListSection elevated header="What this covers" footer="Ticking items only tags them. It never changes the amount.">
+            {items.map((item, i) => {
+              const myShare = item.expense.splits.find((s) => s.uid === fromUid)?.amount || 0;
+              return (
+                <button
+                  key={item.expense.id}
+                  type="button"
+                  role="checkbox"
+                  aria-checked={item.selected}
+                  onClick={() => toggleItem(i)}
+                  className="list-row"
+                  style={{ ["--sep-inset" as string]: "50px" }}
+                >
+                  <span
+                    className={`w-[22px] h-[22px] rounded-full grid place-items-center shrink-0 ${
+                      item.selected ? "bg-[var(--brand-solid)] text-white" : "ring-[1.5px] ring-inset ring-[var(--text-tertiary)]"
+                    }`}
+                    aria-hidden
+                  >
+                    {item.selected && <Checkmark size={13} weight={3.2} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block t-body truncate text-[var(--text-primary)]">{item.expense.description}</span>
+                    <span className="block t-footnote text-[var(--text-secondary)]">of {formatCurrency(item.expense.amount)}</span>
+                  </span>
+                  <span className="t-body t-numeral text-[var(--text-secondary)]">{formatCurrency(myShare)}</span>
+                </button>
+              );
+            })}
+          </ListSection>
+        )}
 
-        <div>
-          <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-            Payment screenshots (optional)
-          </p>
+        <ListSection elevated footer={`${toName} approves it before it counts in the group balance.`}>
+          <FieldRow label="Note">
+            <input
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional"
+              aria-label="Note"
+              className="row-input py-[13px]"
+            />
+          </FieldRow>
           <label
             role="button"
             tabIndex={0}
             aria-label="Add payment screenshots"
             onKeyDown={activateFileInputOnKey}
-            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-tertiary)] tap-shrink"
+            className="list-row cursor-pointer active:bg-[var(--pressed)]"
           >
-            {receiptFiles.length > 0
-              ? `${receiptFiles.length} file(s) selected — tap to add more`
-              : paidExternally
-              ? "Add a screenshot of your payment"
-              : "Tap to select screenshots"}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleReceipts}
-              className="hidden"
-            />
+            <span className="text-[var(--brand)]"><Paperclip size={20} /></span>
+            <span className="flex-1 t-body text-[var(--brand)]">
+              {receiptFiles.length > 0 ? "Add Another Screenshot" : paidExternally ? "Attach Payment Screenshot" : "Attach Screenshot"}
+            </span>
+            <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
           </label>
-          {receiptFiles.length > 0 && (
-            <div className="mt-2 space-y-1">
-              {receiptFiles.map((f, i) => (
-                <div key={i} className="flex items-center justify-between text-[13px] text-[var(--text-secondary)]">
-                  <span className="truncate">{f.name}</span>
-                  <button
-                    type="button"
-                    onClick={() => removeReceipt(i)}
-                    className="text-[var(--danger)] ml-2 shrink-0 tap-shrink"
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+          {receiptFiles.map((f, i) => (
+            <Row
+              key={`${f.name}-${i}`}
+              title={<span className="text-[var(--text-secondary)]">{f.name}</span>}
+              detail={
+                <button type="button" onClick={() => removeReceipt(i)} className="t-body text-[var(--neg)] min-h-[44px] -my-3 px-1">
+                  Remove
+                </button>
+              }
+            />
+          ))}
+        </ListSection>
 
-        <p className="text-[13px] text-[var(--text-tertiary)]">
-          This sends a settlement request to {toName}. They will need to approve
-          it for it to be reflected in the group balance.
-        </p>
-
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-        <GlassButton disabled={busy} className="w-full">
-          {busy ? "Sending…" : "Send Settlement Request"}
-        </GlassButton>
+        {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
       </form>
     </GlassModal>
   );

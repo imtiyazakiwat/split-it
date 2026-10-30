@@ -1,149 +1,213 @@
 @import "tailwindcss";
 
 /* ==========================================================================
-   SplitIt — iOS 26 "Liquid Glass" inspired design tokens
+   SplitIt — iOS 27 design tokens
+
+   iOS 27 keeps the iOS 26 Liquid Glass language and tunes it for
+   readability: denser glass, darker rim, brighter specular edge. Glass is for
+   the floating navigation layer only (tab bar, nav-bar buttons, menus,
+   floating controls). Content (lists, cards, rows) uses opaque surfaces and
+   separates by tone, weight and space rather than lines.
+
+   Token names below are the app's established vocabulary (every screen reads
+   them); their values are now the iOS 26/27 system palette.
    ========================================================================== */
 
 :root {
-  /* Base surfaces */
-  --background: #f2f2f7; /* iOS systemGroupedBackground (light) */
-  --foreground: #1c1c1e; /* iOS label (light) */
-  --surface: #ffffff; /* iOS secondarySystemGroupedBackground */
-  --surface-elevated: #ffffff;
-  --border-subtle: rgba(60, 60, 67, 0.12);
+  color-scheme: light dark;
 
-  /* Brand accent — unified to indigo (see canonical scale below) */
-  --accent: var(--brand-solid);
-  --accent-foreground: var(--brand-fg);
+  /* ── Surfaces ── */
+  --background: #f2f2f7;           /* systemGroupedBackground */
+  --foreground: #000000;
+  --surface: #ffffff;              /* secondarySystemGroupedBackground */
+  --surface-elevated: #ffffff;     /* rows inside sheets */
+  --surface-sheet: #f2f2f7;        /* sheet body (grouped, elevated) */
+  --pressed: rgba(0, 0, 0, 0.06);  /* row highlight flash */
 
-  /* Semantic */
-  --success: #34c759;
-  --danger: #ff3b30;
-  --warning: #ff9500;
-
-  /* Text hierarchy — iOS label ramp (primary 94% / secondary 60% /
-     tertiary 30% / quaternary 18%). The single text scale for the whole app;
-     fills, tints and pos/neg below complete the system. */
-
-  /* Liquid Glass material tokens */
-  --glass-bg: rgba(255, 255, 255, 0.55);
-  --glass-bg-strong: rgba(255, 255, 255, 0.72);
-  --glass-border: rgba(255, 255, 255, 0.6);
-  --glass-highlight: rgba(255, 255, 255, 0.9);
-  --glass-shadow: rgba(0, 0, 0, 0.08);
-  --glass-blur: 20px;
-  --glass-saturate: 180%;
-
-  /* Radii matching iOS 26 continuous corner curvature */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
-  --radius-xl: 28px;
-
-  /* Height of the floating tab bar, excluding the safe-area inset it adds
-     underneath. Floating buttons and page bottom padding both derive their
-     offset from this so the two can never drift apart. */
-  --nav-h: 5.25rem;
-  --radius-pill: 999px;
-
-  /* ── Canonical semantic scale (used by every screen).
-     Light values are the iOS label ramp; dark values adapt for legibility
-     on dark surfaces. ── */
-  --text-primary: rgba(0, 0, 0, 0.94);
+  /* ── Labels (iOS ramp) ── */
+  --text-primary: #000000;
   --text-secondary: rgba(60, 60, 67, 0.6);
   --text-tertiary: rgba(60, 60, 67, 0.3);
   --text-quaternary: rgba(60, 60, 67, 0.18);
+  /* Metadata that must still pass AA on white (label-3 at 30% does not). */
+  --text-meta: #6c6c72;
+  --chevron: #c4c4c7;
 
-  --fill: #f1f5f9;              /* was slate-100 */
-  --fill-soft: #f8fafc;        /* was slate-50 */
+  /* ── Separators & fills ── */
+  --separator: rgba(60, 60, 67, 0.18);
+  --border-subtle: rgba(60, 60, 67, 0.12);
+  --hairline: rgba(0, 0, 0, 0.04);
+  --fill: rgba(120, 120, 128, 0.16);
+  --fill-soft: rgba(118, 118, 128, 0.08);
+  --fill-strong: rgba(120, 120, 128, 0.2);
 
-  --brand: #4f46e5;            /* indigo-600 — text/icons */
-  --brand-solid: #4f46e5;      /* indigo-600 — filled button bg */
+  /* ── System colors (iOS 26/27) ── */
+  --blue: #0088ff;
+  --green: #34c759;
+  --red: #ff383c;
+  --orange: #ff8d28;
+  --yellow: #ffcc00;
+  --indigo: #6155f5;
+  --purple: #cb30e0;
+  --teal: #00c3d0;
+  --pink: #ff2d55;
+  --gray: #8e8e93;
+
+  /* ── One accent. SplitIt's indigo, mapped onto iOS indigo so the tint
+     reads as a system color. Text-weight accent is darkened for AA. ── */
+  --brand: #4f46e5;
+  --brand-solid: #5b4ff0;
   --brand-fg: #ffffff;
+  --accent: var(--brand-solid);
+  --accent-foreground: var(--brand-fg);
 
-  --tint-accent: #eef2ff;      /* was indigo-50 */
-  --tint-accent-2: #e0e7ff;    /* was indigo-100 */
-  --tint-success: #dcfce7;     /* was green-100 */
-  --tint-success-soft: #ecfdf5;/* was emerald-50 */
-  --tint-danger: #fee2e2;      /* was red-100 */
-  --tint-danger-soft: #fef2f2; /* was red-50 / rose-50 */
-  --tint-warning: #fef3c7;     /* was amber-100 */
+  /* ── Semantic ── */
+  --success: var(--green);
+  --danger: var(--red);
+  --warning: #c26200;               /* orange text, AA on white */
+  --pos: #248a3d;                   /* systemGreen, accessible text variant */
+  --neg: #e5262b;                   /* systemRed, accessible text variant */
 
-  --pos: #16a34a;              /* was green-600 */
-  --neg: #ef4444;              /* was red-500 */
+  /* Tinted fills: 12-15% of the tint, as iOS uses for tinted buttons/badges. */
+  --tint-accent: color-mix(in srgb, var(--brand-solid) 12%, transparent);
+  --tint-accent-2: color-mix(in srgb, var(--brand-solid) 18%, transparent);
+  --tint-success: color-mix(in srgb, var(--green) 16%, transparent);
+  --tint-success-soft: color-mix(in srgb, var(--green) 10%, transparent);
+  --tint-danger: color-mix(in srgb, var(--red) 15%, transparent);
+  --tint-danger-soft: color-mix(in srgb, var(--red) 9%, transparent);
+  --tint-warning: color-mix(in srgb, var(--orange) 16%, transparent);
 
-  /* Elevation — consolidated from ad-hoc shadow recipes */
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-  --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.12);
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.03), 0 16px 36px -24px rgba(0, 0, 0, 0.22);
-  --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.2);
+  /* ── Liquid Glass (iOS 27 tuning) ── */
+  --glass-bg: rgba(255, 255, 255, 0.74);
+  --glass-thick: rgba(250, 250, 252, 0.92);
+  --glass-rim: rgba(0, 0, 0, 0.09);
+  --glass-spec: rgba(255, 255, 255, 0.95);
+  --glass-shadow: 0 10px 30px rgba(0, 0, 0, 0.1), 0 1px 4px rgba(0, 0, 0, 0.06);
+  --glass-blur: 20px;
+  --lens: rgba(0, 0, 0, 0.07);
+  --scrim: rgba(0, 0, 0, 0.32);
 
-  /* Card radii — consolidated (inner 18 / card 22 / xl 28 = --radius-xl) */
-  --radius-inner: 18px;
-  --radius-card: 22px;
+  /* ── Shadows: whisper-quiet on light ── */
+  --shadow-sm: 0 1px 4px rgba(0, 0, 0, 0.02);
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.02);
+  --shadow-button: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --shadow-float: 0 6px 20px rgba(0, 0, 0, 0.08);
+  --shadow-sheet: 0 -4px 25px rgba(0, 0, 0, 0.08);
+  --shadow-accent: 0 2px 8px color-mix(in srgb, var(--brand-solid) 35%, transparent);
 
-  /* ── Motion tokens. Every animation in the app derives from these so timing
-     feels like one system, and Reduce Motion collapses them in one place.
-     Springs communicate travel (push/pop/sheets); fades communicate
-     appearance (tab switches, toasts, banners). ── */
-  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  /* ── Radii (concentric family, iOS 26 rounder corners) ── */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-inner: 16px;
+  --radius-lg: 20px;
+  --radius-card: 22px;     /* inset-grouped sections */
+  --radius-xl: 28px;
+  --radius-sheet: 38px;
+  --radius-pill: 999px;
+
+  /* ── Layout metrics ── */
+  --margin: 16px;
+  --tab-h: 62px;
+  --tab-bottom: max(calc(env(safe-area-inset-bottom) - 10px), 12px);
+  /* Height of the floating tab bar region, excluding the safe-area inset
+     (kept as the name existing screens use for bottom padding). */
+  --nav-h: calc(var(--tab-h) + 12px);
+  --content-bottom: calc(var(--tab-h) + var(--tab-bottom) + 28px);
+
+  /* ── Type ── */
+  --font-sans-fallback: "Inter";
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro", var(--font-inter, var(--font-sans-fallback)), "Inter", system-ui, sans-serif;
+  --font-rounded: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, var(--font-inter, var(--font-sans-fallback)), "Inter", system-ui, sans-serif;
+
+  /* ── Motion: springs approximated as iOS curves ── */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);  /* iOS default ease-out */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-bouncy: cubic-bezier(0.34, 1.4, 0.64, 1);
   --dur-instant: 150ms;
   --dur-fast: 250ms;
-  --dur-normal: 300ms;
-  --dur-route: 380ms;
+  --dur-normal: 380ms;
+  --dur-route: 460ms;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     --background: #000000;
-    --foreground: #f2f2f7;
+    --foreground: #ffffff;
     --surface: #1c1c1e;
-    --surface-elevated: #242426;
-    --border-subtle: rgba(255, 255, 255, 0.12);
+    --surface-elevated: #2c2c2e;
+    --surface-sheet: #1c1c1e;
+    --pressed: rgba(255, 255, 255, 0.08);
 
-    --accent: var(--brand-solid);
-    --accent-foreground: var(--brand-fg);
-
-    --success: #30d158;
-    --danger: #ff453a;
-    --warning: #ff9f0a;
-
-    --glass-bg: rgba(28, 28, 30, 0.55);
-    --glass-bg-strong: rgba(28, 28, 30, 0.75);
-    --glass-border: rgba(255, 255, 255, 0.14);
-    --glass-highlight: rgba(255, 255, 255, 0.16);
-    --glass-shadow: rgba(0, 0, 0, 0.4);
-
-    /* Canonical semantic scale — dark (iOS ramp, white base) */
-    --text-primary: rgba(255, 255, 255, 0.95);
+    --text-primary: #ffffff;
     --text-secondary: rgba(235, 235, 245, 0.6);
     --text-tertiary: rgba(235, 235, 245, 0.3);
-    --text-quaternary: rgba(235, 235, 245, 0.18);
+    --text-quaternary: rgba(235, 235, 245, 0.16);
+    --text-meta: #98989f;
+    --chevron: #5a5a5e;
 
-    --fill: rgba(255, 255, 255, 0.09);
-    --fill-soft: rgba(255, 255, 255, 0.05);
+    --separator: rgba(84, 84, 88, 0.55);
+    --border-subtle: rgba(84, 84, 88, 0.45);
+    --hairline: rgba(255, 255, 255, 0.06);
+    --fill: rgba(120, 120, 128, 0.32);
+    --fill-soft: rgba(118, 118, 128, 0.18);
+    --fill-strong: rgba(120, 120, 128, 0.36);
 
-    --brand: #a5b4fc;          /* indigo-300 — legible on dark */
-    --brand-solid: #6366f1;    /* indigo-500 — filled buttons */
+    --blue: #0091ff;
+    --green: #30d158;
+    --red: #ff4245;
+    --orange: #ff9230;
+    --yellow: #ffd600;
+    --indigo: #6d7cff;
+    --purple: #db34f2;
+    --teal: #00d2e0;
+    --pink: #ff375f;
+
+    --brand: #8b93ff;
+    --brand-solid: #6d6af8;
     --brand-fg: #ffffff;
 
-    --tint-accent: rgba(129, 140, 248, 0.18);
-    --tint-accent-2: rgba(129, 140, 248, 0.26);
-    --tint-success: rgba(48, 209, 88, 0.20);
-    --tint-success-soft: rgba(48, 209, 88, 0.12);
-    --tint-danger: rgba(255, 69, 58, 0.20);
-    --tint-danger-soft: rgba(255, 69, 58, 0.12);
-    --tint-warning: rgba(255, 159, 10, 0.20);
+    --warning: #ff9f0a;
+    --pos: #30d158;
+    --neg: #ff6961;
 
-    --pos: #4ade80;
-    --neg: #ff6b6b;
+    --glass-bg: rgba(38, 38, 42, 0.72);
+    --glass-thick: rgba(36, 36, 40, 0.94);
+    --glass-rim: rgba(255, 255, 255, 0.1);
+    --glass-spec: rgba(255, 255, 255, 0.16);
+    --glass-shadow: 0 10px 34px rgba(0, 0, 0, 0.55), 0 1px 4px rgba(0, 0, 0, 0.4);
+    --lens: rgba(255, 255, 255, 0.12);
+    --scrim: rgba(0, 0, 0, 0.5);
 
-    /* Elevation — deeper on dark so surfaces still read */
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
-    --shadow-button: 0 2px 10px -2px rgba(0, 0, 0, 0.5);
-    --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.3), 0 16px 36px -24px rgba(0, 0, 0, 0.6);
-    --shadow-float: 0 8px 30px -8px rgba(0, 0, 0, 0.6);
+    /* Shadows don't read on black: rims instead. */
+    --shadow-sm: none;
+    --shadow-card: none;
+    --shadow-button: none;
+    --shadow-float: 0 8px 24px rgba(0, 0, 0, 0.5);
+    --shadow-sheet: 0 -4px 25px rgba(0, 0, 0, 0.6);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-bg: var(--surface);
+    --glass-thick: var(--surface);
+    --glass-blur: 0px;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --text-secondary: rgba(60, 60, 67, 0.85);
+    --separator: rgba(60, 60, 67, 0.5);
+    --glass-rim: rgba(0, 0, 0, 0.3);
+    --hairline: rgba(0, 0, 0, 0.14);
+  }
+}
+@media (prefers-color-scheme: dark) and (prefers-contrast: more) {
+  :root {
+    --text-secondary: rgba(235, 235, 245, 0.85);
+    --hairline: rgba(255, 255, 255, 0.2);
+    --glass-rim: rgba(255, 255, 255, 0.3);
   }
 }
 
@@ -157,328 +221,627 @@
   --color-success: var(--success);
   --color-danger: var(--danger);
   --color-warning: var(--warning);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font);
 }
 
 html {
   background: var(--background);
   color-scheme: light dark;
-  /* Full-height chain for dvh-backed sheets; env() needs viewport-fit=cover
-     (set in layout viewport) to resolve to non-zero on iOS. */
   height: 100%;
+  -webkit-text-size-adjust: 100%;
 }
 
-/* Synced from window.visualViewport by PwaBootstrap. Tracks the keyboard and
-   Safari chrome so fixed overlays (sheets, chat) size to what's actually
-   visible instead of what 100vh claims. Falls back to dynamic viewport. */
+/* Synced from window.visualViewport by PwaBootstrap. */
 :root {
   --app-height: 100dvh;
 }
 
 body {
   background: var(--background);
-  color: var(--foreground);
-  font-family:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
-    var(--font-sans), "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 17px;
+  line-height: 22px;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   -webkit-tap-highlight-color: transparent;
-  /* Tabular numerals app-wide: amounts never shift width while scrolling or
-     typing, the way currency figures behave on iOS. */
   font-variant-numeric: tabular-nums;
-  /* Stop rubber-band chaining the page behind sheets/modals on iOS. Inner
-     scrollers keep their own momentum via .scroll-momentum. */
   overscroll-behavior-y: none;
 }
 
-/* iOS tap snappiness: no double-tap-zoom wait on controls. Inputs are
-   excluded so pinch-zoom and text selection keep working. */
+/* Apple apps don't let you select UI chrome text by accident. Content you
+   might want to copy (inputs, messages, notes) opts back in. */
 button,
 a,
-[role="button"] {
+[role="button"],
+[role="tab"],
+nav {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   touch-action: manipulation;
 }
+input,
+textarea,
+.selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
 
-/* iOS form controls are sized at 16px+ at the component level (auto-zoom
-   starts below 16px). No global guard here on purpose: one would also shrink
-   the large amount heroes. Keep every input/select/textarea ≥16px. */
-
-/* ==========================================================================
-   Keyboard focus — a single, visible ring across every interactive control.
-   :focus-visible keeps mouse/touch focus clean; the outline follows each
-   element's border-radius and is not clipped by overflow-hidden.
-   ========================================================================== */
+/* Keyboard focus — one visible ring across every interactive control. */
 button:focus-visible,
 a:focus-visible,
-input:focus-visible,
 select:focus-visible,
-textarea:focus-visible,
 [role="button"]:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* Text fields show focus with the caret, as on iOS; dialogs receive focus
+   programmatically for VoiceOver and shouldn't draw a ring around the sheet. */
+input:focus-visible,
+textarea:focus-visible,
+[role="dialog"]:focus-visible,
+[role="alertdialog"]:focus-visible,
+[tabindex="-1"]:focus-visible {
+  outline: none;
+}
 
 /* ==========================================================================
-   Liquid Glass material — the core reusable surface for floating chrome
-   (top bars, tab bars, modals, floating action buttons). Never apply to
-   content lists/cards; those use the plain --surface token instead.
+   Type scale (HIG). Use these instead of ad-hoc pixel sizes.
    ========================================================================== */
+.t-large-title { font-size: 34px; line-height: 41px; font-weight: 700; letter-spacing: -0.025em; }
+.t-title1 { font-size: 28px; line-height: 34px; font-weight: 700; letter-spacing: -0.02em; }
+.t-title2 { font-size: 22px; line-height: 28px; font-weight: 700; letter-spacing: -0.015em; }
+.t-title3 { font-size: 20px; line-height: 25px; font-weight: 600; letter-spacing: -0.015em; }
+.t-headline { font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.015em; }
+.t-body { font-size: 17px; line-height: 22px; font-weight: 400; letter-spacing: -0.01em; }
+.t-callout { font-size: 16px; line-height: 21px; font-weight: 400; letter-spacing: -0.01em; }
+.t-subhead { font-size: 15px; line-height: 20px; font-weight: 400; letter-spacing: -0.008em; }
+.t-footnote { font-size: 13px; line-height: 18px; font-weight: 400; letter-spacing: -0.004em; }
+.t-caption { font-size: 12px; line-height: 16px; font-weight: 400; letter-spacing: 0; }
+.t-caption2 { font-size: 11px; line-height: 13px; font-weight: 400; letter-spacing: 0.005em; }
+.t-numeral { font-family: var(--font-rounded); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
 
+/* ==========================================================================
+   Liquid Glass — navigation layer only (tab bar, bar buttons, menus,
+   floating controls). Never on content.
+   ========================================================================== */
 .glass {
-  position: relative;
   background: var(--glass-bg);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  border: 0.5px solid var(--glass-border);
+  backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%);
   box-shadow:
-    0 1px 2px var(--glass-shadow),
-    0 8px 24px -8px var(--glass-shadow),
-    inset 0 1px 0 var(--glass-highlight);
+    inset 0 1px 0.5px var(--glass-spec),
+    0 0 0 0.5px var(--glass-rim),
+    var(--glass-shadow);
 }
-
 .glass-strong {
-  background: var(--glass-bg-strong);
-  backdrop-filter: blur(28px) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(28px) saturate(var(--glass-saturate));
+  background: var(--glass-thick);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
 }
-
-/* ==========================================================================
-   Sheet — the surface for modals and bottom sheets.
-
-   Deliberately OPAQUE, unlike .glass. Sheets carry the densest text in the app
-   (amounts, member names, ledger rows), and a translucent panel let whatever
-   was underneath show through and wreck the contrast. Glass stays for chrome
-   that floats over content it doesn't need to be read against: top bar, tab
-   bar, FAB.
-   ========================================================================== */
-.sheet {
-  background: var(--surface-elevated);
-  border: 0.5px solid var(--border-subtle);
-  box-shadow:
-    0 2px 8px rgba(0, 0, 0, 0.06),
-    0 -16px 44px -20px rgba(0, 0, 0, 0.35);
-}
-
-/* Fallback for browsers without backdrop-filter support */
 @supports not (backdrop-filter: blur(1px)) {
   .glass,
   .glass-strong {
-    background: var(--glass-bg-strong);
+    background: var(--glass-thick);
   }
 }
 
-/* ==========================================================================
-   Liquid Glass tab capsule (iOS 26 floating tab bar).
-   Frost + refractive rim + top sheen, pure CSS: SVG-displacement refraction
-   only works in Chromium, and this app's audience is Safari — so the depth
-   comes from the rim light, not a displacement filter. The blur is fenced
-   with contain+isolate so it never repaints the page (INP-safe).
-   ========================================================================== */
+/* Glass bar button: 44 pt circle or capsule floating over content. */
+.bar-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  color: var(--text-primary);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  box-shadow:
+    inset 0 1px 0.5px var(--glass-spec),
+    0 0 0 0.5px var(--glass-rim),
+    0 4px 14px rgba(0, 0, 0, 0.08);
+  transition: transform 0.28s var(--ease-bouncy), opacity 0.15s ease;
+}
+.bar-btn:active {
+  transform: scale(0.9);
+}
+.bar-btn:disabled {
+  opacity: 0.4;
+}
+.bar-btn.is-text {
+  padding: 0 16px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+}
+/* The one commit action (sheet ✓, nav +): tinted glass. */
+.bar-btn.is-prominent {
+  background: var(--brand-solid);
+  color: #fff;
+  box-shadow:
+    inset 0 1px 0.5px rgba(255, 255, 255, 0.35),
+    var(--shadow-accent);
+}
+.bar-btn.is-prominent:disabled {
+  background: var(--fill-strong);
+  color: var(--text-tertiary);
+  box-shadow: none;
+  opacity: 1;
+}
+@media (prefers-color-scheme: dark) {
+  .bar-btn {
+    box-shadow:
+      inset 0 1px 0.5px var(--glass-spec),
+      0 0 0 0.5px var(--glass-rim),
+      0 4px 14px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* Floating tab bar capsule. */
 .liquid-tab {
   position: relative;
   isolation: isolate;
   contain: layout paint;
   border-radius: 999px;
-  /* Frosted, not clear: Apple moved bars more opaque in the iOS 26 betas
-     because translucent bars wash out over content. */
-  background: rgba(255, 255, 255, 0.62);
-  backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
-  -webkit-backdrop-filter: blur(24px) saturate(180%) brightness(1.06);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(190%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(190%);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.55),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.18),
-    inset 1px 0 1px rgba(255, 255, 255, 0.12),
-    inset -1px 0 1px rgba(255, 255, 255, 0.12),
-    0 20px 44px -20px rgba(0, 0, 0, 0.5);
+    inset 0 1px 0.5px var(--glass-spec),
+    0 0 0 0.5px var(--glass-rim),
+    var(--glass-shadow);
 }
-.liquid-tab::after {
+.tab-lens {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  border-radius: 999px;
+  background: var(--lens);
+  transition: transform 0.38s var(--ease-bouncy), width 0.38s var(--ease-spring);
+  z-index: -1;
+}
+@media (prefers-reduced-transparency: reduce) {
+  .liquid-tab,
+  .bar-btn:not(.is-prominent) {
+    background: var(--surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Scroll-edge fade: content dissolves into the page color before it reaches
+   floating chrome, so rows never collide visually with bar buttons. */
+.scroll-edge-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: calc(100% + 14px);
+  background: linear-gradient(to bottom, var(--background) 0%, var(--background) 45%, color-mix(in srgb, var(--background) 0%, transparent) 100%);
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.scroll-edge-top[data-visible="true"] {
+  opacity: 1;
+}
+.scroll-edge-bottom {
+  position: fixed;
+  inset: auto 0 0 0;
+  height: calc(var(--tab-h) + var(--tab-bottom) + 36px);
+  background: linear-gradient(to top, var(--background) 0%, var(--background) 40%, color-mix(in srgb, var(--background) 0%, transparent) 100%);
+  pointer-events: none;
+  z-index: 19;
+}
+
+/* ==========================================================================
+   Inset-grouped lists. Section = header + rounded card + footer.
+   Separators are hairlines inset to the text; none above the first row.
+   ========================================================================== */
+.list-section {
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  overflow: hidden;
+  box-shadow: 0 0 0 0.5px var(--hairline), var(--shadow-card);
+}
+.list-section.is-elevated {
+  background: var(--surface-elevated);
+}
+@media (prefers-color-scheme: dark) {
+  .list-section.is-elevated {
+    box-shadow: none;
+  }
+}
+.list-header {
+  padding: 0 20px 7px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+  color: var(--text-secondary);
+}
+.list-header-prominent {
+  padding: 0 4px 8px;
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--text-primary);
+}
+.list-footer {
+  padding: 7px 20px 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-secondary);
+}
+.list-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 11px 16px;
+  text-align: left;
+  color: var(--text-primary);
+  background: transparent;
+  transition: background-color 0.4s ease;
+}
+.list-row.is-tall {
+  min-height: 60px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+/* Press: background flashes immediately, fades out. No scale on rows. */
+a.list-row:active,
+button.list-row:active,
+.list-row.is-pressable:active {
+  background: var(--pressed);
+  transition: none;
+}
+.list-row + .list-row::before,
+.list-row + .list-row-wrap::before,
+.list-row-wrap + .list-row::before,
+.list-row-wrap + .list-row-wrap::before {
   content: "";
   position: absolute;
-  inset: 0;
-  z-index: -1;
-  border-radius: inherit;
+  top: 0;
+  right: 0;
+  left: var(--sep-inset, 16px);
+  height: 0.5px;
+  background: var(--separator);
   pointer-events: none;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.28) 0%,
-    rgba(255, 255, 255, 0.05) 30%,
-    transparent 55%
-  );
-  mix-blend-mode: screen;
+}
+.list-row-wrap {
+  position: relative;
+}
+.row-chevron {
+  flex-shrink: 0;
+  color: var(--chevron);
+}
+
+/* Settings-style leading icon tile: 30 pt, radius 8, white glyph. */
+.icon-tile {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Controls
+   ========================================================================== */
+.btn-prominent,
+.btn-tinted,
+.btn-gray {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 50px;
+  padding: 0 20px;
+  border-radius: 999px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  transition: transform 0.28s var(--ease-bouncy), opacity 0.15s ease;
+}
+.btn-prominent { background: var(--brand-solid); color: #fff; }
+.btn-tinted { background: var(--tint-accent); color: var(--brand); }
+.btn-gray { background: var(--fill); color: var(--text-primary); }
+.btn-prominent:active,
+.btn-tinted:active,
+.btn-gray:active {
+  transform: scale(0.97);
+}
+.btn-prominent:disabled,
+.btn-tinted:disabled,
+.btn-gray:disabled {
+  background: var(--fill);
+  color: var(--text-tertiary);
+  transform: none;
+}
+.btn-small {
+  min-height: 34px;
+  padding: 0 14px;
+  font-size: 15px;
+}
+
+/* Segmented control: 2-4 segments, sliding thumb. */
+.segmented {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--fill-soft);
+  isolation: isolate;
 }
 @media (prefers-color-scheme: dark) {
-  .liquid-tab {
-    background: rgba(28, 28, 30, 0.66);
-    border-color: rgba(255, 255, 255, 0.14);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      inset 0 -1px 0 rgba(255, 255, 255, 0.06),
-      0 20px 44px -20px rgba(0, 0, 0, 0.8);
-  }
-  .liquid-tab::after {
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.12) 0%,
-      rgba(255, 255, 255, 0.02) 30%,
-      transparent 55%
-    );
-  }
+  .segmented { background: var(--fill); }
 }
-/* Solid when transparency is reduced or blur is unavailable. */
-@media (prefers-reduced-transparency: reduce) {
-  .liquid-tab {
-    background: var(--surface);
-  }
-  .liquid-tab::after {
-    display: none;
-  }
-}
-
-/* Viewport-stable sheet cap: 88vh jumps when Safari chrome shows/hides;
-   dvh tracks it, and --app-height (visualViewport-synced) tracks the keyboard
-   too. Order matters — capable engines use the last declaration they parse. */
-.sheet-viewport {
-  max-height: 88vh;
-  max-height: 88dvh;
-  max-height: calc(var(--app-height, 100dvh) * 0.88);
-}
-
-/* Specular highlight sweep used on primary glass buttons/pills */
-.glass-specular {
+.segmented-thumb {
   position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  background: linear-gradient(
-    135deg,
-    rgba(255, 255, 255, 0.35) 0%,
-    rgba(255, 255, 255, 0.05) 35%,
-    rgba(255, 255, 255, 0) 60%
-  );
-  pointer-events: none;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  border-radius: 999px;
+  background: var(--surface);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.12), 0 3px 1px rgba(0, 0, 0, 0.04);
+  transition: transform 0.38s var(--ease-spring);
+  z-index: -1;
 }
-
 @media (prefers-color-scheme: dark) {
-  .glass-specular {
-    background: linear-gradient(
-      135deg,
-      rgba(255, 255, 255, 0.12) 0%,
-      rgba(255, 255, 255, 0.02) 35%,
-      rgba(255, 255, 255, 0) 60%
-    );
-  }
+  .segmented-thumb { background: #636366; }
+}
+.segmented > button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  border-radius: 999px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.segmented > button[aria-selected="true"],
+.segmented > button[aria-pressed="true"] {
+  font-weight: 600;
 }
 
-/* Press feedback: instant scale + dim, never a colour change — the control
-   reacts the moment the finger lands, which is what makes it feel direct. */
+/* Switch: 64 × 28 capsule, green on (iOS 26 proportions). */
+.ios-switch {
+  position: relative;
+  width: 64px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--fill-strong);
+  flex-shrink: 0;
+  transition: background-color 0.25s ease;
+}
+.ios-switch[aria-checked="true"] {
+  background: var(--green);
+}
+.ios-switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 38px;
+  height: 24px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.15), 0 1px 1px rgba(0, 0, 0, 0.06);
+  transition: transform 0.38s var(--ease-spring), width 0.2s ease;
+}
+.ios-switch:active::after {
+  width: 44px;
+}
+.ios-switch[aria-checked="true"]::after {
+  transform: translateX(22px);
+}
+.ios-switch[aria-checked="true"]:active::after {
+  transform: translateX(16px);
+}
+.ios-switch:disabled {
+  opacity: 0.5;
+}
+
+/* Search field: rounded capsule with a fill, like UISearchBar in iOS 26. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: var(--fill-soft);
+  color: var(--text-secondary);
+}
+@media (prefers-color-scheme: dark) {
+  .search-field { background: var(--fill); }
+}
+.search-field input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  outline: none;
+  font-size: 17px;
+  color: var(--text-primary);
+}
+.search-field input::placeholder {
+  color: var(--text-secondary);
+}
+.search-field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+/* Row fields: no borders — the row is the field. */
+.row-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  outline: none;
+  font-size: 17px;
+  color: var(--text-primary);
+}
+.row-input::placeholder {
+  color: var(--text-tertiary);
+}
+.row-input.is-trailing {
+  text-align: right;
+}
+
+/* Badge / capsule. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* Meter. */
+.meter {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--fill);
+  overflow: hidden;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--green);
+  transition: width 0.5s var(--ease-spring);
+}
+
+/* ==========================================================================
+   Sheets
+   ========================================================================== */
+.sheet {
+  background: var(--surface-sheet);
+  box-shadow: var(--shadow-sheet);
+}
+.sheet-viewport {
+  max-height: 92vh;
+  max-height: 92dvh;
+  max-height: calc(var(--app-height, 100dvh) - max(env(safe-area-inset-top), 12px) - 8px);
+}
+.grabber {
+  width: 36px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--fill-strong);
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes sheet-down {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(1.08); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes glass-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes glass-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+.animate-sheet-up { animation: sheet-up 0.5s var(--ease-spring) both; }
+.animate-sheet-down { animation: sheet-down 0.32s var(--ease-spring) both; }
+.animate-dialog-in { animation: dialog-in 0.3s var(--ease-spring) both; }
+.animate-fade-in { animation: glass-fade-in 0.3s ease-out both; }
+.animate-fade-out { animation: glass-fade-out 0.28s ease-out both; }
+@media (min-width: 640px) {
+  .animate-sheet-up { animation: dialog-in 0.3s var(--ease-spring) both; }
+  .animate-sheet-down { animation: glass-fade-out 0.2s ease-out both; }
+}
+
+/* Legacy name some overlays still use. */
+.animate-modal-in { animation: menu-in 0.32s var(--ease-spring) both; }
+
+/* Pull-down menu: springs out of the trigger's corner. */
+@keyframes menu-in {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+.menu-panel {
+  transform-origin: top right;
+  animation: menu-in 0.34s var(--ease-bouncy) both;
+}
+
+/* HUD: drops from the top. */
+@keyframes hud-in {
+  from { opacity: 0; transform: translateY(-80px) scale(0.9); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-toast-in { animation: hud-in 0.45s var(--ease-bouncy) both; }
+
+/* Press feedback for tiles, cards and glass: scale, never a color change. */
 .tap-shrink {
-  transition: transform var(--dur-instant) cubic-bezier(0.34, 1.56, 0.64, 1), opacity var(--dur-instant) ease;
+  transition: transform 0.28s var(--ease-bouncy), opacity var(--dur-instant) ease;
 }
 .tap-shrink:active {
-  transform: scale(0.96);
-  opacity: 0.85;
+  transform: scale(0.97);
 }
 
-/* Smooth iOS-like momentum scrolling */
 .scroll-momentum {
   -webkit-overflow-scrolling: touch;
 }
-
-@keyframes glass-modal-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
-.animate-modal-in {
-  animation: glass-modal-in var(--dur-normal) var(--ease-spring);
-}
-
-@keyframes glass-fade-in {
-  from {
-    opacity: 0;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-.animate-fade-in {
-  animation: glass-fade-in 0.2s ease-out;
-}
-
-/* iOS banner toast: short rise, no scale — quieter than a sheet entrance. */
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.animate-toast-in {
-  animation: toast-in var(--dur-fast) var(--ease-spring);
-}
-
-/* Directional push/pop for routed content. Both layers stay mounted through
-   the transition — that continuity is what makes a push read as travel rather
-   than a pan: incoming full travel, outgoing a short parallax plus dim. */
+/* ==========================================================================
+   Navigation push/pop. Incoming slides full width; outgoing parallaxes to
+   −30 % and dims. Tab switches cross-fade.
+   ========================================================================== */
 @keyframes page-push-in {
-  from {
-    opacity: 0.4;
-    transform: translateX(100%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { transform: translateX(100%); box-shadow: -12px 0 30px rgba(0, 0, 0, 0.12); }
+  to { transform: translateX(0); box-shadow: -12px 0 30px rgba(0, 0, 0, 0); }
 }
 @keyframes page-push-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0.55;
-    transform: translateX(-32%);
-  }
+  from { transform: translateX(0); filter: brightness(1); }
+  to { transform: translateX(-30%); filter: brightness(0.86); }
 }
 @keyframes page-pop-in {
-  from {
-    opacity: 0.55;
-    transform: translateX(-32%);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { transform: translateX(-30%); filter: brightness(0.86); }
+  to { transform: translateX(0); filter: brightness(1); }
 }
 @keyframes page-pop-out {
-  from {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  to {
-    opacity: 0.4;
-    transform: translateX(100%);
-  }
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
 }
 @keyframes page-fade-out {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 .route-stage {
   position: relative;
@@ -486,6 +849,7 @@ textarea:focus-visible,
 .route-incoming {
   position: relative;
   z-index: 1;
+  background: var(--background);
 }
 .route-outgoing {
   position: absolute;
@@ -493,174 +857,69 @@ textarea:focus-visible,
   z-index: 0;
   pointer-events: none;
 }
-.page-push-in {
-  animation: page-push-in var(--dur-route) var(--ease-spring) backwards;
+.route-stage.is-pop .route-outgoing {
+  z-index: 2;
+  background: var(--background);
 }
-.page-push-out {
-  animation: page-push-out var(--dur-route) var(--ease-spring) both;
-}
-.page-pop-in {
-  animation: page-pop-in var(--dur-route) var(--ease-spring) backwards;
-}
-.page-pop-out {
-  animation: page-pop-out var(--dur-route) var(--ease-spring) both;
-}
-.page-fade-out {
-  animation: page-fade-out var(--dur-fast) ease-out both;
-}
+.page-push-in { animation: page-push-in var(--dur-route) var(--ease-spring) backwards; }
+.page-push-out { animation: page-push-out var(--dur-route) var(--ease-spring) both; }
+.page-pop-in { animation: page-pop-in var(--dur-route) var(--ease-spring) backwards; }
+.page-pop-out { animation: page-pop-out var(--dur-route) var(--ease-spring) both; }
+.page-fade-out { animation: page-fade-out 0.18s ease-out both; }
 
-/* Staggered list entrance: rows arrive in sequence so a long list reads as
-   flowing in, capped at 7 steps — beyond that everything just appears.
-   Pure CSS, no measuring, collapses under Reduce Motion with the rest. */
-.stagger > * {
-  animation: glass-fade-in var(--dur-fast) var(--ease-out) backwards;
+@keyframes page-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
-.stagger > *:nth-child(1) { animation-delay: 0ms; }
-.stagger > *:nth-child(2) { animation-delay: 30ms; }
-.stagger > *:nth-child(3) { animation-delay: 60ms; }
-.stagger > *:nth-child(4) { animation-delay: 90ms; }
-.stagger > *:nth-child(5) { animation-delay: 120ms; }
-.stagger > *:nth-child(6) { animation-delay: 150ms; }
-.stagger > *:nth-child(7) { animation-delay: 180ms; }
+.page-enter { animation: page-in 0.22s ease-out backwards; }
+
+/* Lists don't animate on first paint (HIG): stagger is intentionally inert. */
+.stagger > * {
+  animation: none;
+}
 
 /* ==========================================================================
-   Skeleton loaders — shaped placeholders that match final layout, so content
-   resolves in place (no "Loading…" text, no ₹0→value flash / layout shift).
+   Skeletons — shaped placeholders that resolve in place.
    ========================================================================== */
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.45; }
+  50% { opacity: 0.5; }
 }
 .skeleton {
-  background: var(--fill);
+  background: var(--fill-soft);
   border-radius: var(--radius-sm);
-  animation: skeleton-pulse 1.4s ease-in-out infinite;
+  animation: skeleton-pulse 1.6s ease-in-out infinite;
 }
-@media (prefers-reduced-motion: reduce) {
-  .skeleton { animation: none; }
+@media (prefers-color-scheme: dark) {
+  .skeleton { background: var(--fill); }
 }
 
 /* ==========================================================================
-   Splash screen — animated brand reveal on launch
+   Splash
    ========================================================================== */
-
 @keyframes splash-logo-in {
-  0% {
-    opacity: 0;
-    transform: translateY(10px) scale(0.86);
-  }
-  60% {
-    opacity: 1;
-    transform: translateY(0) scale(1.03);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
 }
-
-@keyframes splash-shimmer {
-  0% {
-    transform: translateX(-120%) skewX(-18deg);
-  }
-  100% {
-    transform: translateX(220%) skewX(-18deg);
-  }
-}
-
-@keyframes splash-dot {
-  0%, 80%, 100% {
-    opacity: 0.25;
-    transform: scale(0.8);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
 @keyframes splash-out {
-  from {
-    opacity: 1;
-    transform: scale(1);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.04);
-  }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
-
-.animate-splash-logo {
-  animation: splash-logo-in 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.animate-splash-shimmer {
-  animation: splash-shimmer 1.6s ease-in-out 0.4s infinite;
-}
-
-/* Class version of the loader dots (was inline style, which bypassed the
-   reduced-motion guard below). Stagger via inline animation-delay only. */
-.animate-splash-dot {
-  animation: splash-dot 1.2s ease-in-out infinite;
-}
-
-/* Duration must match FADE_MS in components/SplashGate.tsx: the gate unmounts on
-   a timer, so a longer animation here would be cut off mid-fade. */
-.animate-splash-out {
-  animation: splash-out 0.25s ease-in forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-splash-logo,
-  .animate-splash-shimmer,
-  .animate-splash-dot,
-  .animate-splash-out {
-    animation: none;
-  }
-}
+.animate-splash-logo { animation: splash-logo-in 0.45s var(--ease-spring) both; }
+/* Duration must match FADE_MS in components/SplashGate.tsx. */
+.animate-splash-out { animation: splash-out 0.25s ease-in forwards; }
 
 /* ==========================================================================
-   Page enter transition — routed content fades/rises in on navigation
-   (keyed by pathname in PageTransition), replacing the hard cut.
-   ========================================================================== */
-@keyframes page-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-.page-enter {
-  animation: page-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) backwards;
-}
-
-/* ==========================================================================
-   Navigation pending indicator (see components/NavHint.tsx).
-
-   `tap-shrink` only responds to :active, so all press feedback ended the instant
-   the finger lifted — after which a slow navigation gave the user nothing at all
-   and read as "the tap did nothing".
-
-   The indicator starts fully transparent and fades in only after a delay, so a
-   fast navigation never flashes a spinner: if the route is already prefetched
-   and commits in ~20ms, this is removed from the tree before its animation-delay
-   has even elapsed and the user sees nothing. It only ever appears when the
-   navigation is genuinely slow enough to need explaining.
+   Navigation pending indicator (components/NavHint.tsx). Appears only when a
+   navigation is slow enough to need explaining.
    ========================================================================== */
 @keyframes nav-hint-in {
-  to {
-    opacity: 1;
-  }
+  to { opacity: 1; }
 }
 .nav-hint {
   opacity: 0;
-  animation: nav-hint-in 0.15s ease-out 0.1s forwards;
+  animation: nav-hint-in 0.15s ease-out 0.12s forwards;
 }
-/* Sweeping bar pinned under the status bar — the conventional mobile idiom for
-   "a screen is on its way", and it costs no layout space. */
 .nav-hint-bar {
   position: fixed;
   top: 0;
@@ -668,53 +927,72 @@ textarea:focus-visible,
   right: 0;
   height: 2.5px;
   z-index: 60;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--brand-solid, var(--brand)) 40%,
-    var(--brand-solid, var(--brand)) 60%,
-    transparent
-  );
+  opacity: 0;
+  background: linear-gradient(90deg, transparent, var(--brand-solid) 40%, var(--brand-solid) 60%, transparent);
   background-size: 40% 100%;
   background-repeat: no-repeat;
-  animation: nav-hint-in 0.15s ease-out 0.1s forwards,
-    nav-hint-sweep 1s ease-in-out 0.1s infinite;
+  animation:
+    nav-hint-in 0.15s ease-out 0.12s forwards,
+    nav-hint-sweep 1s ease-in-out 0.12s infinite;
   pointer-events: none;
 }
 @keyframes nav-hint-sweep {
-  from {
-    background-position: -40% 0;
-  }
-  to {
-    background-position: 140% 0;
-  }
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
 }
 
-/* Honor reduced-motion across every animated surface: all travel becomes a
-   cross-fade, staggering disappears. */
+/* ==========================================================================
+   Reduce Motion: travel becomes a cross-fade; nothing bounces.
+   ========================================================================== */
 @media (prefers-reduced-motion: reduce) {
   .page-enter,
   .page-push-in,
-  .page-push-out,
   .page-pop-in,
-  .page-pop-out,
-  .page-fade-out,
+  .animate-sheet-up,
+  .animate-dialog-in,
   .animate-modal-in,
   .animate-toast-in,
-  .animate-fade-in {
-    animation: glass-fade-in var(--dur-fast) ease-out !important;
+  .animate-fade-in,
+  .menu-panel,
+  .animate-splash-logo {
+    animation: glass-fade-in 0.2s ease-out both !important;
   }
-  .stagger > * {
-    animation: none !important;
+  .page-push-out,
+  .page-pop-out,
+  .page-fade-out,
+  .animate-sheet-down,
+  .animate-fade-out,
+  .animate-splash-out {
+    animation: glass-fade-out 0.2s ease-out both !important;
   }
-  .tap-shrink {
+  .tap-shrink,
+  .bar-btn,
+  .btn-prominent,
+  .btn-tinted,
+  .btn-gray,
+  .tab-lens,
+  .segmented-thumb,
+  .ios-switch::after {
     transition: none !important;
   }
-  /* Keep the indicator visible but still: it carries information, so it must not
-     be animated away entirely the way decorative motion is. */
+  .tap-shrink:active,
+  .bar-btn:active,
+  .btn-prominent:active,
+  .btn-tinted:active,
+  .btn-gray:active {
+    transform: none;
+  }
+  .skeleton {
+    animation: none;
+  }
   .nav-hint,
   .nav-hint-bar {
     opacity: 1;
     animation: none !important;
   }
+}
+
+/* While the install banner floats above the tab bar, give pages room for it. */
+body:has([data-install-banner]) {
+  --content-bottom: calc(var(--tab-h) + var(--tab-bottom) + 118px);
 }

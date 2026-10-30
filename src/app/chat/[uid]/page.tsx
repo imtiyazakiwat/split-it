@@ -30,6 +30,9 @@ import LoginScreen from "@/components/LoginScreen";
 import ChatSkeleton from "@/components/chat/ChatSkeleton";
 import { useToast } from "@/components/ui/Toast";
 import SendMoneyModal from "@/components/pay/SendMoneyModal";
+import { BarButton, useBack } from "@/components/ui/Screen";
+import { Avatar } from "@/components/ui/Controls";
+import { ArrowUp, ChevronLeft, Rupee } from "@/components/ui/Icons";
 import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
 
 /**
@@ -131,29 +134,27 @@ function TransferBubble({
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[85%] rounded-[var(--radius-inner)] p-3.5 ${
-          mine
-            ? "bg-[var(--brand-solid)] text-white"
-            : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
+        className={`w-[78%] max-w-[300px] rounded-[22px] px-4 pt-3 pb-2.5 ${
+          mine ? "bg-[var(--brand-solid)] text-white" : "bg-[var(--surface)]"
         }`}
       >
-        <p className={`text-[12px] ${mine ? "text-white/75" : "text-[var(--text-tertiary)]"}`}>
+        <p className={`text-[13px] ${mine ? "text-white/80" : "text-[var(--text-secondary)]"}`}>
           {mine ? `You paid ${otherName}` : `${otherName} paid you`}
         </p>
         <p
-          className={`text-[24px] font-extrabold leading-tight ${
+          className={`text-[34px] leading-[40px] font-bold tracking-[-0.025em] t-numeral ${
             mine ? "text-white" : "text-[var(--text-primary)]"
           }`}
         >
           {formatCurrency(t.amount)}
         </p>
         {t.note && (
-          <p className={`text-[13px] mt-0.5 ${mine ? "text-white/85" : "text-[var(--text-secondary)]"}`}>
+          <p className={`text-[15px] mt-0.5 selectable ${mine ? "text-white/90" : "text-[var(--text-primary)]"}`}>
             {t.note}
           </p>
         )}
         <p
-          className={`text-[12px] mt-1.5 font-medium ${
+          className={`text-[13px] mt-1.5 font-medium ${
             mine
               ? "text-white/85"
               : status.tone === "good"
@@ -190,17 +191,17 @@ function TransferBubble({
         {!mine && t.status === "pending" && (
           <button
             onClick={() => onDecide(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--brand-solid)] text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
+            className="btn-prominent btn-small w-full mt-2.5"
           >
-            Confirm &amp; choose a group
+            Confirm &amp; Choose a Group
           </button>
         )}
         {!mine && broken.length > 0 && (
           <button
             onClick={() => onRepair(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--tint-warning)] text-[var(--warning)] px-4 py-2 text-[13px] font-semibold tap-shrink"
+            className="btn-small w-full mt-2.5 rounded-full bg-[var(--tint-warning)] text-[var(--warning)] font-semibold tap-shrink"
           >
-            Finish recording this payment
+            Finish Recording This Payment
           </button>
         )}
         {/* Still offered once part of the payment is booked: the remainder can
@@ -208,17 +209,17 @@ function TransferBubble({
         {!mine && t.status === "accepted" && !isSettled(unassigned) && (
           <button
             onClick={() => onDecide(t)}
-            className="mt-2.5 w-full rounded-full bg-[var(--fill)] text-[var(--text-primary)] px-4 py-2 text-[13px] font-semibold tap-shrink"
+            className="btn-gray btn-small w-full mt-2.5"
           >
             {legs.length === 0
-              ? "Attach to a group"
+              ? "Attach to a Group"
               : `Assign remaining ${formatCurrency(unassigned)}`}
           </button>
         )}
         {mine && t.status === "pending" && (
           <button
             onClick={() => onCancel(t)}
-            className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
+            className="btn-small w-full mt-2.5 rounded-full bg-white/20 text-white font-semibold tap-shrink"
           >
             Withdraw
           </button>
@@ -233,12 +234,12 @@ function TransferBubble({
                   groupItemLink(leg.groupId, { kind: "settlement", id: leg.settlementId })
                 )
               }
-              className="mt-2.5 w-full rounded-full bg-white/20 text-white px-4 py-2 text-[13px] font-semibold tap-shrink"
+              className="btn-small w-full mt-2.5 rounded-full bg-white/20 text-white font-semibold tap-shrink"
             >
               View {formatCurrency(leg.amount)} in {groupNameOf(leg.groupId)}
             </button>
           ))}
-        <p className={`text-[11px] mt-1.5 ${mine ? "text-white/60" : "text-[var(--text-quaternary)]"}`}>
+        <p className={`text-[11px] mt-1.5 text-right ${mine ? "text-white/65" : "text-[var(--text-secondary)]"}`}>
           {timeLabel(item.ts)}
         </p>
       </div>
@@ -272,25 +273,25 @@ function SettlementBubble({
           item.groupId &&
           onNavigate(groupItemLink(item.groupId, { kind: "settlement", id: s.id }))
         }
-        className={`max-w-[85%] text-left rounded-[var(--radius-inner)] p-3.5 tap-shrink ${
-          mine ? "bg-[var(--tint-accent-2)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
+        className={`w-[72%] max-w-[280px] text-left rounded-[22px] px-4 py-3 tap-shrink ${
+          mine ? "bg-[var(--tint-accent-2)]" : "bg-[var(--surface)]"
         }`}
       >
-        <p className="text-[12px] text-[var(--text-tertiary)]">
+        <p className="text-[13px] text-[var(--text-secondary)] truncate">
           {isOffset
             ? `Offset · ${item.groupName}`
             : mine
             ? `You paid ${otherName} · ${item.groupName}`
             : `${otherName} paid you · ${item.groupName}`}
         </p>
-        <p className="text-[20px] font-bold text-[var(--text-primary)] leading-tight">
+        <p className="text-[22px] leading-[28px] font-bold t-numeral text-[var(--text-primary)]">
           {formatCurrency(s.amount)}
         </p>
         {s.note && (
-          <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">{s.note}</p>
+          <p className="text-[15px] text-[var(--text-primary)] mt-0.5">{s.note}</p>
         )}
         <p
-          className={`text-[12px] mt-1 font-medium ${
+          className={`text-[13px] mt-1 font-medium ${
             s.status === "approved"
               ? "text-[var(--pos)]"
               : s.status === "rejected"
@@ -300,7 +301,7 @@ function SettlementBubble({
         >
           {statusText}
         </p>
-        <p className="text-[11px] text-[var(--text-quaternary)] mt-1">{timeLabel(item.ts)}</p>
+        <p className="text-[11px] text-[var(--text-secondary)] mt-1 text-right">{timeLabel(item.ts)}</p>
       </button>
     </div>
   );
@@ -327,9 +328,9 @@ function ExpenseRow({
         onClick={() =>
           item.groupId && onNavigate(groupItemLink(item.groupId, { kind: "expense", id: e.id }))
         }
-        className="max-w-[92%] text-center rounded-full bg-[var(--fill-soft)] px-3.5 py-1.5 tap-shrink"
+        className="max-w-[88%] text-center px-3 py-1 tap-shrink"
       >
-        <p className="text-[12px] text-[var(--text-secondary)]">
+        <p className="text-[12px] leading-[16px] text-[var(--text-secondary)]">
           <span className="font-semibold">{payerIsMe ? "You" : otherName}</span> paid{" "}
           {formatCurrency(e.amount)} for{" "}
           <span className="font-semibold">{e.description}</span> · {item.groupName} ·{" "}
@@ -347,16 +348,12 @@ function MessageBubble({ item }: { item: ConversationItem }) {
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded-[var(--radius-inner)] px-3.5 py-2.5 ${
-          mine
-            ? "bg-[var(--brand-solid)] text-white"
-            : "bg-[var(--surface)] shadow-[var(--shadow-sm)] text-[var(--text-primary)]"
+        title={timeLabel(item.ts)}
+        className={`max-w-[75%] rounded-[19px] px-3.5 py-[7px] ${
+          mine ? "bg-[var(--brand-solid)] text-white" : "bg-[var(--surface)] text-[var(--text-primary)]"
         }`}
       >
-        <p className="text-[15px] whitespace-pre-wrap break-words">{item.message!.text}</p>
-        <p className={`text-[11px] mt-1 ${mine ? "text-white/60" : "text-[var(--text-quaternary)]"}`}>
-          {timeLabel(item.ts)}
-        </p>
+        <p className="text-[17px] leading-[22px] tracking-[-0.01em] whitespace-pre-wrap break-words selectable">{item.message!.text}</p>
       </div>
     </div>
   );
@@ -379,6 +376,7 @@ function ChatPageInner() {
   const { datasets, groupsLoaded } = useGroupData();
   const { transfers, threadWith } = usePayments();
   const showToast = useToast();
+  const goBack = useBack("/pay");
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -521,34 +519,20 @@ function ChatPageInner() {
 
   return (
     <div className="fixed inset-0 flex flex-col bg-[var(--background)]">
-      <header className="shrink-0 px-4 pt-[max(0.5rem,env(safe-area-inset-top))] pb-2 glass-strong">
-        <div className="max-w-md mx-auto flex items-center gap-3">
-          <button
-            onClick={() => router.push("/pay")}
-            aria-label="Back"
-            className="w-10 h-10 -ml-1 rounded-full flex items-center justify-center tap-shrink shrink-0"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          {otherPhoto ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={otherPhoto} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
-          ) : (
-            <span className="w-9 h-9 rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 text-[13px] font-semibold text-[var(--text-secondary)]">
-              {otherName.charAt(0).toUpperCase()}
-            </span>
-          )}
-          <div className="min-w-0 flex-1">
-            <p className="text-[16px] font-bold text-[var(--text-primary)] truncate">{otherName}</p>
+      {/* Messages-style header: glass back button, centred avatar + name,
+          balance as the subtitle. */}
+      <header className="relative z-10 shrink-0 pt-[env(safe-area-inset-top)] pb-1.5">
+        <div className="absolute inset-0 glass-strong !shadow-none border-b-[0.5px] border-[var(--separator)]" aria-hidden />
+        <div className="relative max-w-md mx-auto px-4 h-[64px] grid grid-cols-[44px_1fr_44px] items-center gap-2">
+          <BarButton onClick={goBack} aria-label="Back">
+            <ChevronLeft size={22} />
+          </BarButton>
+          <div className="flex flex-col items-center min-w-0">
+            <Avatar name={otherName} photoURL={otherPhoto} size={36} seed={otherUid} />
+            <p className="text-[12px] leading-[15px] font-medium text-[var(--text-primary)] truncate max-w-full mt-0.5">{otherName}</p>
             <p
-              className={`text-[12px] font-medium truncate ${
-                iOwe
-                  ? "text-[var(--neg)]"
-                  : theyOwe
-                  ? "text-[var(--pos)]"
-                  : "text-[var(--text-tertiary)]"
+              className={`text-[11px] leading-[13px] truncate max-w-full ${
+                iOwe ? "text-[var(--neg)]" : theyOwe ? "text-[var(--pos)]" : "text-[var(--text-secondary)]"
               }`}
             >
               {iOwe
@@ -560,19 +544,18 @@ function ChatPageInner() {
                 : "No shared groups"}
             </p>
           </div>
+          <span />
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto scroll-momentum px-4 py-3">
-        <div className="max-w-md mx-auto space-y-2">
+      <main className="flex-1 overflow-y-auto overscroll-contain scroll-momentum px-3 py-3">
+        <div className="max-w-md mx-auto space-y-1.5">
           {items.length === 0 ? (
-            <div className="rounded-[var(--radius-card)] bg-[var(--tint-accent)] p-5 text-center mt-6">
-              <p className="text-[16px] font-bold text-[var(--text-primary)]">
-                Nothing between you two yet
-              </p>
-              <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-                Send {otherName} money, or say hello. Every payment and settled
-                balance shows up here.
+            <div className="flex flex-col items-center text-center px-8 pt-16">
+              <Avatar name={otherName} photoURL={otherPhoto} size={72} seed={otherUid} />
+              <p className="t-title3 text-[var(--text-primary)] mt-3">{otherName}</p>
+              <p className="t-subhead text-[var(--text-secondary)] mt-1.5 max-w-[280px]">
+                Send money or say hello. Every payment and settled balance between you shows up here.
               </p>
             </div>
           ) : (
@@ -580,13 +563,11 @@ function ChatPageInner() {
               const label = dayLabel(item.ts);
               const showDay = i === 0 || dayLabel(items[i - 1].ts) !== label;
               return (
-                <div key={item.key} className="space-y-2">
+                <div key={item.key} className="space-y-1.5">
                   {showDay && (
-                    <div className="flex justify-center py-1">
-                      <span className="rounded-full bg-[var(--fill)] px-3 py-0.5 text-[11px] font-semibold text-[var(--text-secondary)]">
-                        {label}
-                      </span>
-                    </div>
+                    <p className="text-center text-[12px] leading-[16px] text-[var(--text-secondary)] pt-3 pb-1">
+                      <span className="font-semibold">{label}</span> {timeLabel(item.ts)}
+                    </p>
                   )}
                   {item.kind === "message" && <MessageBubble item={item} />}
                   {item.kind === "transfer" && (
@@ -605,12 +586,7 @@ function ChatPageInner() {
                     <SettlementBubble item={item} otherName={otherName} onNavigate={navigate} />
                   )}
                   {item.kind === "expense" && (
-                    <ExpenseRow
-                      item={item}
-                      meUid={currentUser.uid}
-                      otherName={otherName}
-                      onNavigate={navigate}
-                    />
+                    <ExpenseRow item={item} meUid={currentUser.uid} otherName={otherName} onNavigate={navigate} />
                   )}
                 </div>
               );
@@ -622,18 +598,19 @@ function ChatPageInner() {
 
       <form
         onSubmit={handleSend}
-        className="shrink-0 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] glass-strong"
+        className="relative shrink-0 px-3 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]"
       >
-        <div className="max-w-md mx-auto flex items-end gap-2">
+        <div className="absolute inset-0 glass-strong !shadow-none border-t-[0.5px] border-[var(--separator)]" aria-hidden />
+        <div className="relative max-w-md mx-auto flex items-end gap-2">
           <button
             type="button"
             onClick={() => setShowPay(true)}
             aria-label={`Pay ${otherName}`}
-            className="w-11 h-11 shrink-0 rounded-full bg-[var(--brand-solid)] text-white flex items-center justify-center tap-shrink font-bold text-[18px]"
+            className="w-9 h-9 mb-[2px] shrink-0 rounded-full bg-[var(--fill)] text-[var(--text-primary)] grid place-items-center tap-shrink"
           >
-            ₹
+            <Rupee size={19} weight={2.1} />
           </button>
-          <label className="flex-1">
+          <label className="flex-1 min-w-0 flex items-end rounded-[20px] bg-[var(--surface)] shadow-[0_0_0_0.5px_var(--separator)] pl-3.5 pr-1 py-1">
             <span className="sr-only">Message {otherName}</span>
             <textarea
               rows={1}
@@ -641,27 +618,24 @@ function ChatPageInner() {
               maxLength={MAX_MESSAGE_LENGTH}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
-                // Enter sends, Shift+Enter makes a new line — the convention
-                // people already have from every other messaging app.
+                // Enter sends, Shift+Enter makes a new line.
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
                   void handleSend(e as unknown as React.FormEvent);
                 }
               }}
               placeholder="Message"
-              className="w-full max-h-28 resize-none rounded-[var(--radius-xl)] border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+              className="flex-1 min-w-0 max-h-28 resize-none bg-transparent py-[5px] text-[17px] leading-[22px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none"
             />
+            <button
+              type="submit"
+              disabled={!draft.trim() || sending}
+              aria-label="Send message"
+              className="w-[30px] h-[30px] shrink-0 rounded-full bg-[var(--brand-solid)] text-white grid place-items-center transition-opacity disabled:opacity-0"
+            >
+              <ArrowUp size={17} weight={2.8} />
+            </button>
           </label>
-          <button
-            type="submit"
-            disabled={!draft.trim() || sending}
-            aria-label="Send message"
-            className="w-11 h-11 shrink-0 rounded-full bg-[var(--fill)] text-[var(--brand)] flex items-center justify-center tap-shrink disabled:opacity-40"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 2 11 13M22 2l-7 20-4-9-9-4z" />
-            </svg>
-          </button>
         </div>
       </form>
 

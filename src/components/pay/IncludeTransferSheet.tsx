@@ -20,6 +20,8 @@ import {
 } from "@/lib/transfers";
 import { hapticSuccess } from "@/lib/haptics";
 import GlassModal from "@/components/ui/GlassModal";
+import { ButtonRow, ListSection, Row } from "@/components/ui/List";
+import { Checkmark } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
 
 /**
@@ -144,165 +146,12 @@ export default function IncludeTransferSheet({
       : `Count ${formatCurrency(plan.allocated)} across ${legs.length} groups`;
 
   return (
-    <GlassModal title={`${formatCurrency(transfer.amount)} from ${fromName}`} onClose={onClose}>
-      <div className="space-y-4">
-        <div className="rounded-[var(--radius-inner)] bg-[var(--tint-accent)] p-4">
-          <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-            Did you receive this?
-          </p>
-          <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-            {fromName} says they sent you {formatCurrency(transfer.amount)}
-            {transfer.note ? ` — “${transfer.note}”` : ""}. Check your bank or UPI app
-            before confirming.
-          </p>
-          {transfer.receiptUrls.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {transfer.receiptUrls.map((url, i) => (
-                <a
-                  key={url}
-                  href={url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-[12px] font-medium text-[var(--brand)]"
-                >
-                  Screenshot {i + 1}
-                </a>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {alreadyBooked.length > 0 && (
-          <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3">
-            <p className="text-[13px] text-[var(--text-secondary)]">
-              {formatCurrency(roundMoney(transfer.amount - available))} of this payment is
-              already counted in {alreadyBooked.length}{" "}
-              {alreadyBooked.length === 1 ? "group" : "groups"}.{" "}
-              <span className="font-medium">
-                {formatCurrency(available)} left to assign.
-              </span>
-            </p>
-          </div>
-        )}
-
-        <div>
-          <p className="text-sm font-medium text-[var(--text-secondary)] mb-1">
-            Settle group balances with it
-          </p>
-          <p className="text-[12px] text-[var(--text-tertiary)] mb-2">
-            Pick every group this payment was for. Each one takes at most what{" "}
-            {fromName} owes there — anything left over stays unassigned rather than
-            tipping a group into the red.
-          </p>
-
-          {settleable.length === 0 ? (
-            <p className="text-[13px] text-[var(--text-tertiary)]">
-              {fromName} doesn&rsquo;t owe you anything in the groups you share, so
-              there&rsquo;s no group balance for this to settle. Confirm it below —
-              it will count as a personal balance between you two.
-            </p>
-          ) : (
-            <div className="space-y-1.5">
-              {settleable.map((o) => {
-                const on = o.groupId in amounts;
-                const leg = plan.legs.find((l) => l.groupId === o.groupId);
-                return (
-                  <div
-                    key={o.groupId}
-                    className={`rounded-[var(--radius-md)] border px-3.5 py-3 ${
-                      on
-                        ? "border-[var(--brand)] bg-[var(--tint-accent)]"
-                        : "border-[var(--border-subtle)] bg-[var(--surface)]"
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="checkbox"
-                        checked={on}
-                        disabled={!!busy}
-                        onChange={() => toggle(o)}
-                        aria-label={`Use this payment in ${o.groupName}`}
-                        className="rounded accent-[var(--accent)] w-4 h-4 shrink-0"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
-                          {o.groupName}
-                        </p>
-                        <p className="text-[12px] text-[var(--pos)]">
-                          owes you {formatCurrency(o.theyOweMe)}
-                        </p>
-                      </div>
-                      {on && (
-                        <div className="shrink-0 flex items-center gap-1">
-                          <span className="text-[14px] text-[var(--text-tertiary)]">₹</span>
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            max={o.theyOweMe}
-                            inputMode="decimal"
-                            value={amounts[o.groupId]}
-                            disabled={!!busy}
-                            onChange={(e) =>
-                              setAmounts((prev) => ({ ...prev, [o.groupId]: e.target.value }))
-                            }
-                            aria-label={`Amount to count in ${o.groupName}`}
-                            className="w-24 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface)] px-2 py-1.5 text-[16px] font-semibold text-right text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-                          />
-                        </div>
-                      )}
-                    </div>
-                    {on && leg && leg.amount < parseFloat(amounts[o.groupId] || "0") && (
-                      <p className="text-[12px] text-[var(--warning)] mt-1.5">
-                        Capped at {formatCurrency(leg.amount)} — that&rsquo;s all that&rsquo;s
-                        owed here, or all the payment has left.
-                      </p>
-                    )}
-                    {on && leg?.clearsGroup && (
-                      <p className="text-[12px] text-[var(--pos)] mt-1.5">
-                        Clears this group completely.
-                      </p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-
-        {settleable.length > 0 && (
-          <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3 space-y-1">
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--text-secondary)]">Counted in groups</span>
-              <span className="font-semibold text-[var(--text-primary)]">
-                {formatCurrency(plan.allocated)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between text-[13px]">
-              <span className="text-[var(--text-secondary)]">Left unassigned</span>
-              <span
-                className={`font-semibold ${
-                  isSettled(plan.leftover)
-                    ? "text-[var(--text-tertiary)]"
-                    : "text-[var(--warning)]"
-                }`}
-              >
-                {formatCurrency(plan.leftover)}
-              </span>
-            </div>
-            {!isSettled(plan.leftover) && (
-              <p className="text-[12px] text-[var(--text-tertiary)] pt-1">
-                {formatCurrency(plan.leftover)} isn&rsquo;t going into any group. It stays
-                as a personal balance between you two, and you can assign it later from this
-                chat if a new balance comes up.
-              </p>
-            )}
-          </div>
-        )}
-
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-        {settleable.length > 0 && (
+    <GlassModal
+      title="Payment Received?"
+      large
+      onClose={onClose}
+      footer={
+        settleable.length > 0 ? (
           <button
             type="button"
             disabled={!!busy || legs.length === 0}
@@ -315,44 +164,147 @@ export default function IncludeTransferSheet({
                   : `Counted across ${legs.length} groups`
               )
             }
-            className="w-full rounded-full bg-[var(--brand-solid)] px-4 py-3 text-[15px] font-semibold text-white tap-shrink disabled:opacity-50"
+            className="btn-prominent w-full"
           >
             {busy === "book" ? "Recording…" : bookLabel}
           </button>
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col items-center text-center pt-3 pb-1">
+        <p className="t-subhead text-[var(--text-secondary)]">{fromName} says they sent you</p>
+        <p className="t-large-title t-numeral text-[var(--text-primary)]">{formatCurrency(transfer.amount)}</p>
+        {transfer.note && <p className="t-subhead text-[var(--text-secondary)] mt-0.5 selectable">“{transfer.note}”</p>}
+        <p className="t-footnote text-[var(--text-secondary)] mt-2 max-w-[300px]">
+          Check your bank or UPI app before confirming.
+        </p>
+        {transfer.receiptUrls.length > 0 && (
+          <div className="flex flex-wrap justify-center gap-3 mt-2">
+            {transfer.receiptUrls.map((url, i) => (
+              <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="t-subhead font-medium text-[var(--brand)]">
+                Screenshot {i + 1}
+              </a>
+            ))}
+          </div>
         )}
-
-        <div className="border-t border-[var(--border-subtle)] pt-3 space-y-2">
-          <button
-            type="button"
-            disabled={!!busy}
-            onClick={() =>
-              run(
-                "ack",
-                () => acknowledgeTransfer(transfer),
-                "Payment confirmed as personal balance"
-              )
-            }
-            className="w-full rounded-full bg-[var(--fill)] px-4 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink disabled:opacity-50"
-          >
-            {busy === "ack" ? "Confirming…" : "Got it, but not for a group"}
-          </button>
-          {alreadyBooked.length === 0 && (
-            <button
-              type="button"
-              disabled={!!busy}
-              onClick={() =>
-                run("decline", () => declineTransfer(transfer), "Marked as not received")
-              }
-              className="w-full rounded-full bg-[var(--tint-danger-soft)] px-4 py-2.5 text-[15px] font-medium text-[var(--neg)] tap-shrink disabled:opacity-50"
-            >
-              {busy === "decline" ? "Saving…" : "I didn't receive this"}
-            </button>
-          )}
-          <p className="text-[12px] text-[var(--text-tertiary)]">
-            You can confirm now and attach it to a group later, from this chat.
-          </p>
-        </div>
       </div>
+
+      {alreadyBooked.length > 0 && (
+        <ListSection elevated>
+          <Row title="Already counted" detail={formatCurrency(roundMoney(transfer.amount - available))} />
+          <Row title="Left to assign" detail={<span className="font-semibold text-[var(--text-primary)]">{formatCurrency(available)}</span>} />
+        </ListSection>
+      )}
+
+      <ListSection
+        elevated
+        header="Settle group balances"
+        footer={
+          settleable.length === 0
+            ? `${fromName} doesn’t owe you anything in the groups you share. Confirm below and it counts as a personal balance between you.`
+            : `Pick every group this payment was for. Each takes at most what ${fromName} owes there; anything left stays unassigned.`
+        }
+      >
+        {settleable.length === 0 ? (
+          <Row title={<span className="text-[var(--text-secondary)]">No group balances to settle</span>} />
+        ) : (
+          settleable.map((o) => {
+            const on = o.groupId in amounts;
+            const leg = plan.legs.find((l) => l.groupId === o.groupId);
+            return (
+              <div key={o.groupId} className="list-row-wrap">
+                <div className="list-row">
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={on}
+                    disabled={!!busy}
+                    onClick={() => toggle(o)}
+                    aria-label={`Use this payment in ${o.groupName}`}
+                    className="flex items-center gap-3 flex-1 min-w-0 text-left -my-2.5 py-2.5"
+                  >
+                    <span
+                      className={`w-[22px] h-[22px] rounded-full grid place-items-center shrink-0 ${
+                        on ? "bg-[var(--brand-solid)] text-white" : "ring-[1.5px] ring-inset ring-[var(--text-tertiary)]"
+                      }`}
+                      aria-hidden
+                    >
+                      {on && <Checkmark size={13} weight={3.2} />}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block t-body truncate text-[var(--text-primary)]">{o.groupName}</span>
+                      <span className="block t-footnote text-[var(--pos)]">Owes you {formatCurrency(o.theyOweMe)}</span>
+                    </span>
+                  </button>
+                  {on && (
+                    <label className="shrink-0 flex items-center gap-0.5 rounded-[10px] bg-[var(--fill-soft)] px-2.5 h-9">
+                      <span className="t-body text-[var(--text-secondary)]">₹</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        max={o.theyOweMe}
+                        inputMode="decimal"
+                        value={amounts[o.groupId]}
+                        disabled={!!busy}
+                        onChange={(e) => setAmounts((prev) => ({ ...prev, [o.groupId]: e.target.value }))}
+                        aria-label={`Amount to count in ${o.groupName}`}
+                        className="w-[84px] bg-transparent outline-none text-right t-body font-semibold t-numeral text-[var(--text-primary)]"
+                      />
+                    </label>
+                  )}
+                </div>
+                {on && leg && leg.amount < parseFloat(amounts[o.groupId] || "0") && (
+                  <p className="t-footnote text-[var(--warning)] px-4 pb-2.5 pl-[50px] -mt-1">
+                    Capped at {formatCurrency(leg.amount)}: that’s all that’s owed here, or all the payment has left.
+                  </p>
+                )}
+                {on && leg?.clearsGroup && (
+                  <p className="t-footnote text-[var(--pos)] px-4 pb-2.5 pl-[50px] -mt-1">Clears this group completely.</p>
+                )}
+              </div>
+            );
+          })
+        )}
+      </ListSection>
+
+      {settleable.length > 0 && (
+        <ListSection
+          elevated
+          footer={
+            !isSettled(plan.leftover)
+              ? `${formatCurrency(plan.leftover)} isn’t going into any group. It stays as a personal balance, and you can assign it later from the chat.`
+              : undefined
+          }
+        >
+          <Row title="Counted in groups" detail={<span className="t-numeral text-[var(--text-primary)]">{formatCurrency(plan.allocated)}</span>} />
+          <Row
+            title="Left unassigned"
+            detail={
+              <span className={`t-numeral ${isSettled(plan.leftover) ? "" : "text-[var(--warning)]"}`}>{formatCurrency(plan.leftover)}</span>
+            }
+          />
+        </ListSection>
+      )}
+
+      {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
+
+      <ListSection elevated footer="You can confirm now and attach it to a group later, from the chat.">
+        <ButtonRow
+          disabled={!!busy}
+          onClick={() => run("ack", () => acknowledgeTransfer(transfer), "Payment confirmed as personal balance")}
+          title={busy === "ack" ? "Confirming…" : "Received, Not for a Group"}
+          action
+        />
+        {alreadyBooked.length === 0 && (
+          <ButtonRow
+            disabled={!!busy}
+            onClick={() => run("decline", () => declineTransfer(transfer), "Marked as not received")}
+            title={busy === "decline" ? "Saving…" : "I Didn’t Receive This"}
+            destructive
+          />
+        )}
+      </ListSection>
     </GlassModal>
   );
 }

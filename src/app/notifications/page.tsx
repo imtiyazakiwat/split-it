@@ -21,6 +21,10 @@ import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import Screen from "@/components/ui/Screen";
+import { ListSection } from "@/components/ui/List";
+import { EmptyState } from "@/components/ui/Controls";
+import { Bell, Bubble, CheckCircle, ChevronRight, Receipt, RupeeCircle } from "@/components/ui/Icons";
 import { hapticSuccess } from "@/lib/haptics";
 
 type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
@@ -52,8 +56,8 @@ function dateBucket(ts: number): string {
   const days = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (days < 7) return d.toLocaleDateString("en-IN", { weekday: "long" });
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
 }
 
 function timeLabel(ts: number): string {
@@ -61,43 +65,17 @@ function timeLabel(ts: number): string {
 }
 
 function KindIcon({ kind }: { kind: NotificationKind }) {
-  if (kind === "request")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-warning)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--warning)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
-        </svg>
-      </span>
-    );
-  if (kind === "status")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="9" /><path d="m8.5 12 2.5 2.5 4.5-5" />
-        </svg>
-      </span>
-    );
-  if (kind === "transfer")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-success)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 3v18M8 7h5.5a2.5 2.5 0 0 1 0 5H8M8 12h8M8 16.5h8" />
-        </svg>
-      </span>
-    );
-  if (kind === "message")
-    return (
-      <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 11.5a8 8 0 0 1-8 8H8l-4 3v-4.6A8 8 0 0 1 13 3.5a8 8 0 0 1 8 8Z" />
-        </svg>
-      </span>
-    );
+  const map: Record<NotificationKind, { color: string; icon: React.ReactNode }> = {
+    request: { color: "var(--orange)", icon: <Bell size={17} /> },
+    status: { color: "var(--green)", icon: <CheckCircle size={18} /> },
+    transfer: { color: "var(--green)", icon: <RupeeCircle size={18} /> },
+    message: { color: "var(--blue)", icon: <Bubble size={17} /> },
+    expense: { color: "var(--indigo)", icon: <Receipt size={17} /> },
+  };
+  const { color, icon } = map[kind];
   return (
-    <span className="w-10 h-10 rounded-full bg-[var(--tint-accent-2)] flex items-center justify-center shrink-0">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9 8h6M9 12h6" />
-      </svg>
+    <span className="icon-tile !w-9 !h-9 !rounded-[10px]" style={{ background: color }}>
+      {icon}
     </span>
   );
 }
@@ -141,20 +119,20 @@ export default function NotificationsPage() {
             title: isOffset ? (
               <>
                 <span className="font-semibold">{name(creator)}</span>
-                <span className="text-[var(--text-tertiary)]"> wants to cancel out </span>
+                <span className="text-[var(--text-secondary)]"> wants to cancel out </span>
                 <span className="font-semibold">{formatCurrency(s.amount)}</span>
-                <span className="text-[var(--text-tertiary)]"> in {group.name}</span>
+                <span className="text-[var(--text-secondary)]"> in {group.name}</span>
               </>
             ) : s.fromUid === creator ? (
               <>
                 <span className="font-semibold">{name(s.fromUid)}</span>
-                <span className="text-[var(--text-tertiary)]"> says they paid you </span>
+                <span className="text-[var(--text-secondary)]"> says they paid you </span>
                 <span className="font-semibold">{formatCurrency(s.amount)}</span>
               </>
             ) : (
               <>
                 <span className="font-semibold">{name(creator)}</span>
-                <span className="text-[var(--text-tertiary)]"> recorded your payment of </span>
+                <span className="text-[var(--text-secondary)]"> recorded your payment of </span>
                 <span className="font-semibold">{formatCurrency(s.amount)}</span>
               </>
             ),
@@ -170,11 +148,11 @@ export default function NotificationsPage() {
             kind: "status",
             title: (
               <>
-                <span className="text-[var(--text-tertiary)]">Your settlement with </span>
+                <span className="text-[var(--text-secondary)]">Your settlement with </span>
                 <span className="font-semibold">
                   {name(s.fromUid === uid ? s.toUid : s.fromUid)}
                 </span>
-                <span className="text-[var(--text-tertiary)]"> was </span>
+                <span className="text-[var(--text-secondary)]"> was </span>
                 <span
                   className={
                     s.status === "approved"
@@ -203,10 +181,10 @@ export default function NotificationsPage() {
           title: (
             <>
               <span className="font-semibold">{name(e.createdBy)}</span>
-              <span className="text-[var(--text-tertiary)]">
+              <span className="text-[var(--text-secondary)]">
                 {e.editAction === "edited" ? " updated " : " added "}
               </span>
-              <span className="font-semibold text-[var(--brand)]">{e.description}</span>
+              <span className="font-semibold">{e.description}</span>
             </>
           ),
           subtitle: `${formatCurrency(e.amount)} · ${group.name}`,
@@ -239,9 +217,9 @@ export default function NotificationsPage() {
           title: (
             <>
               <span className="font-semibold">{personName(other)}</span>
-              <span className="text-[var(--text-tertiary)]"> sent you </span>
+              <span className="text-[var(--text-secondary)]"> sent you </span>
               <span className="font-semibold">{formatCurrency(t.amount)}</span>
-              <span className="text-[var(--text-tertiary)]"> — confirm it</span>
+              <span className="text-[var(--text-secondary)]"> — confirm it</span>
             </>
           ),
           subtitle: t.note ? `Direct payment · ${t.note}` : "Direct payment",
@@ -273,15 +251,15 @@ export default function NotificationsPage() {
           href: `/chat/${other}`,
           title: (
             <>
-              <span className="text-[var(--text-tertiary)]">Your </span>
+              <span className="text-[var(--text-secondary)]">Your </span>
               <span className="font-semibold">{formatCurrency(t.amount)}</span>
-              <span className="text-[var(--text-tertiary)]"> to </span>
+              <span className="text-[var(--text-secondary)]"> to </span>
               <span className="font-semibold">{personName(other)}</span>
               <span
                 className={
                   t.status === "declined"
                     ? " text-[var(--neg)]"
-                    : " text-[var(--text-tertiary)]"
+                    : " text-[var(--text-secondary)]"
                 }
               >
                 {" "}
@@ -313,7 +291,7 @@ export default function NotificationsPage() {
         title: (
           <>
             <span className="font-semibold">{personName(other)}</span>
-            <span className="text-[var(--text-tertiary)]">
+            <span className="text-[var(--text-secondary)]">
               {hasUnread(thread, uid) ? " messaged you" : " said"}
             </span>
           </>
@@ -331,13 +309,7 @@ export default function NotificationsPage() {
     localStorage.setItem("splitit-notif-seen", String(maxTs));
   }, [allItems]);
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)]">Loading…</p>
-      </div>
-    );
-  }
+  if (loading) return <Screen title="Notifications" backHref="/">{null}</Screen>;
   if (!user) return <LoginScreen />;
 
   // groupId comes from the notification item, which was built from the group
@@ -368,96 +340,83 @@ export default function NotificationsPage() {
     }
   }
 
-  const rows = allItems.map((item, i) => {
+  const sections: { bucket: string; items: NotificationItem[] }[] = [];
+  for (const item of allItems) {
     const bucket = dateBucket(item.ts);
-    const prevBucket = i > 0 ? dateBucket(allItems[i - 1].ts) : null;
-    return { item, bucket, showBucket: bucket !== prevBucket, unread: item.ts > seenAt };
-  });
+    const last = sections[sections.length - 1];
+    if (last && last.bucket === bucket) last.items.push(item);
+    else sections.push({ bucket, items: [item] });
+  }
+  const open = (item: NotificationItem) =>
+    router.push(
+      item.href ??
+        groupItemLink(
+          item.groupId,
+          item.expenseId
+            ? { kind: "expense", id: item.expenseId }
+            : item.settlement
+            ? { kind: "settlement", id: item.settlement.id }
+            : undefined
+        )
+    );
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={() => router.push("/")}
-            aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          </button>
-          <h1 className="text-[24px] font-extrabold text-[var(--text-primary)]">Notifications</h1>
-        </div>
-      </header>
-
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-10 scroll-momentum">
-        {allItems.length === 0 ? (
-          <div className="text-center py-24">
-            <div className="w-16 h-16 rounded-full bg-[var(--tint-accent)] flex items-center justify-center mx-auto mb-3">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" />
-              </svg>
-            </div>
-            <p className="text-[16px] font-semibold text-[var(--text-primary)]">You&rsquo;re all caught up</p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Payments, messages and new expenses will show up here.</p>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {rows.map(({ item, bucket, showBucket, unread }) => (
-              <div key={item.key}>
-                {showBucket && (
-                  <p className="text-[12px] font-semibold text-[var(--text-tertiary)] mb-2 mt-2">{bucket}</p>
-                )}
-                <div
-                  onClick={() =>
-                    router.push(
-                      item.href ??
-                        groupItemLink(
-                          item.groupId,
-                          item.expenseId
-                            ? { kind: "expense", id: item.expenseId }
-                            : item.settlement
-                            ? { kind: "settlement", id: item.settlement.id }
-                            : undefined
-                        )
-                    )
-                  }
-                  className={`flex items-start gap-3 rounded-[var(--radius-inner)] p-3.5 cursor-pointer tap-shrink ${
-                    unread ? "bg-[var(--tint-accent)]" : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-                  }`}
-                >
-                  <KindIcon kind={item.kind} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-[15px] text-[var(--text-primary)] leading-snug">{item.title}</p>
-                    <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5 truncate">{item.subtitle}</p>
-                    {item.kind === "request" && item.settlement && (
-                      <div className="flex gap-2 mt-2">
-                        <button
-                          disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "approved"); }}
-                          className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          disabled={busyId === item.settlement.id}
-                          onClick={(ev) => { ev.stopPropagation(); void respond(item.settlement!, item.groupId, "rejected"); }}
-                          className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3.5 py-1.5 text-[13px] font-medium tap-shrink disabled:opacity-50"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
-                    <span className="text-[12px] text-[var(--text-tertiary)]">{timeLabel(item.ts)}</span>
-                    {unread && <span className="w-2 h-2 rounded-full bg-[var(--brand-solid)]" />}
-                  </div>
+    <Screen title="Notifications" backHref="/" large tabBar>
+      {allItems.length === 0 ? (
+        <EmptyState
+          icon={<Bell size={56} weight={1.4} />}
+          title="No Notifications"
+          message="Payments, messages and new expenses show up here."
+        />
+      ) : (
+        sections.map((section) => (
+          <ListSection key={section.bucket} header={section.bucket} className="!mt-5 first:!mt-0">
+            {section.items.map((item) => {
+              const unread = item.ts > seenAt;
+              return (
+                <div key={item.key} className="list-row-wrap" style={{ ["--sep-inset" as string]: "64px" }}>
+                  <button type="button" onClick={() => open(item)} className="list-row is-tall !items-start">
+                    <span className="relative mt-0.5">
+                      <KindIcon kind={item.kind} />
+                      {unread && (
+                        <span className="absolute -left-2.5 top-3 w-[9px] h-[9px] rounded-full bg-[var(--blue)]" aria-label="New" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block t-subhead leading-[20px] text-[var(--text-primary)]">{item.title}</span>
+                      <span className="block t-footnote text-[var(--text-secondary)] mt-0.5 truncate">{item.subtitle}</span>
+                    </span>
+                    <span className="shrink-0 flex items-center gap-1 t-footnote text-[var(--text-secondary)] pt-0.5">
+                      {timeLabel(item.ts)}
+                      <ChevronRight className="row-chevron" size={12} />
+                    </span>
+                  </button>
+                  {item.kind === "request" && item.settlement && (
+                    <div className="flex gap-2 px-4 pb-3 -mt-1 pl-[64px]">
+                      <button
+                        type="button"
+                        disabled={busyId === item.settlement.id}
+                        onClick={() => void respond(item.settlement!, item.groupId, "approved")}
+                        className="btn-prominent btn-small"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === item.settlement.id}
+                        onClick={() => void respond(item.settlement!, item.groupId, "rejected")}
+                        className="btn-gray btn-small !text-[var(--neg)]"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </main>
-    </div>
+              );
+            })}
+          </ListSection>
+        ))
+      )}
+    </Screen>
   );
 }

@@ -29,10 +29,12 @@ import { isSettled } from "@/lib/money";
 import { isArchivedFor } from "@/lib/group-filters";
 import { groupItemLink } from "@/lib/statement";
 import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
-import { categoryMeta } from "@/lib/categories";
-import GlassButton from "@/components/ui/GlassButton";
-import { GlassField } from "@/components/ui/GlassField";
 import GlassModal from "@/components/ui/GlassModal";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import Menu from "@/components/ui/Menu";
+import { ButtonRow, FieldRow, IconTile, ListSection, Row } from "@/components/ui/List";
+import { Avatar, AvatarStack, EmptyState, Switch } from "@/components/ui/Controls";
+import { Archive, Camera, Ellipsis, Leave, Pencil, People, PersonAdd, Plus, Qr, Trash } from "@/components/ui/Icons";
 import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { hapticSuccess } from "@/lib/haptics";
@@ -59,7 +61,6 @@ const AddMemberModal = dynamic(() => import("@/components/group/AddMemberModal")
 const ActivityDetailModal = dynamic(() => import("@/components/group/ActivityDetailModal"), { ssr: false });
 const PersonStatementSheet = dynamic(() => import("@/components/group/PersonStatementSheet"), { ssr: false });
 const InviteQrSheet = dynamic(() => import("@/components/group/InviteQrSheet"), { ssr: false });
-import BottomNav from "@/components/home/BottomNav";
 import ActivityTimeline from "@/components/group/ActivityTimeline";
 import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
 import LoginScreen from "@/components/LoginScreen";
@@ -151,20 +152,18 @@ function GroupPageInner() {
   if (!group) {
     if (notFound) {
       return (
-        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-3">
-          <p className="text-[17px] font-semibold text-[var(--text-primary)]">
-            This group isn&rsquo;t available
-          </p>
-          <p className="text-[14px] text-[var(--text-tertiary)] max-w-xs">
-            It may have been deleted, or you may no longer be a member.
-          </p>
-          <button
-            onClick={() => router.push("/")}
-            className="mt-1 rounded-full bg-[var(--brand-solid)] text-white px-5 py-2.5 text-[15px] font-semibold tap-shrink"
-          >
-            Back to groups
-          </button>
-        </div>
+        <Screen title="Group" backHref="/">
+          <EmptyState
+            icon={<People size={56} weight={1.4} />}
+            title="Group Unavailable"
+            message="It may have been deleted, or you may no longer be a member."
+            action={
+              <button onClick={() => router.push("/")} className="btn-prominent">
+                Back to Groups
+              </button>
+            }
+          />
+        </Screen>
       );
     }
     return <GroupDetailSkeleton />;
@@ -271,7 +270,7 @@ function GroupPageInner() {
       // notification telling the user about the tap they had just made — noise
       // on desktop, and on Android `new Notification()` throws outright.
       showToast({
-        message: `✓ Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
+        message: `Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
       });
     } catch (err) {
       showToast({
@@ -501,7 +500,7 @@ function GroupPageInner() {
         receiptUrls,
         category: input.category,
       });
-      showToast({ message: `${categoryMeta(input.category).emoji} Expense added · ${formatCurrency(input.amount)}` });
+      showToast({ message: `Expense added · ${formatCurrency(input.amount)}` });
       hapticSuccess();
     } catch {
       showToast({ message: "Couldn't add expense — tap + to retry." });
@@ -599,260 +598,190 @@ function GroupPageInner() {
     .sort((a, b) => b.netAmount - a.netAmount);
 
   const createdAgo = createdAgoText(group.createdAt);
+  const memberPeople = group.memberIds.map((uid) => ({
+    id: uid,
+    name: group.members[uid]?.displayName || "Member",
+    photoURL: group.members[uid]?.photoURL,
+  }));
+  const groupMenu = [
+    { label: "Invite People", icon: <Qr size={20} />, onSelect: () => setShowInvite(true) },
+    { label: "Group Info", icon: <People size={20} />, onSelect: () => setShowGroupInfo(true) },
+    ...(isAdmin ? [{ label: "Edit Group", icon: <Pencil size={20} />, onSelect: handleOpenEditGroup }] : []),
+    { divider: true as const },
+    { label: iArchived ? "Restore Group" : "Archive Group", icon: <Archive size={20} />, onSelect: handleToggleArchive },
+    ...(!isAdmin ? [{ label: "Leave Group", icon: <Leave size={20} />, destructive: true, onSelect: handleLeaveGroup }] : []),
+  ];
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <header className="max-w-md w-full mx-auto px-4 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-center justify-between pt-2">
-          <button
-            onClick={() => router.push("/")}
-            aria-label="Back"
-            className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="m15 18-6-6 6-6" />
-            </svg>
-          </button>
-          <div className="flex items-center gap-2.5">
-            <button
-              onClick={() => setShowAddExpense(true)}
-              aria-label="Add expense"
-              className="w-11 h-11 rounded-2xl bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setShowGroupInfo(true)}
-              aria-label="Group menu"
-              className="w-11 h-11 rounded-2xl bg-[var(--surface)] shadow-[var(--shadow-button)] flex items-center justify-center tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="var(--text-secondary)">
-                <circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" />
-              </svg>
-            </button>
-          </div>
-        </div>
-      </header>
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum space-y-5">
-        {/* Group hero */}
-        <div className="flex items-start gap-4">
-          {group.photoURL ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={group.photoURL} alt="" className="w-[88px] h-[88px] rounded-[var(--radius-card)] object-cover shrink-0 shadow-[var(--shadow-float)]" />
-          ) : (
-            <div className="w-[88px] h-[88px] rounded-[var(--radius-card)] bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center shrink-0 shadow-[0_8px_24px_-8px_rgba(79,70,229,0.5)]">
-              <span className="text-[34px] font-bold text-white">{group.name.charAt(0).toUpperCase()}</span>
-            </div>
-          )}
-          <div className="min-w-0 flex-1 pt-1">
-            <div className="flex items-center gap-2">
-              <h1 className="text-[26px] font-extrabold text-[var(--text-primary)] truncate">{group.name}</h1>
-              {isAdmin && (
-                <button
-                  onClick={handleOpenEditGroup}
-                  aria-label="Edit group"
-                  className="w-7 h-7 rounded-full bg-[var(--surface)] shadow-[var(--shadow-sm)] flex items-center justify-center shrink-0 tap-shrink"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-                  </svg>
-                </button>
-              )}
-            </div>
-            <p className="text-[14px] text-[var(--text-tertiary)] mt-1">
-              {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created {createdAgo}
-            </p>
-            <div className="flex items-center mt-2.5">
-              <div className="flex -space-x-2">
-                {group.memberIds.slice(0, 3).map((uid) =>
-                  group.members[uid]?.photoURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img key={uid} src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full border-2 border-[var(--background)] object-cover" />
-                  ) : (
-                    <span key={uid} className="w-8 h-8 rounded-full border-2 border-[var(--background)] bg-[var(--fill)] flex items-center justify-center text-[12px] font-medium text-[var(--text-secondary)]">
-                      {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
-                    </span>
-                  )
-                )}
-              </div>
-              {group.memberIds.length > 3 && (
-                <span className="ml-1 h-8 min-w-8 px-2 rounded-full bg-[var(--tint-accent)] flex items-center justify-center text-[12px] font-semibold text-[var(--brand)]">
-                  +{group.memberIds.length - 3}
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
+    <Screen
+      title={group.name}
+      backHref="/"
+      inlineTitleAfter={120}
+      trailing={
+        <>
+          <Menu
+            label="Group actions"
+            items={groupMenu}
+            trigger={(t) => (
+              <BarButton {...t} aria-label="More">
+                <Ellipsis size={21} />
+              </BarButton>
+            )}
+          />
+          <BarButton prominent onClick={() => setShowAddExpense(true)} aria-label="Add expense">
+            <Plus size={21} />
+          </BarButton>
+        </>
+      }
+    >
+      {/* Header (Contacts-style): photo, name, members. Tapping opens info. */}
+      <button
+        type="button"
+        onClick={() => setShowGroupInfo(true)}
+        className="w-full flex flex-col items-center text-center pt-1 pb-5"
+        aria-label={`${group.name}, group info`}
+      >
+        <Avatar name={group.name} photoURL={group.photoURL} size={88} seed={group.id} />
+        <h1 className="t-title1 text-[var(--text-primary)] mt-3 max-w-full truncate px-4">{group.name}</h1>
+        <span className="mt-1.5 flex items-center gap-2 t-subhead text-[var(--text-secondary)]">
+          <AvatarStack people={memberPeople} size={20} />
+          {group.memberIds.length} {group.memberIds.length === 1 ? "member" : "members"} · Created {createdAgo}
+        </span>
+      </button>
 
-        {/* Stats card — 2×2 grid so each metric has room to breathe */}
-        <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)] grid grid-cols-2 gap-x-4 gap-y-5">
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Total spent</p>
-            <p className="text-[22px] font-bold text-[var(--brand)] mt-1 truncate">{formatCurrency(totalSpent)}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Expenses</p>
-            <p className="text-[22px] font-bold text-[var(--text-primary)] mt-1">{expenseCount}</p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Settled</p>
-            <p className="text-[22px] font-bold text-[var(--pos)] mt-1">{progress.pct}%</p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-              {progress.isEmpty
-                ? "nothing to settle"
-                : isSettled(progress.outstanding)
-                ? "everyone's square"
-                : `${formatCurrency(progress.outstanding)} still to move`}
-            </p>
-          </div>
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Last activity</p>
-            <p className="text-[18px] font-bold text-[var(--text-primary)] mt-1 truncate">
-              {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
-            </p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">{lastActivityItem?.label || "no activity"}</p>
-          </div>
-        </div>
-
-        {/* You owe / you're owed hero */}
+      {/* Where you stand, and the one action that changes it. */}
+      <div className="list-section px-4 pt-3.5 pb-4">
         {topDebt ? (
-          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-danger-soft)]">
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💸</span>
-            <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU OWE</p>
-              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topDebt.toUid)}</p>
-              <p className="text-[34px] font-extrabold text-[var(--neg)] leading-tight">{formatCurrency(topDebt.amount)}</p>
-              <div className="flex flex-wrap items-center gap-2 mt-3">
-                <button
-                  onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
-                  className="inline-flex items-center gap-2 bg-[var(--neg)] text-white rounded-full pl-5 pr-4 py-2.5 text-[15px] font-semibold shadow-[0_8px_20px_-6px_rgba(239,68,68,0.6)] tap-shrink"
-                >
-                  Settle up now
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
+          <>
+            <p className="t-subhead text-[var(--text-secondary)]">You owe {memberName(topDebt.toUid)}</p>
+            <p className="t-large-title t-numeral text-[var(--neg)] truncate">{formatCurrency(topDebt.amount)}</p>
+            {myDebts.length > 1 && (
+              <p className="t-footnote text-[var(--text-secondary)]">
+                and {myDebts.length - 1} other{myDebts.length > 2 ? "s" : ""} in this group
+              </p>
+            )}
+            <button
+              type="button"
+              onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
+              className="btn-prominent w-full mt-3.5"
+            >
+              Settle Up
+            </button>
+          </>
         ) : topCredit ? (
-          <div className="relative overflow-hidden rounded-[var(--radius-card)] p-5 bg-[var(--tint-success-soft)]">
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-[64px] opacity-70 select-none" aria-hidden>💰</span>
-            <div className="relative">
-              <p className="text-[12px] font-semibold tracking-wide text-[var(--text-tertiary)]">YOU&rsquo;LL RECEIVE</p>
-              <p className="text-[22px] font-extrabold text-[var(--text-primary)] mt-1">{memberName(topCredit.fromUid)}</p>
-              <p className="text-[34px] font-extrabold text-[var(--pos)] leading-tight">{formatCurrency(topCredit.amount)}</p>
-              <p className="mt-2 text-[13px] text-[var(--text-tertiary)]">Waiting for {memberName(topCredit.fromUid)} to settle up.</p>
-            </div>
-          </div>
+          <>
+            <p className="t-subhead text-[var(--text-secondary)]">{memberName(topCredit.fromUid)} owes you</p>
+            <p className="t-large-title t-numeral text-[var(--pos)] truncate">{formatCurrency(topCredit.amount)}</p>
+            <p className="t-footnote text-[var(--text-secondary)] mt-0.5">
+              {myCredits.length > 1
+                ? `${myCredits.length - 1} more ${myCredits.length > 2 ? "people owe" : "person owes"} you here.`
+                : `Waiting for ${memberName(topCredit.fromUid)} to settle up.`}
+            </p>
+          </>
         ) : (
-          <div className="rounded-[var(--radius-card)] p-6 bg-[var(--tint-accent)] text-center">
-            <p className="text-[18px] font-bold text-[var(--text-primary)]">You&rsquo;re all settled up 🎉</p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">No outstanding balances in this group.</p>
-          </div>
+          <>
+            <p className="t-subhead text-[var(--text-secondary)]">Your balance</p>
+            <p className="t-title1 text-[var(--text-primary)]">All settled up</p>
+          </>
         )}
 
-        {/* Balances */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Balances</h2>
-            <button onClick={() => setShowGroupInfo(true)} className="text-[14px] font-semibold text-[var(--brand)] tap-shrink">View all</button>
+        <div className="mt-4 pt-3.5 grid grid-cols-3 gap-2 relative before:absolute before:inset-x-0 before:top-0 before:h-[0.5px] before:bg-[var(--separator)]">
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Total spent</p>
+            <p className="t-headline t-numeral text-[var(--text-primary)] truncate">{formatCurrency(totalSpent)}</p>
           </div>
-          <div className="flex gap-3 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
-            {memberBalances.map((b) => {
-              const isMe = b.uid === currentUser.uid;
-              // One definition of "settled" for the label, the colour and the
-              // number. These were three separate `0.01` comparisons, so a
-              // residual under the threshold rendered a real figure next to a
-              // "settled up" chip.
-              const settled = isSettled(b.netAmount);
-              const pos = !settled && b.netAmount > 0;
-              const neg = !settled && b.netAmount < 0;
-              return (
-                <button
-                  key={b.uid}
-                  type="button"
-                  // Your own card has no pairwise statement to show.
-                  disabled={isMe}
-                  onClick={() => setStatementUid(b.uid)}
-                  aria-label={isMe ? undefined : `View your statement with ${memberName(b.uid)}`}
-                  className={`shrink-0 w-[190px] text-left rounded-[var(--radius-inner)] p-3.5 ${
-                    isMe ? "" : "tap-shrink"
-                  } ${
-                    isMe ? (neg ? "bg-[var(--tint-danger-soft)]" : "bg-[var(--tint-success-soft)]") : "bg-[var(--surface)] shadow-[var(--shadow-sm)]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2.5">
-                    {isMe ? (
-                      <span className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-[12px] font-bold ${neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--tint-success)] text-[var(--pos)]"}`}>You</span>
-                    ) : group.members[b.uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[b.uid].photoURL} alt="" className="w-10 h-10 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="w-10 h-10 rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 text-[14px] font-medium text-[var(--text-secondary)]">
-                        {(group.members[b.uid]?.displayName || "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">{isMe ? "You" : memberName(b.uid)}</p>
-                      <p className={`text-[15px] font-bold ${pos ? "text-[var(--pos)]" : neg ? "text-[var(--neg)]" : "text-[var(--text-tertiary)]"}`}>
-                        {pos ? "+" : neg ? "-" : ""}
-                        {formatCurrency(settled ? 0 : Math.abs(b.netAmount))}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                    <span className={`inline-block rounded-full px-2.5 py-0.5 text-[12px] font-medium ${
-                      pos ? "bg-[var(--tint-success)] text-[var(--pos)]" : neg ? "bg-[var(--tint-danger)] text-[var(--neg)]" : "bg-[var(--fill)] text-[var(--text-secondary)]"
-                    }`}>
-                      {isMe ? (neg ? "You owe" : pos ? "You get back" : "Settled") : pos ? "Gets back" : neg ? "Owes" : "Settled"}
-                    </span>
-                    {!isMe && !group.memberIds.includes(b.uid) && (
-                      <span className="inline-block rounded-full bg-[var(--fill)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)]">
-                        left group
-                      </span>
-                    )}
-                    {!isMe && (
-                      <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-[var(--brand)]">
-                        Statement
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                          <path d="M9 6l6 6-6 6" />
-                        </svg>
-                      </span>
-                    )}
-                  </div>
-                </button>
-              );
-            })}
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Expenses</p>
+            <p className="t-headline t-numeral text-[var(--text-primary)]">{expenseCount}</p>
           </div>
-        </section>
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Last activity</p>
+            <p className="t-headline text-[var(--text-primary)] truncate">
+              {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
+            </p>
+          </div>
+        </div>
+        {!progress.isEmpty && (
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between t-caption text-[var(--text-secondary)]">
+              <span>
+                {isSettled(progress.outstanding)
+                  ? "Everyone is square"
+                  : `${formatCurrency(progress.outstanding)} still to settle`}
+              </span>
+              <span className="font-semibold text-[var(--text-primary)]">{progress.pct}%</span>
+            </div>
+            <div className="meter mt-1.5" role="meter" aria-valuenow={progress.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Settled">
+              <span style={{ width: `${progress.pct}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
 
-        {/* Activity */}
-        <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-[20px] font-bold text-[var(--text-primary)]">Activity</h2>
-          </div>
-          <ActivityTimeline
-            expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
-            settlements={settlements}
-            memberName={memberName}
-            currentUid={currentUser.uid}
-            isAdmin={isAdmin}
-            onEditExpense={handleEditExpense}
-            onDeleteExpense={handleDeleteExpense}
-            onApprove={handleApproveSettlement}
-            onReject={handleRejectSettlement}
-            onForward={(s) => setForwardTarget(s)}
-            canForward={myCreditors.length > 0}
-            onOpenExpense={openExpense}
-            onOpenSettlement={openSettlement}
-          />
-        </section>
-      </main>
+      {/* Balances: one row per person. Tap for your statement with them. */}
+      <ListSection
+        header="Balances"
+        footer={group.useSimplifiedDebts ? "Combine payments is on: the plan routes payments through fewer people." : undefined}
+      >
+        {memberBalances.map((b) => {
+          const isMe = b.uid === currentUser.uid;
+          const settled = isSettled(b.netAmount);
+          const pos = !settled && b.netAmount > 0;
+          const left = !group.memberIds.includes(b.uid);
+          const name = isMe ? "You" : memberName(b.uid);
+          const detail = (
+            <span className="flex flex-col items-end leading-tight">
+              <span className="t-caption text-[var(--text-secondary)]">
+                {settled ? "settled" : pos ? "gets back" : "owes"}
+              </span>
+              <span
+                className={`t-subhead font-semibold t-numeral ${
+                  settled ? "text-[var(--text-secondary)]" : pos ? "text-[var(--pos)]" : "text-[var(--neg)]"
+                }`}
+              >
+                {formatCurrency(settled ? 0 : Math.abs(b.netAmount))}
+              </span>
+            </span>
+          );
+          const leading = (
+            <Avatar name={group.members[b.uid]?.displayName || name} photoURL={group.members[b.uid]?.photoURL} size={36} seed={b.uid} />
+          );
+          return isMe ? (
+            <Row key={b.uid} leading={leading} separatorInset={64} title={name} subtitle="Your balance in this group" detail={detail} />
+          ) : (
+            <ButtonRow
+              key={b.uid}
+              onClick={() => setStatementUid(b.uid)}
+              aria-label={`Your statement with ${name}`}
+              leading={leading}
+              separatorInset={64}
+              title={name}
+              subtitle={left ? "Left the group" : undefined}
+              detail={detail}
+              chevron
+            />
+          );
+        })}
+      </ListSection>
 
-      <BottomNav active="groups" />
+      <div className="mt-7">
+        <div className="list-header-prominent">Activity</div>
+        <ActivityTimeline
+          expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
+          settlements={settlements}
+          memberName={memberName}
+          currentUid={currentUser.uid}
+          isAdmin={isAdmin}
+          onEditExpense={handleEditExpense}
+          onDeleteExpense={handleDeleteExpense}
+          onApprove={handleApproveSettlement}
+          onReject={handleRejectSettlement}
+          onForward={(s) => setForwardTarget(s)}
+          canForward={myCreditors.length > 0}
+          onOpenExpense={openExpense}
+          onOpenSettlement={openSettlement}
+        />
+      </div>
 
       {showAddExpense && (
         <AddExpenseModal group={group} currentUid={currentUser.uid} onSubmit={handleAddExpense} onClose={() => setShowAddExpense(false)} />
@@ -871,13 +800,8 @@ function GroupPageInner() {
         />
       )}
 
-
       {showInvite && (
-        <InviteQrSheet
-          groupName={group.name}
-          inviteCode={group.inviteCode}
-          onClose={() => setShowInvite(false)}
-        />
+        <InviteQrSheet groupName={group.name} inviteCode={group.inviteCode} onClose={() => setShowInvite(false)} />
       )}
       {statementUid && (
         <PersonStatementSheet
@@ -902,113 +826,94 @@ function GroupPageInner() {
         />
       )}
 
-      {/* Group Info Modal */}
+      {/* Group Info */}
       {showGroupInfo && (
         <GlassModal title="Group Info" onClose={() => setShowGroupInfo(false)}>
-          <div className="space-y-4">
-            <div className="text-center">
-              {group.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={group.photoURL} alt="" className="w-20 h-20 rounded-full object-cover mx-auto" />
-              ) : (
-                <div className="w-20 h-20 rounded-full bg-[var(--accent)]/10 flex items-center justify-center mx-auto">
-                  <span className="text-[32px] font-semibold text-[var(--accent)]">{group.name.charAt(0).toUpperCase()}</span>
-                </div>
-              )}
-              <p className="text-[20px] font-semibold text-[var(--text-primary)] mt-3">{group.name}</p>
-              {group.description && <p className="text-[14px] text-[var(--text-secondary)] mt-1">{group.description}</p>}
-              <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-                {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-
-            <div className="flex gap-2">
-              <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); setShowInvite(true); }} className="flex-1">
-                Invite people
-              </GlassButton>
-              {isAdmin && (
-                <GlassButton size="sm" variant="glass" onClick={() => { setShowGroupInfo(false); handleOpenEditGroup(); }} className="flex-1">
-                  Edit Group
-                </GlassButton>
-              )}
-            </div>
-
-            <div className="border-t border-[var(--border-subtle)] pt-3">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium text-[var(--text-secondary)]">Members</p>
-                {isAdmin && (
-                  <button
-                    onClick={() => { setShowGroupInfo(false); setShowAddMember(true); }}
-                    className="text-[13px] font-medium text-[var(--brand)] tap-shrink"
-                  >
-                    + Add member
-                  </button>
-                )}
-              </div>
-              <div className="space-y-2">
-                {group.memberIds.map((uid) => (
-                  <div key={uid} className="flex items-center gap-2.5">
-                    {group.members[uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[uid].photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <div className="w-8 h-8 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-                        <span className="text-[13px] font-medium text-[var(--accent)]">
-                          {(group.members[uid]?.displayName || "?").charAt(0).toUpperCase()}
-                        </span>
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] text-[var(--text-primary)] truncate">
-                        {memberName(uid)}{uid === group.createdBy && <span className="text-[11px] text-[var(--text-tertiary)] ml-1">(Admin)</span>}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] truncate">{group.members[uid]?.email || ""}</p>
-                    </div>
-                    {isAdmin && uid !== group.createdBy && (
-                      <button
-                        onClick={() => handleRemoveMember(uid)}
-                        className="text-[12px] font-medium text-[var(--danger)] shrink-0 tap-shrink px-2 py-1"
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Archiving is personal: it moves this group into your Archived tab
-                and leaves it exactly where it is for everyone else. */}
-            <button
-              onClick={handleToggleArchive}
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
-            >
-              {iArchived ? "Restore to active groups" : "Archive this group"}
-            </button>
-            <p className="text-[12px] text-[var(--text-tertiary)] -mt-1">
-              {iArchived
-                ? "It will show up under Your Groups again."
-                : "Hides it from your home screen without changing any balance. Only you see this."}
-            </p>
-
-            {!isAdmin && (
-              <button
-                onClick={handleLeaveGroup}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink"
-              >
-                Leave group
-              </button>
+          <div className="flex flex-col items-center text-center pt-2 pb-1">
+            <Avatar name={group.name} photoURL={group.photoURL} size={72} seed={group.id} />
+            <p className="t-title2 text-[var(--text-primary)] mt-2.5 max-w-full truncate">{group.name}</p>
+            {group.description && (
+              <p className="t-subhead text-[var(--text-secondary)] mt-0.5 selectable">{group.description}</p>
             )}
           </div>
+
+          <ListSection elevated>
+            <ButtonRow
+              onClick={() => {
+                setShowGroupInfo(false);
+                setShowInvite(true);
+              }}
+              leading={<IconTile color="var(--blue)"><Qr size={17} /></IconTile>}
+              separatorInset={58}
+              title="Invite People"
+              chevron
+            />
+            {isAdmin && (
+              <ButtonRow
+                onClick={() => {
+                  setShowGroupInfo(false);
+                  setShowAddMember(true);
+                }}
+                leading={<IconTile color="var(--green)"><PersonAdd size={17} /></IconTile>}
+                separatorInset={58}
+                title="Add Member"
+                chevron
+              />
+            )}
+            {isAdmin && (
+              <ButtonRow
+                onClick={() => {
+                  setShowGroupInfo(false);
+                  handleOpenEditGroup();
+                }}
+                leading={<IconTile color="var(--gray)"><Pencil size={17} /></IconTile>}
+                separatorInset={58}
+                title="Edit Group"
+                chevron
+              />
+            )}
+          </ListSection>
+
+          <ListSection
+            elevated
+            header={`${group.memberIds.length} ${group.memberIds.length === 1 ? "Member" : "Members"}`}
+            footer={isAdmin ? "Tap a member to remove them." : undefined}
+          >
+            {group.memberIds.map((uid) => {
+              const leading = (
+                <Avatar name={group.members[uid]?.displayName || "Member"} photoURL={group.members[uid]?.photoURL} size={36} seed={uid} />
+              );
+              const props = {
+                leading,
+                separatorInset: 64,
+                title: memberName(uid),
+                subtitle: group.members[uid]?.email || undefined,
+                detail: uid === group.createdBy ? "Admin" : undefined,
+              };
+              return isAdmin && uid !== group.createdBy ? (
+                <ButtonRow key={uid} onClick={() => handleRemoveMember(uid)} {...props} />
+              ) : (
+                <Row key={uid} {...props} />
+              );
+            })}
+          </ListSection>
+
+          <ListSection
+            elevated
+            footer={
+              iArchived
+                ? "Archived groups stay out of your list. Restoring brings it back."
+                : "Archiving hides it from your Groups list without changing any balance. Only you see this."
+            }
+          >
+            <ButtonRow onClick={handleToggleArchive} title={iArchived ? "Restore Group" : "Archive Group"} action />
+            {!isAdmin && <ButtonRow onClick={handleLeaveGroup} title="Leave Group" destructive />}
+          </ListSection>
         </GlassModal>
       )}
 
       {showAddMember && (
-        <AddMemberModal
-          groupId={group.id}
-          existingUids={group.memberIds}
-          onClose={() => setShowAddMember(false)}
-        />
+        <AddMemberModal groupId={group.id} existingUids={group.memberIds} onClose={() => setShowAddMember(false)} />
       )}
 
       {(detailExpense || detailSettlement) && (
@@ -1025,76 +930,83 @@ function GroupPageInner() {
         />
       )}
 
-      {/* Edit Group Modal */}
+      {/* Edit Group: delete lives here, at the bottom, behind confirmation. */}
       {showEditGroup && (
-        <GlassModal title="Edit Group" onClose={() => setShowEditGroup(false)}>
-          <form onSubmit={handleSaveGroupProfile} className="space-y-4">
-            <div className="flex justify-center">
+        <GlassModal
+          title="Edit Group"
+          large
+          onClose={() => setShowEditGroup(false)}
+          dirty={
+            !editBusy &&
+            (editName !== group.name ||
+              editDesc !== (group.description || "") ||
+              editUseSimplified !== (group.useSimplifiedDebts === true) ||
+              !!editPhotoFile)
+          }
+          confirm={{ label: "Save", formId: "edit-group", disabled: !editName.trim(), busy: editBusy, onConfirm: () => {} }}
+        >
+          <form id="edit-group" onSubmit={handleSaveGroupProfile}>
+            <div className="flex flex-col items-center pt-2">
               <label
                 role="button"
                 tabIndex={0}
                 aria-label="Change group photo"
                 onKeyDown={activateFileInputOnKey}
-                className="relative cursor-pointer tap-shrink rounded-full"
+                className="relative cursor-pointer rounded-full flex flex-col items-center"
               >
-                {editPhotoPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={editPhotoPreview} alt="" className="w-20 h-20 rounded-full object-cover border-2 border-[var(--border-subtle)]" />
-                ) : (
-                  <div className="w-20 h-20 rounded-full bg-[var(--accent)]/10 flex items-center justify-center border-2 border-[var(--border-subtle)]">
-                    <span className="text-[28px] font-semibold text-[var(--accent)]">{(editName || "G").charAt(0).toUpperCase()}</span>
-                  </div>
-                )}
-                <span className="absolute bottom-0 right-0 bg-[var(--accent)] text-white text-[10px] px-1.5 py-0.5 rounded-full">Edit</span>
+                <Avatar name={editName || group.name} photoURL={editPhotoPreview} size={88} seed={group.id} />
+                <span className="mt-2 t-subhead font-semibold text-[var(--brand)] flex items-center gap-1">
+                  <Camera size={16} /> {editPhotoPreview ? "Change Photo" : "Add Photo"}
+                </span>
                 <input type="file" accept="image/*" onChange={handleEditPhotoChange} className="hidden" />
               </label>
             </div>
-            <GlassField label="Group name" autoFocus value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Group name" />
-            <GlassField label="Description" value={editDesc} onChange={(e) => setEditDesc(e.target.value)} placeholder="Group description (optional)" />
 
-            <div className="rounded-[var(--radius-inner)] border border-[var(--border-subtle)] p-3.5">
-              <label className="flex items-start gap-3 cursor-pointer">
+            <ListSection elevated>
+              <FieldRow label="Name">
                 <input
-                  type="checkbox"
-                  checked={editUseSimplified}
-                  onChange={(e) => setEditUseSimplified(e.target.checked)}
-                  className="mt-0.5 h-5 w-5 shrink-0 accent-[var(--brand-solid)]"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Required"
+                  aria-label="Group name"
+                  className="row-input py-[13px]"
                 />
-                <span className="min-w-0">
-                  <span className="block text-[15px] font-semibold text-[var(--text-primary)]">
-                    Combine payments
-                  </span>
-                  <span className="block text-[13px] text-[var(--text-secondary)] mt-0.5">
-                    Off: you settle directly with each person you shared expenses
-                    with. On: the app reshuffles who pays whom so there are fewer
-                    transfers — which can ask you to pay someone you never shared
-                    a bill with.
-                  </span>
-                </span>
-              </label>
-            </div>
+              </FieldRow>
+              <FieldRow label="Description">
+                <input
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="Optional"
+                  aria-label="Description"
+                  className="row-input py-[13px]"
+                />
+              </FieldRow>
+            </ListSection>
 
-            {editError && <p className="text-sm text-[var(--danger)]">{editError}</p>}
-            <GlassButton disabled={editBusy} className="w-full">{editBusy ? "Saving…" : "Save"}</GlassButton>
+            <ListSection
+              elevated
+              footer="Off: you settle directly with each person you shared expenses with. On: the app reshuffles who pays whom so there are fewer payments, which can ask you to pay someone you never shared a bill with."
+            >
+              <Row title="Combine Payments">
+                <Switch checked={editUseSimplified} onChange={setEditUseSimplified} label="Combine payments" />
+              </Row>
+            </ListSection>
 
-            <div className="border-t border-[var(--border-subtle)] pt-3">
-              <button
-                type="button"
+            {editError && <p className="list-footer !text-[var(--neg)]">{editError}</p>}
+
+            <ListSection elevated footer="Deletes the group and its balances for everyone. This can’t be undone.">
+              <ButtonRow
                 onClick={handleDeleteGroup}
                 disabled={editBusy}
-                className="w-full rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3.5 py-2.5 text-sm font-medium text-[var(--danger)] tap-shrink disabled:opacity-50"
-              >
-                Delete Group
-              </button>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-1.5 text-center">
-                Permanently removes this group for everyone. This can&apos;t be undone.
-              </p>
-            </div>
+                leading={<span className="text-[var(--red)]"><Trash size={20} /></span>}
+                title="Delete Group"
+                destructive
+              />
+            </ListSection>
           </form>
         </GlassModal>
       )}
 
-      {/* Edit Expense Modal */}
       {editingExpense && (
         <AddExpenseModal
           group={group}
@@ -1114,7 +1026,7 @@ function GroupPageInner() {
           onClose={() => setConfirmState(null)}
         />
       )}
-    </div>
+    </Screen>
   );
 }
 

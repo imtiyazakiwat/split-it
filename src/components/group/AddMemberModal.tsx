@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { searchUsers, addMemberToGroup, UserSearchResult } from "@/lib/firestore";
 import GlassModal from "@/components/ui/GlassModal";
+import { ListSection, Row } from "@/components/ui/List";
+import { Avatar, SearchField } from "@/components/ui/Controls";
 import { useToast } from "@/components/ui/Toast";
 
 export default function AddMemberModal({
@@ -66,54 +68,53 @@ export default function AddMemberModal({
   }
 
   return (
-    <GlassModal title="Add member" onClose={onClose}>
-      <div className="space-y-3">
-        <input
-          autoFocus
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="Search by name or email…"
-          className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-        />
+    <GlassModal title="Add Member" large onClose={onClose}>
+      <SearchField value={term} onChange={setTerm} placeholder="Name or Email" label="Search people" autoFocus className="mt-1" />
 
-        {searching && <p className="text-[13px] text-[var(--text-tertiary)]">Searching…</p>}
+      {term.trim().length >= 2 && (
+        <ListSection
+          elevated
+          footer={
+            !searching && results.length === 0
+              ? "No one found. They need to have signed in to SplitIt at least once."
+              : undefined
+          }
+        >
+          {searching && results.length === 0 ? (
+            <Row title={<span className="text-[var(--text-secondary)]">Searching…</span>} />
+          ) : results.length === 0 ? (
+            <Row title={<span className="text-[var(--text-secondary)]">No Results</span>} />
+          ) : (
+            results.map((u) => (
+              <Row
+                key={u.uid}
+                leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={36} seed={u.uid} />}
+                separatorInset={64}
+                title={u.displayName}
+                subtitle={u.email}
+                detail={
+                  <button
+                    type="button"
+                    onClick={() => handleAdd(u)}
+                    disabled={addingUid !== null}
+                    className="btn-tinted btn-small -my-1"
+                  >
+                    {addingUid === u.uid ? "Adding…" : "Add"}
+                  </button>
+                }
+              />
+            ))
+          )}
+        </ListSection>
+      )}
 
-        {!searching && term.trim().length >= 2 && results.length === 0 && (
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            No users found. They need to have signed in to SplitIt at least once.
-          </p>
-        )}
+      {term.trim().length < 2 && (
+        <p className="list-footer text-center !px-6 !pt-6">
+          Search for someone who has signed in to SplitIt. To invite anyone else, share the group’s invite link.
+        </p>
+      )}
 
-        <div className="space-y-1 max-h-72 overflow-y-auto">
-          {results.map((u) => (
-            <div key={u.uid} className="flex items-center gap-2.5 py-2">
-              {u.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={u.photoURL} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-[var(--accent)]/10 flex items-center justify-center shrink-0">
-                  <span className="text-[14px] font-medium text-[var(--accent)]">
-                    {u.displayName.charAt(0).toUpperCase()}
-                  </span>
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <p className="text-[14px] text-[var(--text-primary)] truncate">{u.displayName}</p>
-                <p className="text-[12px] text-[var(--text-tertiary)] truncate">{u.email}</p>
-              </div>
-              <button
-                onClick={() => handleAdd(u)}
-                disabled={addingUid === u.uid}
-                className="rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-1.5 text-[13px] font-medium shrink-0 tap-shrink disabled:opacity-50"
-              >
-                {addingUid === u.uid ? "Adding…" : "Add"}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-      </div>
+      {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
     </GlassModal>
   );
 }

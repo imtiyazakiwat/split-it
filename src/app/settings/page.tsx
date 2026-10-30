@@ -17,11 +17,13 @@ import {
 } from "@/lib/notifications";
 import { usePushStatus } from "@/lib/use-push";
 import { sendTestNotification } from "@/lib/send-notification";
-import TopBar from "@/components/TopBar";
-import Card from "@/components/ui/Card";
-import { GlassField } from "@/components/ui/GlassField";
-import GlassButton from "@/components/ui/GlassButton";
 import { activateFileInputOnKey } from "@/lib/keyboard";
+import Screen from "@/components/ui/Screen";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { useToast } from "@/components/ui/Toast";
+import { ButtonRow, FieldRow, IconTile, ListSection, Row } from "@/components/ui/List";
+import { Avatar, Switch } from "@/components/ui/Controls";
+import { Bell, Camera, RupeeCircle } from "@/components/ui/Icons";
 
 export default function SettingsPage() {
   const { user, loading, signOut } = useAuth();
@@ -37,32 +39,33 @@ export default function SettingsPage() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState<{ name: string; upi: string; photo: string } | null>(null);
+  const [confirmSignOut, setConfirmSignOut] = useState(false);
+  const showToast = useToast();
 
   useEffect(() => {
     if (!user) return;
     const fallbackName = user.displayName || "";
     getUserProfile(user.uid)
       .then((data) => {
-        setDisplayName(data?.displayName || fallbackName);
-        setUpiId(data?.upiId || "");
-        setPhotoPreview(data?.photoURL || user.photoURL || "");
+        const name = data?.displayName || fallbackName;
+        const upi = data?.upiId || "";
+        const photo = data?.photoURL || user.photoURL || "";
+        setDisplayName(name);
+        setUpiId(upi);
+        setPhotoPreview(photo);
+        setLoaded({ name, upi, photo });
       })
       .catch(() => {
         // Offline or blocked read: still let the user edit and save.
         setDisplayName(fallbackName);
         setPhotoPreview(user.photoURL || "");
+        setLoaded({ name: fallbackName, upi: "", photo: user.photoURL || "" });
       });
   }, [user]);
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)]">Loading…</p>
-      </div>
-    );
-  }
+  if (loading) return <Screen title="Settings" large>{null}</Screen>;
   // Rendering `null` here left Android users staring at a blank screen whenever
   // sign-in hadn't completed (which the popup-only flow made common).
   if (!user) return <LoginScreen />;
@@ -89,7 +92,6 @@ export default function SettingsPage() {
     }
     setBusy(true);
     setError("");
-    setSaved(false);
     try {
       let photoURL = photoPreview || undefined;
       if (photoFile) {
@@ -104,7 +106,8 @@ export default function SettingsPage() {
         upiId: trimmedUpi,
       });
       setPhotoFile(null);
-      setSaved(true);
+      setLoaded({ name: displayName.trim(), upi: trimmedUpi, photo: photoURL || "" });
+      showToast({ message: "Profile saved" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -150,140 +153,132 @@ export default function SettingsPage() {
     }
   }
 
-  return (
-    <div className="flex-1 flex flex-col">
-      <TopBar title="Settings" onBack={() => router.push("/")} />
-      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 scroll-momentum">
-        <Card className="p-4">
-          <form onSubmit={handleSaveProfile} className="space-y-4">
-            <div className="flex flex-col items-center gap-3">
-              <label
-                role="button"
-                tabIndex={0}
-                aria-label="Change profile photo"
-                onKeyDown={activateFileInputOnKey}
-                className="relative cursor-pointer tap-shrink rounded-full"
-              >
-                {photoPreview ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={photoPreview}
-                    alt=""
-                    className="w-20 h-20 rounded-full object-cover border-2 border-[var(--border-subtle)]"
-                  />
-                ) : (
-                  <div className="w-20 h-20 rounded-full bg-[var(--accent)]/10 flex items-center justify-center border-2 border-[var(--border-subtle)]">
-                    <span className="text-[28px] font-semibold text-[var(--accent)]">
-                      {(displayName || "U").charAt(0).toUpperCase()}
-                    </span>
-                  </div>
-                )}
-                <span className="absolute bottom-0 right-0 bg-[var(--accent)] text-white text-[10px] px-1.5 py-0.5 rounded-full">
-                  Edit
-                </span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handlePhotoChange}
-                  className="hidden"
-                />
-              </label>
-            </div>
+  const profileDirty =
+    !!loaded &&
+    (displayName.trim() !== loaded.name || upiId.trim() !== loaded.upi || !!photoFile);
+  const upiInvalid = !!upiId.trim() && !isValidUpiId(upiId.trim());
+  const pushUnavailable =
+    pushStatus === "needs-install" || pushStatus === "unsupported" || pushStatus === "unavailable";
 
-            <GlassField
-              label="Display name"
+  return (
+    <Screen title="Settings" large>
+      <form onSubmit={handleSaveProfile}>
+        {/* Profile header, Apple ID style. */}
+        <div className="flex flex-col items-center text-center pt-1 pb-2">
+          <label
+            role="button"
+            tabIndex={0}
+            aria-label="Change profile photo"
+            onKeyDown={activateFileInputOnKey}
+            className="relative cursor-pointer rounded-full flex flex-col items-center"
+          >
+            <Avatar name={displayName || currentUser.displayName || "You"} photoURL={photoPreview} size={88} seed={currentUser.uid} />
+            <span className="mt-2 t-subhead font-semibold text-[var(--brand)] flex items-center gap-1">
+              <Camera size={16} /> Edit Photo
+            </span>
+            <input type="file" accept="image/*" onChange={handlePhotoChange} className="hidden" />
+          </label>
+          <p className="t-footnote text-[var(--text-secondary)] mt-1 selectable">{currentUser.email}</p>
+        </div>
+
+        <ListSection
+          header="Profile"
+          footer={
+            upiInvalid ? (
+              <span className="text-[var(--neg)]">A UPI ID looks like yourname@bank.</span>
+            ) : (
+              "Your UPI ID is shared with your groups so they can pay you in one tap."
+            )
+          }
+        >
+          <FieldRow label="Name">
+            <input
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="Your name"
+              placeholder="Your Name"
+              aria-label="Display name"
+              autoComplete="name"
+              className="row-input py-[13px]"
             />
+          </FieldRow>
+          <FieldRow label="UPI ID">
+            <input
+              value={upiId}
+              onChange={(e) => setUpiId(e.target.value)}
+              placeholder="yourname@bank"
+              aria-label="UPI ID"
+              inputMode="email"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className={`row-input py-[13px] ${upiInvalid ? "!text-[var(--neg)]" : ""}`}
+            />
+          </FieldRow>
+        </ListSection>
 
-            <div>
-              <GlassField
-                label="UPI ID"
-                value={upiId}
-                onChange={(e) => setUpiId(e.target.value)}
-                placeholder="yourname@bank"
-                inputMode="email"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-              />
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
-                Shared with your groups so they can pay you in one tap.
-                {upiId.trim() && !isValidUpiId(upiId.trim()) && (
-                  <span className="block text-[var(--danger)] mt-0.5">
-                    Expected format: yourname@bank
-                  </span>
-                )}
-              </p>
-            </div>
-
-            {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-            {saved && <p className="text-sm text-[var(--success)]">Saved.</p>}
-
-            <GlassButton disabled={busy} className="w-full">
-              {busy ? "Saving…" : "Save Profile"}
-            </GlassButton>
-          </form>
-        </Card>
-
-        <Card className="p-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-[15px] font-medium text-[var(--text-primary)]">
-                Push notifications
-              </p>
-              <p className="text-[13px] text-[var(--text-tertiary)]">
-                Get notified when someone sends a settlement request or adds an expense
-              </p>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={notificationsOn}
-              aria-label="Push notifications"
-              aria-busy={pushBusy}
-              disabled={pushBusy || pushStatus === "needs-install" || pushStatus === "unsupported" || pushStatus === "unavailable"}
-              onClick={toggleNotifications}
-              className={`relative w-12 h-7 rounded-full transition-colors disabled:opacity-50 ${
-                notificationsOn ? "bg-[var(--accent)]" : "bg-[var(--border-subtle)]"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${
-                  notificationsOn ? "translate-x-5" : ""
-                }`}
-              />
+        {(profileDirty || busy || error) && (
+          <div className="mt-4">
+            <button type="submit" disabled={busy || upiInvalid} className="btn-prominent w-full">
+              {busy ? "Saving…" : "Save Changes"}
             </button>
+            {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
           </div>
-          {(pushMessage || pushStatus === "denied" || pushStatus === "needs-install") && (
-            <p role="status" className="text-[13px] text-[var(--text-secondary)] mt-2">
-              {pushMessage ||
-                describePushFailure(pushStatus === "denied" ? "denied" : "needs-install")}
-            </p>
-          )}
-          {notificationsOn && (
-            <button
-              type="button"
-              onClick={handleTestPush}
-              disabled={pushBusy}
-              className="mt-3 min-h-11 text-[15px] font-medium text-[var(--brand)] tap-shrink disabled:opacity-50"
-            >
-              Send a test notification
-            </button>
-          )}
-        </Card>
+        )}
+      </form>
 
-        <button
-          onClick={async () => {
+      <ListSection
+        header="Notifications"
+        footer={
+          pushMessage ||
+          (pushStatus === "denied" || pushStatus === "needs-install"
+            ? describePushFailure(pushStatus === "denied" ? "denied" : "needs-install")
+            : "Get notified when someone adds an expense, asks you to confirm a payment, or pays you back.")
+        }
+      >
+        <Row
+          leading={<IconTile color="var(--red)"><Bell size={17} /></IconTile>}
+          separatorInset={58}
+          title="Push Notifications"
+        >
+          <Switch
+            checked={notificationsOn}
+            onChange={() => void toggleNotifications()}
+            label="Push notifications"
+            busy={pushBusy}
+            disabled={pushBusy || pushUnavailable}
+          />
+        </Row>
+        {notificationsOn && (
+          <ButtonRow onClick={handleTestPush} disabled={pushBusy} title="Send a Test Notification" action />
+        )}
+      </ListSection>
+
+      <ListSection header="About">
+        <Row
+          leading={<IconTile color="var(--indigo)"><RupeeCircle size={18} /></IconTile>}
+          separatorInset={58}
+          title="SplitIt"
+          detail="Split bills, settle with UPI"
+        />
+      </ListSection>
+
+      <ListSection>
+        <ButtonRow onClick={() => setConfirmSignOut(true)} title="Sign Out" destructive className="justify-center [&>span]:text-center" />
+      </ListSection>
+
+      {confirmSignOut && (
+        <ConfirmDialog
+          title="Sign out of SplitIt?"
+          message="Your groups and balances stay saved to your account."
+          confirmLabel="Sign Out"
+          destructive
+          onConfirm={async () => {
             await signOut();
             router.push("/");
           }}
-          className="w-full text-center py-3 text-[15px] text-[var(--danger)] font-medium tap-shrink"
-        >
-          Sign Out
-        </button>
-      </main>
-    </div>
+          onClose={() => setConfirmSignOut(false)}
+        />
+      )}
+    </Screen>
   );
 }

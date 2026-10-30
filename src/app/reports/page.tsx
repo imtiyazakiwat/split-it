@@ -11,9 +11,14 @@ import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { toCsv, downloadTextFile } from "@/lib/report";
 import { Expense, Group, Settlement } from "@/lib/types";
-import BottomNav from "@/components/home/BottomNav";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import Menu from "@/components/ui/Menu";
+import { ButtonRow, LinkRow, ListSection, Row } from "@/components/ui/List";
+import { Avatar, EmptyState, Segmented } from "@/components/ui/Controls";
+import { Doc, Download, Ellipsis } from "@/components/ui/Icons";
+import Skeleton from "@/components/ui/Skeleton";
 
 const ALL = "all";
 
@@ -48,61 +53,59 @@ function rowWording(row: StatementRow, otherName: string): string {
 function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: string }) {
   if (stmt.rows.length === 0) {
     return (
-      <p className="text-[14px] text-[var(--text-tertiary)] px-4 py-6 text-center">
-        Nothing shared with {otherName} here yet.
-      </p>
+      <ListSection header="Entries">
+        <Row title={<span className="text-[var(--text-secondary)]">Nothing shared with {otherName} here yet</span>} />
+      </ListSection>
     );
   }
   const gave = stmt.rows.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0);
   const got = stmt.rows.filter((r) => r.delta < 0).reduce((s, r) => s - r.delta, 0);
   return (
-    <div>
-      {/* Column key, spelled out — the two columns are the whole idea. */}
-      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--fill-soft)]">
-        <span className="text-[11px] font-bold tracking-wide text-[var(--text-tertiary)]">DATE &amp; DETAILS</span>
-        <span className="text-[11px] font-bold tracking-wide text-[var(--pos)] text-right w-[72px]">YOU GAVE</span>
-        <span className="text-[11px] font-bold tracking-wide text-[var(--neg)] text-right w-[72px]">YOU GOT</span>
-      </div>
-      <ul>
+    <>
+      <ListSection header={`${stmt.rows.length} ${stmt.rows.length === 1 ? "Entry" : "Entries"}`}>
         {[...stmt.rows].reverse().map((row) => (
-          <li
-            key={row.key}
-            className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-3 border-b border-[var(--border-subtle)]"
-          >
-            <div className="min-w-0">
-              <p className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{row.label}</p>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{fullDate(row.ts)}</p>
-              <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{rowWording(row, otherName)}</p>
-              <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+          <div key={row.key} className="list-row is-tall !items-start">
+            <span className="min-w-0 flex-1">
+              <span className="block t-body text-[var(--text-primary)] truncate">{row.label}</span>
+              <span className="block t-subhead text-[var(--text-secondary)] mt-px">{rowWording(row, otherName)}</span>
+              <span className="block t-footnote text-[var(--text-secondary)] mt-0.5">
+                {fullDate(row.ts)} ·{" "}
                 {isSettled(row.balance)
-                  ? "Balance: settled"
+                  ? "settled"
                   : row.balance > 0
-                  ? `Balance: ${otherName} owes you ${formatCurrency(row.balance)}`
-                  : `Balance: you owe ${otherName} ${formatCurrency(-row.balance)}`}
-              </p>
-            </div>
-            <span className="text-[14px] font-semibold text-[var(--pos)] text-right w-[72px]">
-              {row.delta > 0.001 ? formatCurrency(row.delta) : ""}
+                  ? `${otherName} owes you ${formatCurrency(row.balance)}`
+                  : `you owe ${formatCurrency(-row.balance)}`}
+              </span>
             </span>
-            <span className="text-[14px] font-semibold text-[var(--neg)] text-right w-[72px]">
-              {row.delta < -0.001 ? formatCurrency(-row.delta) : ""}
+            <span className="shrink-0 text-right pt-px">
+              {row.delta > 0.001 ? (
+                <>
+                  <span className="block t-caption text-[var(--text-secondary)]">you gave</span>
+                  <span className="block t-subhead font-semibold t-numeral text-[var(--pos)]">{formatCurrency(row.delta)}</span>
+                </>
+              ) : row.delta < -0.001 ? (
+                <>
+                  <span className="block t-caption text-[var(--text-secondary)]">you got</span>
+                  <span className="block t-subhead font-semibold t-numeral text-[var(--neg)]">{formatCurrency(-row.delta)}</span>
+                </>
+              ) : (
+                <span className="block t-subhead text-[var(--text-secondary)]">—</span>
+              )}
             </span>
-          </li>
+          </div>
         ))}
-      </ul>
-      <div className="grid grid-cols-[1fr_auto_auto] gap-3 px-4 py-3 bg-[var(--fill-soft)]">
-        <span className="text-[13px] font-bold text-[var(--text-primary)]">Total</span>
-        <span className="text-[13px] font-bold text-[var(--pos)] text-right w-[72px]">{formatCurrency(gave)}</span>
-        <span className="text-[13px] font-bold text-[var(--neg)] text-right w-[72px]">{formatCurrency(got)}</span>
-      </div>
-    </div>
+      </ListSection>
+      <ListSection header="Totals">
+        <Row title="You gave" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(gave)}</span>} />
+        <Row title="You got" detail={<span className="t-numeral text-[var(--neg)]">{formatCurrency(got)}</span>} />
+      </ListSection>
+    </>
   );
 }
 
-/** Horizontal proportion bar used by the category and payer breakdowns. */
+/** Proportion row used by the category and payer breakdowns. */
 function SpendBar({
   label,
-  emoji,
   value,
   max,
   sub,
@@ -115,54 +118,49 @@ function SpendBar({
 }) {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
-    <div className="py-2">
+    <div className="list-row !block">
       <div className="flex items-baseline justify-between gap-3">
-        <span className="text-[14px] font-medium text-[var(--text-primary)] truncate">
-          {emoji ? `${emoji} ` : ""}
-          {label}
-        </span>
-        <span className="text-[14px] font-semibold text-[var(--text-primary)] shrink-0">
-          {formatCurrency(value)}
-        </span>
+        <span className="t-body text-[var(--text-primary)] truncate">{label}</span>
+        <span className="t-body font-semibold t-numeral text-[var(--text-primary)] shrink-0">{formatCurrency(value)}</span>
       </div>
-      <div className="mt-1.5 h-2 rounded-full bg-[var(--fill)] overflow-hidden">
-        <div className="h-full rounded-full bg-[var(--brand-solid)]" style={{ width: `${pct}%` }} />
+      <div className="meter mt-2 !h-[6px]">
+        <span style={{ width: `${pct}%`, background: "var(--brand-solid)" }} />
       </div>
-      {sub && <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{sub}</p>}
+      {sub && <p className="t-footnote text-[var(--text-secondary)] mt-1.5">{sub}</p>}
     </div>
   );
 }
 
-function FilterChips({
-  options,
+/** A pop-up menu row: label left, current value + up/down chevrons right. */
+function PickerRow({
+  label,
   value,
   onChange,
-  label,
+  options,
 }: {
-  options: { id: string; name: string }[];
+  label: string;
   value: string;
   onChange: (id: string) => void;
-  label: string;
+  options: { id: string; name: string }[];
 }) {
+  const current = options.find((o) => o.id === value)?.name ?? options[0]?.name;
   return (
-    <div className="mt-4">
-      <p className="text-[11px] font-bold tracking-wide text-[var(--text-tertiary)] mb-2">{label}</p>
-      <div className="flex gap-2 overflow-x-auto scroll-momentum -mx-4 px-4 pb-1">
-        {options.map((o) => (
-          <button
-            key={o.id}
-            onClick={() => onChange(o.id)}
-            className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
-              value === o.id
-                ? "bg-[var(--brand-solid)] text-white"
-                : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-            }`}
-          >
-            {o.name}
-          </button>
-        ))}
-      </div>
-    </div>
+    <Menu
+      label={label}
+      align="right"
+      items={options.map((o) => ({ label: o.name, checked: o.id === value, onSelect: () => onChange(o.id) }))}
+      trigger={(t) => (
+        <button {...t} type="button" className="list-row">
+          <span className="flex-1 t-body text-[var(--text-primary)]">{label}</span>
+          <span className="t-body text-[var(--text-secondary)] truncate max-w-[55%] flex items-center gap-1">
+            {current}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m7 9 5-5 5 5M7 15l5 5 5-5" />
+            </svg>
+          </span>
+        </button>
+      )}
+    />
   );
 }
 
@@ -211,111 +209,79 @@ function SpendingDashboard({
 
   return (
     <div>
-      <FilterChips
-        label="GROUP"
-        value={groupId}
-        onChange={setGroupId}
-        options={[{ id: "all", name: "All groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
-      />
-      {people.length > 0 && (
-        <FilterChips
-          label="SPENT WITH"
-          value={activePerson ?? "all"}
-          onChange={setPersonUid}
-          options={[{ id: "all", name: "Everyone" }, ...people]}
+      <ListSection className="!mt-4">
+        <PickerRow
+          label="Group"
+          value={groupId}
+          onChange={setGroupId}
+          options={[{ id: "all", name: "All Groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
         />
-      )}
+        {people.length > 0 && (
+          <PickerRow
+            label="Spent With"
+            value={activePerson ?? "all"}
+            onChange={setPersonUid}
+            options={[{ id: "all", name: "Everyone" }, ...people]}
+          />
+        )}
+      </ListSection>
 
-      <div className="mt-5 rounded-[var(--radius-card)] bg-[var(--surface)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[13px] text-[var(--text-tertiary)]">
-          {otherName ? `Spent on things you and ${otherName} shared` : "Total spent"}
+      <div className="list-section px-4 pt-3.5 pb-4 mt-5">
+        <p className="t-subhead text-[var(--text-secondary)] truncate">
+          {otherName ? `Shared with ${otherName}` : "Total spent"}
           {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
         </p>
-        <p className="text-[34px] font-extrabold text-[var(--brand)] leading-tight mt-1">
-          {formatCurrency(summary.total)}
-        </p>
-        <p className="text-[13px] text-[var(--text-secondary)] mt-1">
+        <p className="t-large-title t-numeral text-[var(--text-primary)] truncate">{formatCurrency(summary.total)}</p>
+        <p className="t-footnote text-[var(--text-secondary)]">
           {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
-          {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} on average`}
+          {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} average`}
+          {summary.firstTs && summary.lastTs ? ` · ${fullDate(summary.firstTs)} – ${fullDate(summary.lastTs)}` : ""}
         </p>
-        {summary.firstTs && summary.lastTs && (
-          <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
-            {fullDate(summary.firstTs)} — {fullDate(summary.lastTs)}
-          </p>
-        )}
-
-        {summary.expenseCount > 0 && (
-          <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] grid grid-cols-2 gap-y-3 gap-x-4">
-            <div>
-              <p className="text-[12px] text-[var(--text-tertiary)]">Your share</p>
-              <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                {formatCurrency(summary.myShare)}
-              </p>
-            </div>
-            <div>
-              <p className="text-[12px] text-[var(--text-tertiary)]">You paid up front</p>
-              <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                {formatCurrency(summary.iPaid)}
-              </p>
-            </div>
-            {otherName && (
-              <>
-                <div>
-                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName}&rsquo;s share</p>
-                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                    {formatCurrency(summary.theirShare)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-[12px] text-[var(--text-tertiary)]">{otherName} paid up front</p>
-                  <p className="text-[17px] font-bold text-[var(--text-primary)]">
-                    {formatCurrency(summary.theyPaid)}
-                  </p>
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </div>
 
+      {summary.expenseCount > 0 && (
+        <ListSection>
+          <Row title="Your share" detail={<span className="t-numeral">{formatCurrency(summary.myShare)}</span>} />
+          <Row title="You paid up front" detail={<span className="t-numeral">{formatCurrency(summary.iPaid)}</span>} />
+          {otherName && (
+            <>
+              <Row title={`${otherName}’s share`} detail={<span className="t-numeral">{formatCurrency(summary.theirShare)}</span>} />
+              <Row title={`${otherName} paid up front`} detail={<span className="t-numeral">{formatCurrency(summary.theyPaid)}</span>} />
+            </>
+          )}
+        </ListSection>
+      )}
+
       {summary.expenseCount === 0 ? (
-        <p className="text-[14px] text-[var(--text-tertiary)] mt-5">
-          {otherName
-            ? `No expenses shared with ${otherName} in this scope yet.`
-            : "No expenses in this scope yet."}
-        </p>
+        <EmptyState
+          icon={<Doc size={52} weight={1.4} />}
+          title="No Expenses"
+          message={otherName ? `No expenses shared with ${otherName} in this scope yet.` : "No expenses in this scope yet."}
+        />
       ) : (
         <>
-          <section className="mt-6">
-            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Where it went</h2>
-            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
-              {summary.byCategory.map((c) => (
-                <SpendBar
-                  key={c.id}
-                  label={c.label}
-                  emoji={c.emoji}
-                  value={c.total}
-                  max={maxCategory}
-                  sub={`${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`}
-                />
-              ))}
-            </div>
-          </section>
-
-          <section className="mt-6">
-            <h2 className="text-[17px] font-bold text-[var(--text-primary)]">Who put the money in</h2>
-            <div className="mt-1 rounded-[var(--radius-card)] bg-[var(--surface)] px-4 py-2 shadow-[var(--shadow-card)] divide-y divide-[var(--border-subtle)]">
-              {summary.byPayer.map((p) => (
-                <SpendBar
-                  key={p.uid}
-                  label={nameOf(p.uid)}
-                  value={p.paid}
-                  max={maxPayer}
-                  sub={`paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`}
-                />
-              ))}
-            </div>
-          </section>
+          <ListSection header="Where it went">
+            {summary.byCategory.map((c) => (
+              <SpendBar
+                key={c.id}
+                label={c.label}
+                value={c.total}
+                max={maxCategory}
+                sub={`${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`}
+              />
+            ))}
+          </ListSection>
+          <ListSection header="Who paid">
+            {summary.byPayer.map((p) => (
+              <SpendBar
+                key={p.uid}
+                label={nameOf(p.uid)}
+                value={p.paid}
+                max={maxPayer}
+                sub={`paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`}
+              />
+            ))}
+          </ListSection>
         </>
       )}
     </div>
@@ -348,7 +314,21 @@ function ReportsInner() {
   );
 
   if (loading || (!groupsLoaded && user)) {
-    return <p className="p-6 text-[15px] text-[var(--text-tertiary)]">Loading…</p>;
+    return (
+      <Screen title="Statements" large>
+        <div className="list-section">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="list-row is-tall">
+              <Skeleton className="w-10 h-10 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-1/2 rounded-md" />
+                <Skeleton className="h-3 w-2/3 rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Screen>
+    );
   }
   if (!user) return <LoginScreen />;
   const meUid = user.uid;
@@ -359,88 +339,63 @@ function ReportsInner() {
       (c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0)
     );
     return (
-      <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-        <main className="flex-1 max-w-md w-full mx-auto px-4 pt-6 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
-          <h1 className="text-[30px] font-extrabold text-[var(--text-primary)]">Reports</h1>
-          <div className="flex gap-2 mt-4 mb-1">
-            {[
-              { id: "statements", label: "Statements" },
-              { id: "spending", label: "Spending" },
-            ].map((t) => (
-              <button
-                key={t.id}
-                onClick={() =>
-                  router.replace(t.id === "spending" ? "/reports?tab=spending" : "/reports", {
-                    scroll: false,
-                  })
+      <Screen title="Statements" large>
+        <Segmented
+          label="Statements view"
+          value={tabParam}
+          onChange={(id) => router.replace(id === "spending" ? "/reports?tab=spending" : "/reports", { scroll: false })}
+          options={[
+            { id: "statements", label: "People" },
+            { id: "spending", label: "Spending" },
+          ]}
+        />
+        {tabParam === "spending" ? (
+          <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
+        ) : people.length === 0 ? (
+          <EmptyState
+            icon={<Doc size={56} weight={1.4} />}
+            title="No Statements"
+            message="Add an expense in a group and a running account with each person shows up here."
+          />
+        ) : (
+          <ListSection
+            className="!mt-4"
+            footer={
+              !allLoaded
+                ? "Still loading every group…"
+                : "A running account with each person: who paid for what, and what’s left between you."
+            }
+          >
+            {people.map((p) => (
+              <LinkRow
+                key={p.uid}
+                href={`/reports?person=${p.uid}`}
+                tall
+                leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} seed={p.uid} />}
+                separatorInset={68}
+                title={p.displayName}
+                subtitle={
+                  p.sharedGroupCount > 0
+                    ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
+                    : "Direct payments"
                 }
-                className={`rounded-full px-4 py-1.5 text-[14px] font-semibold tap-shrink ${
-                  tabParam === t.id
-                    ? "bg-[var(--brand-solid)] text-white"
-                    : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-                }`}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-          {tabParam === "spending" ? (
-            <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
-          ) : (
-          <>
-          <p className="text-[15px] text-[var(--text-tertiary)] mt-2 mb-5">
-            A running account with each person, entry by entry — who paid for what, and what&rsquo;s
-            left between you.
-          </p>
-          {!allLoaded && (
-            <p className="text-[13px] text-[var(--text-tertiary)] mb-3">Still loading every group…</p>
-          )}
-          {people.length === 0 ? (
-            <p className="text-[14px] text-[var(--text-tertiary)]">
-              No shared expenses yet. Add one in a group and it&rsquo;ll show up here.
-            </p>
-          ) : (
-            <div className="space-y-2.5 stagger">
-              {people.map((p) => (
-                <button
-                  key={p.uid}
-                  onClick={() => router.push(`/reports?person=${p.uid}`)}
-                  className="w-full text-left bg-[var(--surface)] rounded-[var(--radius-card)] p-4 flex items-center gap-3 shadow-[var(--shadow-card)] tap-shrink"
-                >
-                  {p.photoURL ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.photoURL} alt="" className="w-11 h-11 rounded-full object-cover shrink-0" />
+                detail={
+                  isSettled(p.net) ? (
+                    "Settled"
                   ) : (
-                    <span className="w-11 h-11 rounded-full bg-[var(--fill)] flex items-center justify-center text-[16px] font-semibold text-[var(--text-secondary)] shrink-0">
-                      {p.displayName.charAt(0).toUpperCase()}
+                    <span className="flex flex-col items-end leading-tight">
+                      <span className="t-caption text-[var(--text-secondary)]">{p.net > 0 ? "you owe" : "owes you"}</span>
+                      <span className={`t-subhead font-semibold t-numeral ${p.net > 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                        {formatCurrency(Math.abs(p.net))}
+                      </span>
                     </span>
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-[16px] font-semibold text-[var(--text-primary)] truncate">
-                      {p.displayName}
-                    </p>
-                    <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
-                      {describeNet(-p.net, p.displayName, formatCurrency)}
-                      {!isSettled(p.directNet || 0)
-                        ? ` (incl. ${formatCurrency(Math.abs(p.directNet))} direct)`
-                        : ""}
-                    </p>
-                    <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5 truncate">
-                      {p.sharedGroupCount > 0
-                        ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
-                        : "Direct payment"}
-                    </p>
-                  </div>
-                  <span className="text-[var(--text-quaternary)] text-lg shrink-0">›</span>
-                </button>
-              ))}
-            </div>
-          )}
-          </>
-          )}
-        </main>
-        <BottomNav active="reports" />
-      </div>
+                  )
+                }
+              />
+            ))}
+          </ListSection>
+        )}
+      </Screen>
     );
   }
 
@@ -496,94 +451,85 @@ function ReportsInner() {
   }
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-4 pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+2rem)]">
-        <div className="flex items-center gap-2 pt-1">
-          <button
-            onClick={() => router.push("/reports")}
-            aria-label="Back to statements"
-            className="w-10 h-10 rounded-full bg-[var(--surface)] shadow-[var(--shadow-sm)] flex items-center justify-center tap-shrink"
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6" /></svg>
-          </button>
-          <h1 className="text-[22px] font-extrabold text-[var(--text-primary)] truncate">{otherName}</h1>
-        </div>
-
-        {/* The bottom line, in words */}
-        <div
-          className={`mt-4 rounded-[var(--radius-card)] p-5 ${
-            isSettled(stmt.net)
-              ? "bg-[var(--fill-soft)]"
-              : stmt.net > 0
-              ? "bg-[var(--tint-success-soft)]"
-              : "bg-[var(--tint-danger-soft)]"
+    <Screen
+      title={otherName}
+      backHref="/reports"
+      inlineTitleAfter={90}
+      trailing={
+        stmt.rows.length > 0 ? (
+          <Menu
+            label="Statement actions"
+            items={[{ label: "Export CSV", icon: <Download size={20} />, onSelect: handleDownload }]}
+            trigger={(t) => (
+              <BarButton {...t} aria-label="More">
+                <Ellipsis size={21} />
+              </BarButton>
+            )}
+          />
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col items-center text-center pt-1 pb-4">
+        <Avatar name={otherName} photoURL={person?.photoURL} size={72} seed={personParam} />
+        <h1 className="t-title2 text-[var(--text-primary)] mt-2.5 max-w-full truncate px-4">{otherName}</h1>
+        <p
+          className={`t-headline mt-1 ${
+            isSettled(stmt.net) ? "text-[var(--text-secondary)]" : stmt.net > 0 ? "text-[var(--pos)]" : "text-[var(--neg)]"
           }`}
         >
-          <p className="text-[13px] text-[var(--text-tertiary)]">As things stand</p>
-          <p className="text-[20px] font-extrabold text-[var(--text-primary)] mt-1">
-            {describeNet(stmt.net, otherName, formatCurrency)}
-          </p>
-          <p className="text-[13px] text-[var(--text-secondary)] mt-2">
-            You covered {formatCurrency(stmt.iCoveredForThem)} of {otherName}&rsquo;s share.{" "}
-            {otherName} covered {formatCurrency(stmt.theyCoveredForMe)} of yours.
-          </p>
-          {!isSettled(stmt.directNet || 0) && (
-            <p className="text-[13px] text-[var(--text-secondary)] mt-1">
-              {formatCurrency(Math.abs(stmt.directNet))} is direct (not in any group)
-              {stmt.directNet > 0
-                ? ` ${otherName} owes you`
-                : ` you owe ${otherName}`}
-              .
-            </p>
-          )}
-          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
-            <p className="text-[13px] text-[var(--warning)] mt-2">
-              A payment is still waiting to be approved, so it isn&rsquo;t counted above.
-            </p>
-          )}
-        </div>
+          {describeNet(stmt.net, otherName, formatCurrency)}
+        </p>
+      </div>
 
-        {/* Group scope */}
-        {sharedGroups.length > 1 && (
-          <div className="flex gap-2 overflow-x-auto scroll-momentum -mx-4 px-4 mt-4 pb-1">
-            {[{ id: ALL, name: "All groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))].map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setScope(opt.id)}
-                className={`shrink-0 rounded-full px-3.5 py-1.5 text-[13px] font-semibold tap-shrink ${
-                  effectiveScope === opt.id
-                    ? "bg-[var(--brand-solid)] text-white"
-                    : "bg-[var(--surface)] text-[var(--text-secondary)] shadow-[var(--shadow-sm)]"
-                }`}
-              >
-                {opt.name}
-              </button>
-            ))}
-          </div>
+      {sharedGroups.length > 1 && (
+        <ListSection className="!mt-0">
+          <PickerRow
+            label="Groups"
+            value={effectiveScope}
+            onChange={setScope}
+            options={[{ id: ALL, name: "All Shared Groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))]}
+          />
+        </ListSection>
+      )}
+
+      <ListSection
+        footer={
+          !isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)
+            ? "A payment is still waiting to be approved, so it isn’t counted here."
+            : undefined
+        }
+      >
+        <Row title={`You covered for ${otherName}`} detail={<span className="t-numeral">{formatCurrency(stmt.iCoveredForThem)}</span>} />
+        <Row title={`${otherName} covered for you`} detail={<span className="t-numeral">{formatCurrency(stmt.theyCoveredForMe)}</span>} />
+        {!isSettled(stmt.directNet || 0) && (
+          <Row
+            title="Direct (not in a group)"
+            subtitle={stmt.directNet > 0 ? `${otherName} owes you` : `You owe ${otherName}`}
+            detail={<span className="t-numeral">{formatCurrency(Math.abs(stmt.directNet))}</span>}
+          />
         )}
+      </ListSection>
 
-        <div className="mt-4 bg-[var(--surface)] rounded-[var(--radius-card)] overflow-hidden shadow-[var(--shadow-card)]">
-          <StatementTable stmt={stmt} otherName={otherName} />
-        </div>
+      <StatementTable stmt={stmt} otherName={otherName} />
 
-        {stmt.rows.length > 0 && (
-          <button
+      {stmt.rows.length > 0 && (
+        <ListSection>
+          <ButtonRow
             onClick={handleDownload}
-            className="mt-4 w-full rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] px-4 py-3 text-[15px] font-semibold text-[var(--text-primary)] tap-shrink"
-          >
-            Export this statement (CSV)
-          </button>
-        )}
-      </main>
-      <BottomNav active="reports" />
-    </div>
+            leading={<span className="text-[var(--brand)]"><Download size={20} /></span>}
+            title="Export Statement"
+            action
+          />
+        </ListSection>
+      )}
+    </Screen>
   );
 }
 
 export default function ReportsPage() {
   // useSearchParams needs a Suspense boundary for static rendering.
   return (
-    <Suspense fallback={<p className="p-6 text-[15px] text-[var(--text-tertiary)]">Loading…</p>}>
+    <Suspense fallback={<Screen title="Statements" large>{null}</Screen>}>
       <ReportsInner />
     </Suspense>
   );

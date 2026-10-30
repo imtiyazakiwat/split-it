@@ -1,6 +1,7 @@
 "use client";
-import { useRouter } from "next/navigation";
 import GlassModal from "@/components/ui/GlassModal";
+import { LinkRow, ListSection, Row } from "@/components/ui/List";
+import { Avatar } from "@/components/ui/Controls";
 import { Expense, Group, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
@@ -53,7 +54,6 @@ export default function PersonStatementSheet({
   onClose: () => void;
   onSettle: (toUid: string, amount: number) => void;
 }) {
-  const router = useRouter();
   const otherName = group.members[otherUid]?.displayName || "Member";
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
   const settled = isSettled(stmt.net);
@@ -65,140 +65,102 @@ export default function PersonStatementSheet({
   const simplified = group.useSimplifiedDebts === true;
 
   return (
-    <GlassModal title={otherName} onClose={onClose}>
-      <div className="space-y-4">
-        {/* The headline answer, in words rather than a signed number. */}
-        <div
-          className={`rounded-[var(--radius-inner)] p-4 text-center ${
-            settled
-              ? "bg-[var(--fill-soft)]"
-              : iOwe
-              ? "bg-[var(--tint-danger-soft)]"
-              : "bg-[var(--tint-success-soft)]"
-          }`}
-        >
-          <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-            {describeNet(stmt.net, otherName, formatCurrency)}
-          </p>
-          <p className="text-[12px] text-[var(--text-tertiary)] mt-1">
-            Just between you two, in {group.name}
-          </p>
-          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
-            <p className="text-[12px] text-[var(--warning)] mt-2">
-              {!isSettled(stmt.pendingFromThem)
-                ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
-                : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
-              . Not counted above.
-            </p>
-          )}
-        </div>
-
-        {/* Where the number comes from */}
-        <div className="rounded-[var(--radius-inner)] bg-[var(--fill-soft)] p-3 space-y-1.5">
-          <div className="flex justify-between text-[14px]">
-            <span className="text-[var(--text-tertiary)]">You covered for {otherName}</span>
-            <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.iCoveredForThem)}</span>
-          </div>
-          <div className="flex justify-between text-[14px]">
-            <span className="text-[var(--text-tertiary)]">{otherName} covered for you</span>
-            <span className="font-medium text-[var(--text-primary)]">{formatCurrency(stmt.theyCoveredForMe)}</span>
-          </div>
-          {!isSettled(stmt.iPaid) && (
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Payments you sent</span>
-              <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>
-            </div>
-          )}
-          {!isSettled(stmt.theyPaid) && (
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Payments {otherName} sent</span>
-              <span className="font-medium text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Row-by-row history */}
-        <div>
-          <p className="text-[13px] font-semibold text-[var(--text-secondary)] mb-2">
-            {stmt.rows.length > 0
-              ? `${stmt.rows.length} entr${stmt.rows.length === 1 ? "y" : "ies"} between you`
-              : "Nothing shared yet"}
-          </p>
-          {stmt.rows.length === 0 ? (
-            <p className="text-[13px] text-[var(--text-tertiary)]">
-              You haven&rsquo;t shared any expenses with {otherName} in this group.
-            </p>
-          ) : (
-            <ul className="divide-y divide-[var(--border-subtle)]">
-              {[...stmt.rows].reverse().map((row) => {
-                const words = rowWords(row, otherName);
-                return (
-                  <li key={row.key} className="py-2.5 flex items-start gap-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[14px] font-medium text-[var(--text-primary)] truncate">
-                        {row.label}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">
-                        {shortDate(row.ts)} · {words.text}
-                      </p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p
-                        className={`text-[14px] font-semibold ${
-                          words.tone === "owe"
-                            ? "text-[var(--neg)]"
-                            : words.tone === "get"
-                            ? "text-[var(--pos)]"
-                            : "text-[var(--text-tertiary)]"
-                        }`}
-                      >
-                        {row.informationalOnly
-                          ? "—"
-                          : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
-                      </p>
-                      <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
-                        {isSettled(row.balance)
-                          ? "settled"
-                          : row.balance > 0
-                          ? `owes you ${formatCurrency(row.balance)}`
-                          : `you owe ${formatCurrency(-row.balance)}`}
-                      </p>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-
-        {simplified && !settled && (
-          <p className="text-[12px] text-[var(--text-tertiary)] text-center">
-            This group uses simplified debts, so the amounts above are your shared
-            history. Use the group&rsquo;s settle-up plan to see who to pay.
-          </p>
-        )}
-        <div className="flex gap-2">
-          {iOwe && !simplified && (
-            <button
-              type="button"
-              onClick={() => {
-                onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
-                onClose();
-              }}
-              className="flex-1 rounded-full bg-[var(--brand-solid)] text-white px-4 py-3 text-[15px] font-semibold tap-shrink"
-            >
-              Settle {formatCurrency(-stmt.net)}
-            </button>
-          )}
+    <GlassModal
+      title={otherName}
+      large
+      onClose={onClose}
+      footer={
+        iOwe && !simplified ? (
           <button
             type="button"
-            onClick={() => router.push(`/reports?person=${otherUid}&group=${group.id}`)}
-            className="flex-1 rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] text-[var(--text-primary)] px-4 py-3 text-[15px] font-semibold tap-shrink"
+            onClick={() => {
+              onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
+              onClose();
+            }}
+            className="btn-prominent w-full"
           >
-            Full statement
+            Settle {formatCurrency(-stmt.net)}
           </button>
-        </div>
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col items-center text-center pt-2 pb-1">
+        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} seed={otherUid} />
+        <p
+          className={`t-title2 mt-3 ${
+            settled ? "text-[var(--text-primary)]" : iOwe ? "text-[var(--neg)]" : "text-[var(--pos)]"
+          }`}
+        >
+          {describeNet(stmt.net, otherName, formatCurrency)}
+        </p>
+        <p className="t-footnote text-[var(--text-secondary)] mt-0.5">Just between you two, in {group.name}</p>
+        {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
+          <p className="t-footnote text-[var(--warning)] mt-2 max-w-[320px]">
+            {!isSettled(stmt.pendingFromThem)
+              ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
+              : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
+            . Not counted above.
+          </p>
+        )}
       </div>
+
+      <ListSection elevated>
+        <Row title={`You covered for ${otherName}`} detail={<span className="t-numeral">{formatCurrency(stmt.iCoveredForThem)}</span>} />
+        <Row title={`${otherName} covered for you`} detail={<span className="t-numeral">{formatCurrency(stmt.theyCoveredForMe)}</span>} />
+        {!isSettled(stmt.iPaid) && (
+          <Row title="Payments you sent" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>} />
+        )}
+        {!isSettled(stmt.theyPaid) && (
+          <Row title={`Payments ${otherName} sent`} detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>} />
+        )}
+      </ListSection>
+
+      <ListSection
+        elevated
+        header={stmt.rows.length > 0 ? `${stmt.rows.length} ${stmt.rows.length === 1 ? "Entry" : "Entries"}` : "History"}
+        footer={
+          simplified && !settled
+            ? "This group combines payments, so these amounts are your shared history. Use the group’s balances to see who to pay."
+            : undefined
+        }
+      >
+        {stmt.rows.length === 0 ? (
+          <Row title={<span className="text-[var(--text-secondary)]">No shared expenses in this group yet</span>} />
+        ) : (
+          [...stmt.rows].reverse().map((row) => {
+            const words = rowWords(row, otherName);
+            return (
+              <Row
+                key={row.key}
+                title={row.label}
+                subtitle={`${shortDate(row.ts)} · ${words.text}`}
+                detail={
+                  <span className="flex flex-col items-end leading-tight">
+                    <span
+                      className={`t-subhead font-semibold t-numeral ${
+                        words.tone === "owe" ? "text-[var(--neg)]" : words.tone === "get" ? "text-[var(--pos)]" : "text-[var(--text-secondary)]"
+                      }`}
+                    >
+                      {row.informationalOnly ? "—" : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
+                    </span>
+                    <span className="t-caption text-[var(--text-secondary)]">
+                      {isSettled(row.balance)
+                        ? "settled"
+                        : row.balance > 0
+                        ? `owes you ${formatCurrency(row.balance)}`
+                        : `you owe ${formatCurrency(-row.balance)}`}
+                    </span>
+                  </span>
+                }
+              />
+            );
+          })
+        )}
+      </ListSection>
+
+      <ListSection elevated>
+        <LinkRow href={`/reports?person=${otherUid}&group=${group.id}`} title="Full Statement" subtitle="Every group you share, with export" />
+      </ListSection>
     </GlassModal>
   );
 }
