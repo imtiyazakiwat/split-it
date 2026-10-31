@@ -18,8 +18,51 @@ type Direction = "push" | "pop" | "fade" | "none";
  */
 const navStack: string[] = [];
 
+/**
+ * Set by a `popstate` (browser Back/Forward, Safari's own swipe, or our
+ * `router.back()`), consumed by the next pathname change. A history traversal
+ * must reconcile the stack against where the browser actually landed rather
+ * than be read as a new push, or the stack drifts from real history and Back
+ * starts pointing at the wrong screen.
+ */
+let traversing = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    traversing = true;
+  });
+}
+
 export function previousPath(): string | null {
   return navStack.length >= 2 ? navStack[navStack.length - 2] : null;
+}
+
+/**
+ * Entries popped by going back, nearest first, so browser Forward can put
+ * them back exactly. Cleared by any new in-app navigation, as history is.
+ */
+const forwardStack: string[] = [];
+
+/**
+ * Lands the stack on `pathname` after a history traversal:
+ *  - back to an entry we hold: pop to it, remembering what was popped;
+ *  - forward to the entry we just popped: push it again;
+ *  - anywhere else: restart at the current screen. Its own parent link then
+ *    handles Back, which is always a safe target.
+ */
+function reconcileTraversal(pathname: string): "pop" | "push" | "fade" {
+  const at = navStack.lastIndexOf(pathname);
+  if (at >= 0 && at < navStack.length - 1) {
+    forwardStack.unshift(...navStack.splice(at + 1).reverse());
+    return "pop";
+  }
+  if (forwardStack[0] === pathname) {
+    navStack.push(forwardStack.shift()!);
+    return "push";
+  }
+  forwardStack.length = 0;
+  navStack.length = 0;
+  navStack.push(pathname);
+  return "fade";
 }
 
 /**
@@ -57,15 +100,20 @@ export default function PageTransition({ children }: { children: ReactNode }) {
       return;
     }
     let dir: Direction;
-    if (navStack.length >= 2 && navStack[navStack.length - 2] === pathname) {
-      navStack.pop();
+    if (traversing) {
+      traversing = false;
+      dir = reconcileTraversal(pathname);
+    } else if (navStack.length >= 2 && navStack[navStack.length - 2] === pathname) {
+      forwardStack.unshift(navStack.pop()!);
       dir = "pop";
     } else if (TAB_ROOTS.has(pathname) && TAB_ROOTS.has(prev)) {
       // Switching tabs resets the stack to that tab's root.
+      forwardStack.length = 0;
       navStack.length = 0;
       navStack.push(pathname);
       dir = "fade";
     } else {
+      forwardStack.length = 0;
       if (navStack[navStack.length - 1] !== prev) navStack.push(prev);
       navStack.push(pathname);
       if (navStack.length > 20) navStack.splice(0, navStack.length - 20);

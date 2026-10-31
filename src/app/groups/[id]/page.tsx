@@ -208,10 +208,14 @@ function GroupPageInner() {
     ? settlements.find((s) => s.id === openSettlementId) ?? null
     : null;
   const closeDetail = () => router.replace(`/groups/${group.id}`, { scroll: false });
+  // Replace, not push: a detail sheet is an overlay on this screen, not a
+  // screen of its own. Pushing gave every opened item a browser-history
+  // entry that the in-app stack (keyed by pathname) can't see, so Back only
+  // stripped the query string. Deep links still open the sheet directly.
   const openExpense = (e: Expense) =>
-    router.push(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
+    router.replace(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
   const openSettlement = (s: Settlement) =>
-    router.push(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
+    router.replace(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
 
   const iArchived = isArchivedFor(group, currentUser.uid);
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));

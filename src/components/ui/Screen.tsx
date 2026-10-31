@@ -32,7 +32,11 @@ export const BarButton = forwardRef<
  */
 export function useBack(fallbackHref: string) {
   const router = useRouter();
-  return () => router.push(previousPath() ?? fallbackHref);
+  // With an in-app previous screen, it is also the entry behind us in browser
+  // history (the stack only grows from in-app navigation and reconciles on
+  // popstate), so a real pop keeps both in step. Without one (a deep link, a
+  // fresh tab), go to the parent instead of leaving the app.
+  return () => (previousPath() ? router.back() : router.push(fallbackHref));
 }
 
 function useScrollY(): number {
