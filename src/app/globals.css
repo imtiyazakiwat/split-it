@@ -206,6 +206,7 @@
 @media (prefers-color-scheme: dark) and (prefers-contrast: more) {
   :root {
     --text-secondary: rgba(235, 235, 245, 0.85);
+    --separator: rgba(235, 235, 245, 0.5);
     --hairline: rgba(255, 255, 255, 0.2);
     --glass-rim: rgba(255, 255, 255, 0.3);
   }

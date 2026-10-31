@@ -97,7 +97,7 @@ export default function ActivityTimeline({
   return (
     <>
       {sections.map((section) => (
-        <ListSection key={section.bucket} header={section.bucket} className="!mt-5 first:!mt-0">
+        <ListSection key={`${section.items[0].type}-${section.items[0].data.id}`} header={section.bucket} className="!mt-5 first:!mt-0">
           {section.items.map((item) => {
             if (item.type === "expense") {
               const e = item.data;
@@ -170,14 +170,14 @@ export default function ActivityTimeline({
                 ? `${memberName(s.fromUid)} → ${memberName(s.toUid)}`
                 : `${memberName(s.fromUid)} paid ${memberName(s.toUid)}`;
             const status =
-              isOffset
-                ? "No money moved"
-                : s.status === "pending"
+              s.status === "pending"
                 ? respond
                   ? "Waiting for you"
                   : "Waiting for approval"
                 : s.status === "rejected"
                 ? "Declined"
+                : isOffset
+                ? "No money moved"
                 : "Settled";
             const statusTone =
               s.status === "pending" ? "text-[var(--warning)]" : s.status === "rejected" ? "text-[var(--neg)]" : "text-[var(--text-secondary)]";

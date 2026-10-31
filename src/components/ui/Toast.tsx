@@ -12,6 +12,11 @@ import {
 
 interface ToastOptions {
   message: string;
+  /**
+   * success shows a check; error shows an exclamation; info shows nothing.
+   * Defaults by wording, so a "Couldn't …" toast never wears a success check.
+   */
+  variant?: "success" | "info" | "error";
   actionLabel?: string;
   onAction?: () => void;
   duration?: number; // ms
@@ -108,9 +113,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             onTouchEnd={onTouchEnd}
             className="glass glass-strong pointer-events-auto max-w-[min(100%,420px)] rounded-full min-h-[48px] pl-4 pr-2 py-1.5 flex items-center gap-2.5 animate-toast-in"
           >
-            <span className="shrink-0 w-[22px] h-[22px] rounded-full bg-[var(--fill)] text-[var(--text-primary)] grid place-items-center" aria-hidden>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
-            </span>
+            {toastVariant(toast) === "success" && (
+              <span className="shrink-0 w-[22px] h-[22px] rounded-full bg-[var(--fill)] text-[var(--text-primary)] grid place-items-center" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+              </span>
+            )}
+            {toastVariant(toast) === "error" && (
+              <span className="shrink-0 w-[22px] h-[22px] rounded-full bg-[var(--red)] text-white grid place-items-center text-[14px] font-bold leading-none" aria-hidden>
+                !
+              </span>
+            )}
             <span className="min-w-0 flex-1 text-[15px] leading-[20px] font-semibold text-[var(--text-primary)] line-clamp-2 py-1 pr-2">
               {toast.message}
             </span>
@@ -127,6 +139,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       )}
     </ToastContext.Provider>
   );
+}
+
+const FAILURE = /^(couldn[’']?t|can[’']?t|failed|error|unable|that item isn)/i;
+
+function toastVariant(t: ToastOptions): "success" | "info" | "error" {
+  if (t.variant) return t.variant;
+  return FAILURE.test(t.message.trim()) ? "error" : "success";
 }
 
 export function useToast() {

@@ -19,6 +19,9 @@ export default function AddMemberModal({
   const [term, setTerm] = useState("");
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  // The term whose search last finished. Until it matches the current term,
+  // the list is still waiting (debounce included), so "No Results" isn't true yet.
+  const [searchedTerm, setSearchedTerm] = useState("");
   const [addingUid, setAddingUid] = useState<string | null>(null);
   const [error, setError] = useState("");
   const showToast = useToast();
@@ -41,7 +44,10 @@ export default function AddMemberModal({
       } catch {
         if (!cancelled) setError("Search failed. Try again.");
       } finally {
-        if (!cancelled) setSearching(false);
+        if (!cancelled) {
+          setSearching(false);
+          setSearchedTerm(t);
+        }
       }
     }, 300);
     return () => {
@@ -67,6 +73,8 @@ export default function AddMemberModal({
     }
   }
 
+  const pending = searching || term.trim() !== searchedTerm;
+
   return (
     <GlassModal title="Add Member" large onClose={onClose}>
       <SearchField value={term} onChange={setTerm} placeholder="Name or Email" label="Search people" autoFocus className="mt-1" />
@@ -75,12 +83,12 @@ export default function AddMemberModal({
         <ListSection
           elevated
           footer={
-            !searching && results.length === 0
+            !pending && results.length === 0
               ? "No one found. They need to have signed in to SplitIt at least once."
               : undefined
           }
         >
-          {searching && results.length === 0 ? (
+          {pending && results.length === 0 ? (
             <Row title={<span className="text-[var(--text-secondary)]">Searching…</span>} />
           ) : results.length === 0 ? (
             <Row title={<span className="text-[var(--text-secondary)]">No Results</span>} />

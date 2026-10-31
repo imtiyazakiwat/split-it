@@ -203,7 +203,7 @@ export default function ActivityPage() {
     >
       <Segmented label="Activity views" value={tab} onChange={setTab} options={TABS} />
 
-      {tab !== "report" && scopedRecords.length > 8 && (
+      {tab !== "report" && (groupScopedRecords.length > 8 || search !== "") && (
         <SearchField
           value={search}
           onChange={setSearch}
@@ -244,7 +244,7 @@ export default function ActivityPage() {
           />
         ) : (
           sections.map((section) => (
-            <ListSection key={section.bucket} header={section.bucket} className="!mt-5 first:!mt-0">
+            <ListSection key={section.records[0].key} header={section.bucket} className="!mt-5 first:!mt-0">
               {section.records.map((record) => (
                 <button
                   key={record.key}

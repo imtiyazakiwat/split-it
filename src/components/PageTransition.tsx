@@ -151,16 +151,18 @@ export default function PageTransition({ children }: { children: ReactNode }) {
       if (!node || !g.locked) return reset(node);
       const width = window.innerWidth;
       const dx = g.lastX - g.startX;
-      const commit = dx > width * 0.4 || (g.v > 520 && dx > 20);
+      // Only commit when there is somewhere to go back to: a deep-linked
+      // screen (opened from a notification) has no in-app history, and
+      // router.back() would leave a blank, slid-away page.
+      const target = previousPath();
+      const commit = !!target && (dx > width * 0.4 || (g.v > 520 && dx > 20));
       node.style.transition = "transform 0.32s cubic-bezier(0.32,0.72,0,1)";
       if (commit) {
         node.style.transform = `translateX(${width}px)`;
         swipeCommitted.current = true;
-        setTimeout(() => {
-          const prev = previousPath();
-          if (prev) router.push(prev);
-          else router.back();
-        }, 200);
+        // A real history pop, so browser Back/Forward stay consistent with
+        // the in-app stack (the stack is only ever pushed by in-app links).
+        setTimeout(() => router.back(), 200);
         setTimeout(() => reset(el()), 700);
       } else {
         node.style.transform = "translateX(0)";
@@ -171,12 +173,18 @@ export default function PageTransition({ children }: { children: ReactNode }) {
     document.addEventListener("touchstart", onTouchStart, { passive: true });
     document.addEventListener("touchmove", onTouchMove, { passive: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
-    document.addEventListener("touchcancel", onTouchEnd, { passive: true });
+    // The system took the touch over (edge gesture, call): never navigate.
+    const onTouchCancel = () => {
+      gestureRef.current.active = false;
+      cancelAnimationFrame(raf);
+      reset(el());
+    };
+    document.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
-      document.removeEventListener("touchcancel", onTouchEnd);
+      document.removeEventListener("touchcancel", onTouchCancel);
       cancelAnimationFrame(raf);
     };
   }, [router]);

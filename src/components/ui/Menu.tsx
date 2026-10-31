@@ -47,13 +47,31 @@ export default function Menu({
     );
   }, [open, align]);
 
+  const close = () => {
+    setOpen(false);
+    btnRef.current?.focus({ preventScroll: true });
+  };
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" || e.key === "Tab") {
+        e.preventDefault();
         e.stopPropagation();
         setOpen(false);
-        btnRef.current?.focus();
+        btnRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+        const items = Array.from(panelRef.current?.querySelectorAll<HTMLButtonElement>("button:not([disabled])") ?? []);
+        if (items.length === 0) return;
+        e.preventDefault();
+        const at = items.indexOf(document.activeElement as HTMLButtonElement);
+        const next =
+          e.key === "Home" ? 0 : e.key === "End" ? items.length - 1
+          : e.key === "ArrowDown" ? (at + 1) % items.length
+          : (at - 1 + items.length) % items.length;
+        items[next].focus();
       }
     };
     document.addEventListener("keydown", onKey, true);
@@ -68,7 +86,7 @@ export default function Menu({
       {open &&
         pos &&
         createPortal(
-          <div className="fixed inset-0 z-[45]" onClick={() => setOpen(false)}>
+          <div className="fixed inset-0 z-[45]" onClick={close}>
             <div
               ref={panelRef}
               role="menu"
@@ -82,13 +100,13 @@ export default function Menu({
                   <div key={`d${i}`} className="h-[7px] my-0.5 bg-[var(--fill-soft)]" />
                 ) : (
                   <button
-                    key={item.label}
+                    key={`i${i}`}
                     type="button"
                     role={hasChecks ? "menuitemradio" : "menuitem"}
                     aria-checked={hasChecks ? !!item.checked : undefined}
                     disabled={item.disabled}
                     onClick={() => {
-                      setOpen(false);
+                      close();
                       item.onSelect();
                     }}
                     className={`w-full min-h-[46px] flex items-center gap-2.5 px-4 text-left text-[17px] tracking-[-0.015em] active:bg-[var(--pressed)] disabled:opacity-40 ${

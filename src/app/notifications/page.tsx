@@ -57,7 +57,11 @@ function dateBucket(ts: number): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return d.toLocaleDateString("en-IN", { weekday: "long" });
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 function timeLabel(ts: number): string {
@@ -370,7 +374,7 @@ export default function NotificationsPage() {
         />
       ) : (
         sections.map((section) => (
-          <ListSection key={section.bucket} header={section.bucket} className="!mt-5 first:!mt-0">
+          <ListSection key={section.items[0].key} header={section.bucket} className="!mt-5 first:!mt-0">
             {section.items.map((item) => {
               const unread = item.ts > seenAt;
               return (

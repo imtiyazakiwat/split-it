@@ -120,6 +120,7 @@ export default function BottomNav() {
   const { user } = useAuth();
   const { unreadCount, pendingIncoming, unattributed } = usePayments();
   const active = tabFor(pathname);
+  const visible = !!user && !!active && !hidesTabBar(pathname);
   const barRef = useRef<HTMLDivElement | null>(null);
   const [lens, setLens] = useState<{ x: number; w: number } | null>(null);
   const index = ITEMS.findIndex((i) => i.id === active);
@@ -135,9 +136,9 @@ export default function BottomNav() {
     const ro = new ResizeObserver(measure);
     ro.observe(bar);
     return () => ro.disconnect();
-  }, [index, user]);
+  }, [index, visible]);
 
-  if (!user || !active || hidesTabBar(pathname)) return null;
+  if (!visible) return null;
   const payBadge = unreadCount > 0 || pendingIncoming.length + unattributed.length > 0;
 
   return (

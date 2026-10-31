@@ -99,14 +99,16 @@ export default function SettingsPage() {
       }
       // One write, and it mirrors name/photo/UPI onto every group membership so
       // the settle-up sheet can actually find the UPI ID.
+      const savedName = displayName.trim() || currentUser.displayName || "User";
       await updateUserProfile(currentUser.uid, {
-        displayName: displayName.trim() || currentUser.displayName || "User",
+        displayName: savedName,
         email: (currentUser.email || "").toLowerCase(),
         photoURL,
         upiId: trimmedUpi,
       });
       setPhotoFile(null);
-      setLoaded({ name: displayName.trim(), upi: trimmedUpi, photo: photoURL || "" });
+      setDisplayName(savedName);
+      setLoaded({ name: savedName, upi: trimmedUpi, photo: photoURL || "" });
       showToast({ message: "Profile saved" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save");

@@ -138,7 +138,13 @@ export default function ActivityDetailModal({
     const s = settlement;
     const isOffset = s.kind === "offset";
     const statusText =
-      isOffset ? "Offset · no money moved" : s.status === "approved" ? "Settled" : s.status === "pending" ? "Waiting for approval" : "Declined";
+      s.status === "pending"
+        ? "Waiting for approval"
+        : s.status === "rejected"
+        ? "Declined"
+        : isOffset
+        ? "Offset · no money moved"
+        : "Settled";
     const statusColor =
       s.status === "approved" ? "var(--green)" : s.status === "pending" ? "var(--orange)" : "var(--gray)";
     return (

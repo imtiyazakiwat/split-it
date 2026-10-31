@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useCallback, useRef, useState } from "react";
+import { ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useSheetLayer } from "@/lib/sheet-layer";
 import { useOverlayBehavior } from "@/lib/overlay-stack";
@@ -58,14 +58,21 @@ export default function GlassModal({
     setTimeout(onClose, reduce ? 160 : 300);
   }, [closing, onClose]);
 
+  // Read at call time: drag-end and Escape handlers can run before the
+  // render that carries the latest `dirty` has committed.
+  const dirtyRef = useRef(dirty);
+  useLayoutEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
+
   const requestClose = useCallback(() => {
-    if (dirty) {
+    if (dirtyRef.current) {
       setDrag(0);
       setAskDiscard(true);
       return;
     }
     finish();
-  }, [dirty, finish]);
+  }, [finish]);
 
   useOverlayBehavior(dialogRef, requestClose);
 
@@ -91,7 +98,7 @@ export default function GlassModal({
     d.active = false;
     setDragging(false);
     if (drag > 130 || d.v > 700) {
-      if (dirty) {
+      if (dirtyRef.current) {
         setDrag(0);
         setAskDiscard(true);
       } else {
@@ -174,20 +181,12 @@ export default function GlassModal({
       </div>
 
       {askDiscard && (
-        <ActionSheetInline
-          title="Are you sure you want to discard your changes?"
-          onCancel={() => setAskDiscard(false)}
-          actions={[
-            {
-              label: "Discard Changes",
-              destructive: true,
-              onClick: () => {
-                setAskDiscard(false);
-                finish();
-              },
-            },
-          ]}
-          cancelLabel="Keep Editing"
+        <DiscardPrompt
+          onKeep={() => setAskDiscard(false)}
+          onDiscard={() => {
+            setAskDiscard(false);
+            finish();
+          }}
         />
       )}
     </div>
@@ -198,6 +197,26 @@ export default function GlassModal({
   // action, never during SSR, so `document` is always available here.
   if (typeof document === "undefined") return null;
   return createPortal(sheet, document.body);
+}
+
+/**
+ * The discard confirmation is its own overlay: it owns Escape (which keeps
+ * editing) and traps focus, so keyboard users can reach both choices instead
+ * of being pulled back into the sheet underneath.
+ */
+function DiscardPrompt({ onKeep, onDiscard }: { onKeep: () => void; onDiscard: () => void }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useOverlayBehavior(ref, onKeep);
+  return (
+    <div ref={ref}>
+      <ActionSheetInline
+        title="Are you sure you want to discard your changes?"
+        onCancel={onKeep}
+        actions={[{ label: "Discard Changes", destructive: true, onClick: onDiscard }]}
+        cancelLabel="Keep Editing"
+      />
+    </div>
+  );
 }
 
 /**

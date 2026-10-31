@@ -239,6 +239,15 @@ export function SwipeRow({
           setOffset(open && s.v < 450 ? -total : 0);
           setTimeout(() => (g.current.dragged = false), 120);
         }}
+        onTouchCancel={() => {
+          const s = g.current;
+          s.active = false;
+          s.dragged = false;
+          setDragging(false);
+          setOffset(s.start);
+        }}
+        // Swallows only the click that ends a drag, or the tap that closes an
+        // open row. A closed, untouched row passes every click through.
         onClickCapture={(e) => {
           if (g.current.dragged) {
             e.preventDefault();
