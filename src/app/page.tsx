@@ -344,7 +344,7 @@ export default function Home() {
               <LinkRow
                 key={person.uid}
                 href={`/reports?person=${person.uid}`}
-                leading={<Avatar name={person.displayName} photoURL={person.photoURL} size={36} seed={person.uid} />}
+                leading={<Avatar name={person.displayName} photoURL={person.photoURL} size={36} seed={person.uid} uid={person.uid} />}
                 separatorInset={64}
                 title={person.displayName}
                 subtitle={sub}

@@ -371,7 +371,7 @@ function ReportsInner() {
                 key={p.uid}
                 href={`/reports?person=${p.uid}`}
                 tall
-                leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} seed={p.uid} />}
+                leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} seed={p.uid} uid={p.uid} />}
                 separatorInset={68}
                 title={p.displayName}
                 subtitle={
@@ -470,7 +470,7 @@ function ReportsInner() {
       }
     >
       <div className="flex flex-col items-center text-center pt-1 pb-4">
-        <Avatar name={otherName} photoURL={person?.photoURL} size={72} seed={personParam} />
+        <Avatar name={otherName} photoURL={person?.photoURL} size={72} seed={personParam} uid={personParam} />
         <h1 className="t-title2 text-[var(--text-primary)] mt-2.5 max-w-full truncate px-4">{otherName}</h1>
         <p
           className={`t-headline mt-1 ${

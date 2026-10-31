@@ -174,7 +174,7 @@ export default function SettingsPage() {
             onKeyDown={activateFileInputOnKey}
             className="relative cursor-pointer rounded-full flex flex-col items-center"
           >
-            <Avatar name={displayName || currentUser.displayName || "You"} photoURL={photoPreview} size={88} seed={currentUser.uid} />
+            <Avatar name={displayName || currentUser.displayName || "You"} photoURL={photoPreview} size={88} seed={currentUser.uid} uid={currentUser.uid} />
             <span className="mt-2 t-subhead font-semibold text-[var(--brand)] flex items-center gap-1">
               <Camera size={16} /> Edit Photo
             </span>
