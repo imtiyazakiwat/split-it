@@ -12,6 +12,8 @@ import {
   reportFilename,
 } from "@/lib/report";
 import { useToast } from "@/components/ui/Toast";
+import { ButtonRow, ListSection, Row } from "@/components/ui/List";
+import { CategoryGlyph, Download, categoryTint } from "@/components/ui/Icons";
 
 function Stat({
   label,
@@ -25,18 +27,12 @@ function Stat({
   hint?: string;
 }) {
   const color =
-    tone === "pos"
-      ? "text-[var(--pos)]"
-      : tone === "neg"
-      ? "text-[var(--neg)]"
-      : tone === "brand"
-      ? "text-[var(--brand)]"
-      : "text-[var(--text-primary)]";
+    tone === "pos" ? "text-[var(--pos)]" : tone === "neg" ? "text-[var(--neg)]" : "text-[var(--text-primary)]";
   return (
     <div className="min-w-0">
-      <p className="text-[12px] text-[var(--text-tertiary)]">{label}</p>
-      <p className={`text-[20px] font-bold mt-0.5 truncate ${color}`}>{value}</p>
-      {hint && <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 truncate">{hint}</p>}
+      <p className="t-caption text-[var(--text-secondary)]">{label}</p>
+      <p className={`t-title3 t-numeral truncate ${color}`}>{value}</p>
+      {hint && <p className="t-caption text-[var(--text-secondary)] truncate">{hint}</p>}
     </div>
   );
 }
@@ -51,36 +47,28 @@ function BarList({
   showShare?: boolean;
 }) {
   if (buckets.length === 0) {
-    return <p className="text-[13px] text-[var(--text-tertiary)] py-3">{emptyLabel}</p>;
+    return <p className="list-row t-body text-[var(--text-secondary)]">{emptyLabel}</p>;
   }
   const max = Math.max(...buckets.map((b) => b.total), 1);
   return (
-    <div className="space-y-3">
+    <>
       {buckets.map((b) => (
-        <div key={b.key}>
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="text-[14px] text-[var(--text-primary)] truncate">
-              {b.emoji ? `${b.emoji} ` : ""}
-              {b.label}
-            </p>
-            <p className="text-[14px] font-semibold text-[var(--text-primary)] shrink-0">
-              {formatCurrency(b.total)}
-            </p>
+        <div key={b.key} className="list-row !block">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="t-body text-[var(--text-primary)] truncate">{b.label}</p>
+            <p className="t-body font-semibold t-numeral text-[var(--text-primary)] shrink-0">{formatCurrency(b.total)}</p>
           </div>
-          <div className="mt-1 h-2 rounded-full bg-[var(--fill)] overflow-hidden">
-            <div
-              className="h-full rounded-full bg-[var(--brand-solid)]"
-              style={{ width: `${Math.max(2, (b.total / max) * 100)}%` }}
-            />
+          <div className="meter mt-2 !h-[6px]">
+            <span style={{ width: `${Math.max(2, (b.total / max) * 100)}%`, background: "var(--brand-solid)" }} />
           </div>
-          <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
+          <p className="t-footnote text-[var(--text-secondary)] mt-1.5">
             {b.count} expense{b.count !== 1 ? "s" : ""}
             {showShare ? ` · your share ${formatCurrency(b.myShare)}` : ""}
             {typeof b.settledPct === "number" ? ` · ${b.settledPct}% settled` : ""}
           </p>
         </div>
       ))}
-    </div>
+    </>
   );
 }
 
@@ -126,129 +114,97 @@ export default function ReportPanel({
       : "No activity yet";
 
   return (
-    <div className="space-y-5">
-      {/* Headline */}
-      <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Total group spend</p>
-            <p className="text-[32px] font-extrabold text-[var(--brand)] leading-tight truncate">
-              {formatCurrency(report.totalSpend)}
-            </p>
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-0.5">{period}</p>
-          </div>
-          <button
-            onClick={handleDownload}
-            disabled={busy}
-            className="shrink-0 flex items-center gap-1.5 rounded-full bg-[var(--brand-solid)] text-white px-3.5 py-2 text-[13px] font-semibold tap-shrink disabled:opacity-50"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 3v12M7 11l5 5 5-5M5 21h14" />
-            </svg>
-            {busy ? "…" : "CSV"}
-          </button>
-        </div>
-
-        <div className="h-px bg-[var(--border-subtle)] my-4" />
-
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
+    <div>
+      <div className="list-section px-4 pt-3.5 pb-4">
+        <p className="t-subhead text-[var(--text-secondary)]">Total group spend</p>
+        <p className="t-large-title t-numeral text-[var(--text-primary)] truncate">{formatCurrency(report.totalSpend)}</p>
+        <p className="t-footnote text-[var(--text-secondary)]">{period}</p>
+        <div className="mt-4 pt-3.5 grid grid-cols-2 gap-x-4 gap-y-3.5 relative before:absolute before:inset-x-0 before:top-0 before:h-[0.5px] before:bg-[var(--separator)]">
           <Stat
             label="Your share"
             value={formatCurrency(report.myShare)}
             hint={`${report.expenseCount} expense${report.expenseCount !== 1 ? "s" : ""}`}
           />
           <Stat
-            label="You paid upfront"
+            label="You paid up front"
             value={formatCurrency(report.iPaid)}
-            tone="brand"
             hint={
               report.netPosition >= 0
-                ? `${formatCurrency(report.netPosition)} more than your share`
-                : `${formatCurrency(-report.netPosition)} less than your share`
+                ? `${formatCurrency(report.netPosition)} over your share`
+                : `${formatCurrency(-report.netPosition)} under your share`
             }
           />
           <Stat
-            label="Settlements sent"
+            label="Payments sent"
             value={formatCurrency(report.paidOut)}
-            tone="neg"
-            hint={!isSettled(report.pendingOut) ? `${formatCurrency(report.pendingOut)} pending` : "all confirmed"}
+            hint={!isSettled(report.pendingOut) ? `${formatCurrency(report.pendingOut)} pending` : "All confirmed"}
           />
           <Stat
-            label="Settlements received"
+            label="Payments received"
             value={formatCurrency(report.receivedIn)}
-            tone="pos"
-            hint={!isSettled(report.pendingIn) ? `${formatCurrency(report.pendingIn)} awaiting you` : "all confirmed"}
+            hint={!isSettled(report.pendingIn) ? `${formatCurrency(report.pendingIn)} awaiting you` : "All confirmed"}
           />
         </div>
       </div>
 
-      {/* Current position */}
-      <div className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[15px] font-bold text-[var(--text-primary)] mb-3">Where you stand now</p>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-4">
-          <Stat label="You owe" value={formatCurrency(report.totalOwe)} tone="neg" />
-          <Stat label="You will receive" value={formatCurrency(report.totalReceive)} tone="pos" />
-        </div>
-        {!isSettled(report.offsetTotal) && (
-          <p className="mt-3 rounded-[var(--radius-md)] bg-[var(--tint-accent)] px-3 py-2 text-[13px] text-[var(--text-secondary)]">
-            {formatCurrency(report.offsetTotal)} was cleared by cancelling balances across
-            groups — no money changed hands.
-          </p>
-        )}
-        <div className="mt-4">
+      <ListSection
+        header="Where you stand"
+        footer={
+          !isSettled(report.offsetTotal)
+            ? `${formatCurrency(report.offsetTotal)} was cleared by cancelling balances across groups. No money changed hands.`
+            : "Settled overall is the share of all money that ever needed to change hands and no longer does."
+        }
+      >
+        <Row title="You owe" detail={<span className="t-numeral text-[var(--neg)]">{formatCurrency(report.totalOwe)}</span>} />
+        <Row title="You’re owed" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(report.totalReceive)}</span>} />
+        <div className="list-row !block">
           <div className="flex items-baseline justify-between">
-            <p className="text-[13px] text-[var(--text-tertiary)]">Settled overall</p>
-            <p className="text-[15px] font-bold text-[var(--pos)]">{report.settledPct}%</p>
+            <span className="t-body text-[var(--text-primary)]">Settled overall</span>
+            <span className="t-body font-semibold text-[var(--text-primary)]">{report.settledPct}%</span>
           </div>
-          <div className="mt-1.5 h-2.5 rounded-full bg-[var(--fill)] overflow-hidden">
-            <div
-              className="h-full rounded-full bg-[var(--pos)]"
-              style={{ width: `${report.settledPct}%` }}
-            />
+          <div className="meter mt-2">
+            <span style={{ width: `${report.settledPct}%` }} />
           </div>
-          <p className="text-[11px] text-[var(--text-tertiary)] mt-1">
-            Share of all money that ever needed to change hands and no longer does.
-          </p>
         </div>
-      </div>
+      </ListSection>
 
-      {/* Categories */}
-      <section className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[15px] font-bold text-[var(--text-primary)] mb-3">Spending by category</p>
-        <BarList buckets={report.byCategory} emptyLabel="No expenses yet." />
-      </section>
+      <ListSection header="By category">
+        <BarList buckets={report.byCategory} emptyLabel="No expenses yet" />
+      </ListSection>
 
-      {/* Groups */}
-      <section className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[15px] font-bold text-[var(--text-primary)] mb-3">By group</p>
-        <BarList buckets={report.byGroup} emptyLabel="No groups yet." />
-      </section>
+      <ListSection header="By group">
+        <BarList buckets={report.byGroup} emptyLabel="No groups yet" />
+      </ListSection>
 
-      {/* Months */}
-      <section className="bg-[var(--surface)] rounded-[var(--radius-card)] p-5 shadow-[var(--shadow-card)]">
-        <p className="text-[15px] font-bold text-[var(--text-primary)] mb-3">Month by month</p>
-        <BarList buckets={report.byMonth} emptyLabel="No expenses yet." />
-      </section>
+      <ListSection header="By month">
+        <BarList buckets={report.byMonth} emptyLabel="No expenses yet" />
+      </ListSection>
 
       {report.biggestExpense && (
-        <section className="bg-[var(--tint-accent)] rounded-[var(--radius-card)] p-4 flex items-center gap-3">
-          <span className="w-11 h-11 rounded-2xl bg-[var(--surface)] flex items-center justify-center text-[22px] shrink-0">
-            {report.biggestExpense.categoryEmoji}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-[12px] text-[var(--text-tertiary)]">Biggest single expense</p>
-            <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
-              {report.biggestExpense.description}
-            </p>
-            <p className="text-[12px] text-[var(--text-tertiary)] truncate">
-              {report.biggestExpense.groupName} · paid by {report.biggestExpense.paidByName}
-            </p>
-          </div>
-          <p className="text-[17px] font-extrabold text-[var(--brand)] shrink-0">
-            {formatCurrency(report.biggestExpense.amount)}
-          </p>
-        </section>
+        <ListSection header="Biggest expense">
+          <Row
+            leading={
+              <span className="icon-tile" style={{ background: categoryTint(report.biggestExpense.category) }}>
+                <CategoryGlyph id={report.biggestExpense.category} size={18} />
+              </span>
+            }
+            separatorInset={58}
+            title={report.biggestExpense.description}
+            subtitle={`${report.biggestExpense.groupName} · paid by ${report.biggestExpense.paidByName}`}
+            detail={<span className="t-numeral font-semibold text-[var(--text-primary)]">{formatCurrency(report.biggestExpense.amount)}</span>}
+          />
+        </ListSection>
       )}
+
+      <ListSection footer="A spreadsheet of every expense and payment in this view.">
+        <ButtonRow
+          onClick={handleDownload}
+          disabled={busy}
+          leading={<span className="text-[var(--brand)]"><Download size={20} /></span>}
+          title={busy ? "Exporting…" : "Export CSV"}
+          action
+        />
+      </ListSection>
     </div>
   );
 }

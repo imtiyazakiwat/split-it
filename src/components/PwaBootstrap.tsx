@@ -1,9 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
 import { getAppServiceWorker } from "@/lib/sw-registration";
 
 export default function PwaBootstrap() {
+  const pathname = usePathname();
+  const { user } = useAuth();
   const [state, setState] = useState({
     mounted: false,
     isIOS: false,
@@ -62,27 +66,35 @@ export default function PwaBootstrap() {
   const { mounted, isIOS, isStandalone, dismissed } = state;
 
   if (!mounted || isStandalone || dismissed || !isIOS) return null;
+  // Never over sign-in, a composer or a full-screen flow.
+  if (!user) return null;
+  if (/^\/(chat|join|share-receipt|offline)/.test(pathname)) return null;
 
+  // Sits above the floating tab bar, never on top of it; the page grows its
+  // bottom inset (see globals.css) so the last row can still scroll clear.
   return (
-    <div className="glass glass-strong fixed bottom-4 left-4 right-4 max-w-md mx-auto rounded-[var(--radius-lg)] p-3.5 pb-[max(0.875rem,env(safe-area-inset-bottom))] text-sm flex items-center justify-between gap-3 z-30 animate-modal-in">
-      <p className="text-[var(--text-primary)]">
-        Install SplitIt: tap Share{" "}
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="inline -mt-0.5" aria-label="Share">
-          <path d="M12 3v13" />
-          <path d="m7 8 5-5 5 5" />
-          <path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7" />
+    <div
+      data-install-banner
+      className="glass glass-strong fixed left-4 right-4 max-w-md mx-auto rounded-[22px] pl-4 pr-1.5 py-1.5 flex items-center gap-3 z-30 animate-sheet-up"
+      style={{ bottom: "calc(var(--tab-bottom) + var(--tab-h) + 10px)" }}
+    >
+      <p className="flex-1 t-footnote text-[var(--text-primary)] py-1.5">
+        <span className="font-semibold">Install SplitIt.</span> Tap{" "}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="inline -mt-0.5" aria-label="Share">
+          <path d="M12 3.5v11M8 7l4-3.5L16 7" />
+          <path d="M7.5 10.5H6a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 6 20.5h12a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-1.5" />
         </svg>{" "}
-        then &ldquo;Add to Home Screen&rdquo;.
+        then Add to Home Screen to get notifications.
       </p>
       <button
         onClick={() => {
           sessionStorage.setItem("pwa-install-dismissed", "1");
           setState((s) => ({ ...s, dismissed: true }));
         }}
-        className="text-[var(--text-tertiary)] text-lg leading-none tap-shrink shrink-0"
+        className="shrink-0 w-[30px] h-[30px] m-[7px] rounded-full bg-[var(--fill)] text-[var(--text-secondary)] grid place-items-center"
         aria-label="Dismiss"
       >
-        ×
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
   );

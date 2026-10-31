@@ -18,7 +18,9 @@ import {
 } from "@/lib/upi";
 import { UpiAppIcon } from "@/components/UpiAppIcon";
 import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
+import { ButtonRow, FieldRow, ListSection, Row } from "@/components/ui/List";
+import { AmountInput } from "@/components/ui/Controls";
+import { Copy, Paperclip } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 
@@ -161,161 +163,116 @@ export default function SendMoneyModal({
   }
 
   return (
-    <GlassModal title={`Pay ${toName}`} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label
-            htmlFor="send-amount"
-            className="text-sm font-medium text-[var(--text-secondary)] block mb-1"
-          >
-            Amount
-          </label>
-          <input
-            id="send-amount"
-            type="number"
-            step="0.01"
-            min="0"
-            inputMode="decimal"
-            autoFocus
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            placeholder="0.00"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[22px] font-semibold text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          />
-          {contextLine && (
-            <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{contextLine}</p>
-          )}
-          {overpayBy > 0 && (
-            <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-              <p className="text-[13px] text-[var(--text-secondary)]">
-                That&rsquo;s {formatCurrency(overpayBy)} more than the{" "}
-                {formatCurrency(suggestedAmount)} you owe. After this,{" "}
-                <span className="font-medium">
-                  {toName} will owe you {formatCurrency(overpayBy)}
-                </span>
-                , and your groups will keep showing a balance until that comes back.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAmount(suggestedAmount.toFixed(2))}
-                className="mt-2 rounded-full bg-[var(--surface)] px-3 py-1.5 text-[13px] font-semibold text-[var(--accent)] tap-shrink"
-              >
-                Send exactly {formatCurrency(suggestedAmount)}
-              </button>
-            </div>
-          )}
+    <GlassModal
+      title={`Pay ${toName}`}
+      large
+      onClose={onClose}
+      dirty={!busy && (note.trim() !== "" || receiptFiles.length > 0 || handedOff)}
+      footer={
+        <button type="submit" form="send-form" disabled={busy || parsedAmount <= 0} className="btn-prominent w-full">
+          {busy ? "Recording…" : parsedAmount > 0 ? `I’ve Sent ${formatCurrency(parsedAmount)}` : "I’ve Sent It"}
+        </button>
+      }
+    >
+      <form id="send-form" onSubmit={handleSubmit}>
+        <div className="flex flex-col items-center pt-3 pb-1 text-center">
+          <AmountInput id="send-amount" value={amount} onChange={setAmount} autoFocus />
+          {contextLine && <p className="t-footnote text-[var(--text-secondary)] max-w-[300px]">{contextLine}</p>}
         </div>
 
+        {overpayBy > 0 && (
+          <ListSection
+            elevated
+            footer={`After this, ${toName} will owe you ${formatCurrency(overpayBy)}, and your groups keep showing a balance until it comes back.`}
+          >
+            <Row title={<span className="text-[var(--warning)]">{formatCurrency(overpayBy)} more than you owe</span>} />
+            <ButtonRow onClick={() => setAmount(suggestedAmount.toFixed(2))} title={`Send Exactly ${formatCurrency(suggestedAmount)}`} action />
+          </ListSection>
+        )}
+
         {upiUsable ? (
-          <div>
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-              Pay with UPI
-            </p>
-            <div className="grid grid-cols-2 gap-2">
+          <ListSection
+            elevated
+            header="Pay with UPI"
+            footer={
+              !canHandOff
+                ? `UPI apps open only on a phone. Copy ${toName}'s UPI ID and pay from your bank app.`
+                : handedOff
+                ? "Nothing opened? Copy the UPI ID and pay from your bank app."
+                : "Opens the app with the amount filled in. Come back here to record it."
+            }
+          >
+            <div className="grid grid-cols-4 gap-1 px-2 py-3">
               {UPI_APPS.map((app) => (
                 <button
                   key={app.id}
                   type="button"
                   onClick={() => handlePayWithApp(app)}
-                  className="flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3 py-2.5 text-sm font-medium text-[var(--text-primary)] tap-shrink"
+                  className="flex flex-col items-center gap-1.5 py-1 tap-shrink"
                 >
-                  <UpiAppIcon id={app.id} className="w-5 h-5 shrink-0" />
-                  <span className="truncate">{app.label}</span>
+                  <span className="w-12 h-12 rounded-[13px] bg-[var(--surface)] grid place-items-center shadow-[0_0_0_0.5px_var(--separator)]">
+                    <UpiAppIcon id={app.id} className="w-7 h-7" />
+                  </span>
+                  <span className="t-caption text-[var(--text-primary)] truncate max-w-full">{app.label}</span>
                 </button>
               ))}
             </div>
-            <button
-              type="button"
+            <ButtonRow
               onClick={handleCopyUpi}
-              className="mt-2 w-full rounded-[var(--radius-md)] bg-[var(--fill-soft)] px-3 py-2 text-[13px] font-medium text-[var(--text-secondary)] tap-shrink"
-            >
-              Copy UPI ID · {resolvedUpiId}
-            </button>
-            {!canHandOff ? (
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                UPI apps can only be opened from a phone. On desktop, copy{" "}
-                {toName}&rsquo;s UPI ID and pay from your bank app.
-              </p>
-            ) : (
-              handedOff && (
-                <p className="text-[12px] text-[var(--text-tertiary)] mt-2">
-                  Nothing opened? Copy the UPI ID above and pay from your bank app.
-                </p>
-              )
-            )}
-          </div>
-        ) : resolvedUpiId ? (
-          <div className="rounded-[var(--radius-md)] bg-[var(--tint-warning)] p-3">
-            <p className="text-[13px] text-[var(--text-secondary)]">
-              {toName}&rsquo;s saved UPI ID (
-              <span className="font-medium">{resolvedUpiId}</span>) isn&rsquo;t a valid
-              handle@bank address, so UPI apps can&rsquo;t open it.
-            </p>
-          </div>
+              leading={<span className="text-[var(--brand)]"><Copy size={19} /></span>}
+              title="Copy UPI ID"
+              detail={<span className="selectable">{resolvedUpiId}</span>}
+              action
+            />
+          </ListSection>
         ) : (
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            {upiChecked
-              ? `${toName} hasn't added a UPI ID. Pay them however you like (cash, UPI, bank transfer) and record it here.`
-              : "Checking for a UPI ID…"}
-          </p>
+          <ListSection elevated>
+            <Row
+              title={
+                <span className="whitespace-normal t-subhead text-[var(--text-secondary)]">
+                  {resolvedUpiId
+                    ? `${toName}'s saved UPI ID (${resolvedUpiId}) isn't a valid handle@bank address, so UPI apps can't open it.`
+                    : upiChecked
+                    ? `${toName} hasn't added a UPI ID. Pay them however you like (cash, UPI, bank transfer) and record it here.`
+                    : "Checking for a UPI ID…"}
+                </span>
+              }
+            />
+          </ListSection>
         )}
 
-        <div>
-          <label
-            htmlFor="send-note"
-            className="text-sm font-medium text-[var(--text-secondary)] block mb-1"
-          >
-            Note (optional)
-          </label>
-          <input
-            id="send-note"
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="For Friday's dinner…"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-          />
-        </div>
-
-        <div>
-          <p className="text-sm font-medium text-[var(--text-secondary)] mb-2">
-            Payment screenshot (optional)
-          </p>
+        <ListSection
+          elevated
+          footer={`${toName} confirms the payment and chooses whether it settles a group balance. Until then it shows as a personal balance between you.`}
+        >
+          <FieldRow label="Note">
+            <input
+              id="send-note"
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional"
+              aria-label="Note"
+              className="row-input py-[13px]"
+            />
+          </FieldRow>
           <label
             role="button"
             tabIndex={0}
             aria-label="Add a payment screenshot"
             onKeyDown={activateFileInputOnKey}
-            className="block cursor-pointer rounded-[var(--radius-md)] border border-dashed border-[var(--border-subtle)] px-3 py-2.5 text-sm text-[var(--text-tertiary)] tap-shrink"
+            className="list-row cursor-pointer active:bg-[var(--pressed)]"
           >
-            {receiptFiles.length > 0
-              ? `${receiptFiles.length} file(s) selected — tap to add more`
-              : "Tap to select a screenshot"}
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handleReceipts}
-              className="hidden"
-            />
+            <span className="text-[var(--brand)]"><Paperclip size={20} /></span>
+            <span className="flex-1 t-body text-[var(--brand)]">
+              {receiptFiles.length > 0 ? "Add Another Screenshot" : "Attach Screenshot"}
+            </span>
+            {receiptFiles.length > 0 && <span className="t-body text-[var(--text-secondary)]">{receiptFiles.length}</span>}
+            <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
           </label>
-        </div>
+        </ListSection>
 
-        <p className="text-[13px] text-[var(--text-tertiary)]">
-          This tells {toName} you sent the money. They confirm it, and they choose
-          whether it settles a group balance — until they book it into a group
-          it shows as a personal balance between you two.
-        </p>
-
-        {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-        <GlassButton disabled={busy || parsedAmount <= 0} className="w-full">
-          {busy
-            ? "Recording…"
-            : parsedAmount > 0
-            ? `I've sent ${formatCurrency(parsedAmount)}`
-            : "I've sent it"}
-        </GlassButton>
+        {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
       </form>
     </GlassModal>
   );

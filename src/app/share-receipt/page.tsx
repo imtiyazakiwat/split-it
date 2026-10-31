@@ -4,10 +4,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-import TopBar from "@/components/TopBar";
 import LoginScreen from "@/components/LoginScreen";
-import Card from "@/components/ui/Card";
-import { GlassSelect } from "@/components/ui/GlassField";
+import Screen from "@/components/ui/Screen";
+import { ButtonRow, ListSection } from "@/components/ui/List";
+import { Avatar } from "@/components/ui/Controls";
 import AddExpenseModal from "@/components/AddExpenseModal";
 import { activateFileInputOnKey } from "@/lib/keyboard";
 
@@ -31,34 +31,32 @@ export default function ShareReceiptPage() {
     }
   }, []);
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)] text-sm">Loading…</p>
-      </div>
-    );
-  }
+  if (loading) return <Screen title="Add Receipt" backHref="/" tabBar={false}>{null}</Screen>;
   if (!user) return <LoginScreen />;
 
   const group = groups.find((g) => g.id === selectedGroupId);
 
   return (
-    <div className="flex-1 flex flex-col">
-      <TopBar title="Add Receipt" onBack={() => router.push("/")} />
-      <main className="flex-1 max-w-md w-full mx-auto p-4 space-y-4 scroll-momentum">
-        <p className="text-sm text-[var(--text-secondary)]">
-          Received a shared image. Pick a group to attach it to a new expense.
-        </p>
-
-        {!receiptFile && (
+    <Screen title="Add Receipt" backHref="/" tabBar={false} large>
+      {receiptFile ? (
+        <div className="list-section p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={URL.createObjectURL(receiptFile)}
+            alt="Shared receipt preview"
+            className="w-full rounded-[16px] max-h-72 object-contain bg-[var(--fill-soft)]"
+          />
+        </div>
+      ) : (
+        <ListSection footer="Nothing was shared with SplitIt. Pick an image to attach.">
           <label
             role="button"
             tabIndex={0}
             aria-label="Select an image to attach"
             onKeyDown={activateFileInputOnKey}
-            className="block bg-[var(--surface)] border-2 border-dashed border-[var(--border-subtle)] rounded-[var(--radius-lg)] p-6 text-center text-sm text-[var(--text-tertiary)] cursor-pointer tap-shrink"
+            className="list-row cursor-pointer active:bg-[var(--pressed)]"
           >
-            No image detected. Tap to select one manually.
+            <span className="flex-1 t-body text-[var(--brand)]">Choose Image</span>
             <input
               type="file"
               accept="image/*"
@@ -66,32 +64,25 @@ export default function ShareReceiptPage() {
               onChange={(e) => setReceiptFile(e.target.files?.[0] || null)}
             />
           </label>
-        )}
+        </ListSection>
+      )}
 
-        {receiptFile && (
-          <Card className="p-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={URL.createObjectURL(receiptFile)}
-              alt="Shared receipt preview"
-              className="w-full rounded-[var(--radius-md)] max-h-64 object-contain"
+      <ListSection header="Add to group" footer="Pick a group to start a new expense with this receipt attached.">
+        {groups.length === 0 ? (
+          <div className="list-row t-body text-[var(--text-secondary)]">You’re not in any groups yet.</div>
+        ) : (
+          groups.map((g) => (
+            <ButtonRow
+              key={g.id}
+              onClick={() => setSelectedGroupId(g.id)}
+              leading={<Avatar name={g.name} photoURL={g.photoURL} size={32} seed={g.id} />}
+              separatorInset={60}
+              title={g.name}
+              chevron
             />
-          </Card>
+          ))
         )}
-
-        <GlassSelect
-          label="Group"
-          value={selectedGroupId}
-          onChange={(e) => setSelectedGroupId(e.target.value)}
-        >
-          <option value="">Select a group…</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </GlassSelect>
-      </main>
+      </ListSection>
 
       {group && (
         <AddExpenseModal
@@ -101,6 +92,6 @@ export default function ShareReceiptPage() {
           prefillReceipt={receiptFile}
         />
       )}
-    </div>
+    </Screen>
   );
 }

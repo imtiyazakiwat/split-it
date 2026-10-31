@@ -4,11 +4,14 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { getGroupByInviteCode, joinGroupByCode } from "@/lib/firestore";
+import LoginScreen from "@/components/LoginScreen";
+import { EmptyState } from "@/components/ui/Controls";
+import { People } from "@/components/ui/Icons";
 
 export default function JoinPage() {
   const { code } = useParams<{ code: string }>();
   const router = useRouter();
-  const { user, loading, signInWithGoogle } = useAuth();
+  const { user, loading } = useAuth();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [groupName, setGroupName] = useState("");
@@ -54,52 +57,33 @@ export default function JoinPage() {
     };
   }, [code, user, loading, router]);
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <p className="text-[var(--text-tertiary)]">Loading…</p>
-      </div>
-    );
-  }
+  if (loading) return <div className="flex-1 min-h-[100dvh] bg-[var(--background)]" />;
 
-  if (!user) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center p-4 gap-4">
-        <p className="text-[var(--text-secondary)] text-center">
-          Sign in to join this group
-        </p>
-        <button
-          onClick={signInWithGoogle}
-          className="glass rounded-full px-6 py-2.5 text-[15px] font-medium text-[var(--text-primary)] tap-shrink"
-        >
-          Sign in with Google
-        </button>
-      </div>
-    );
-  }
+  // Signing in from an invite link uses the same welcome screen as the app;
+  // once signed in, this effect joins and redirects.
+  if (!user) return <LoginScreen />;
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4">
-      <div className="text-center">
-        {busy ? (
-          <>
-            <div className="w-12 h-12 rounded-full border-2 border-[var(--accent)] border-t-transparent animate-spin mx-auto mb-3" />
-            <p className="text-[var(--text-secondary)]">
-              {groupName ? `Joining ${groupName}…` : "Looking up group…"}
-            </p>
-          </>
-        ) : error ? (
-          <>
-            <p className="text-[var(--danger)] text-[15px] mb-2">{error}</p>
-            <button
-              onClick={() => router.push("/")}
-              className="text-[var(--accent)] text-sm tap-shrink"
-            >
-              Go home
+    <div className="flex-1 min-h-[100dvh] flex items-center justify-center p-4 bg-[var(--background)]">
+      {error ? (
+        <EmptyState
+          icon={<People size={56} weight={1.4} />}
+          title="Couldn’t Join"
+          message={error}
+          action={
+            <button onClick={() => router.push("/")} className="btn-prominent">
+              Go to Groups
             </button>
-          </>
-        ) : null}
-      </div>
+          }
+        />
+      ) : (
+        <div className="flex flex-col items-center text-center gap-3" role="status">
+          <span className="w-7 h-7 rounded-full border-[2.5px] border-[var(--text-tertiary)] border-t-transparent animate-spin" aria-hidden />
+          <p className="t-subhead text-[var(--text-secondary)]">
+            {busy ? (groupName ? `Joining ${groupName}…` : "Looking up the group…") : "Opening…"}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,81 +4,129 @@ import { usePathname, useRouter } from "next/navigation";
 import { ReactNode, useLayoutEffect, useEffect, useRef, useState } from "react";
 
 /** Top-level destinations: switching between them cross-fades (no push). */
-const TAB_ROOTS = new Set(["/", "/pay", "/activity", "/reports", "/settings"]);
+export const TAB_ROOTS = new Set(["/", "/pay", "/activity", "/reports", "/settings"]);
 
 /** How long the outgoing layer stays mounted. Must exceed --dur-route. */
-const EXIT_MS = 450;
+const EXIT_MS = 500;
 
-type Direction = "push" | "pop" | "fade";
+type Direction = "push" | "pop" | "fade" | "none";
+
+/**
+ * In-app navigation stack, shared with the back buttons so "Back" returns to
+ * the screen the user actually came from (a group opened from Activity goes
+ * back to Activity, not Groups).
+ */
+const navStack: string[] = [];
+
+/**
+ * Set by a `popstate` (browser Back/Forward, Safari's own swipe, or our
+ * `router.back()`), consumed by the next pathname change. A history traversal
+ * must reconcile the stack against where the browser actually landed rather
+ * than be read as a new push, or the stack drifts from real history and Back
+ * starts pointing at the wrong screen.
+ */
+let traversing = false;
+if (typeof window !== "undefined") {
+  window.addEventListener("popstate", () => {
+    traversing = true;
+  });
+}
+
+export function previousPath(): string | null {
+  return navStack.length >= 2 ? navStack[navStack.length - 2] : null;
+}
+
+/**
+ * Entries popped by going back, nearest first, so browser Forward can put
+ * them back exactly. Cleared by any new in-app navigation, as history is.
+ */
+const forwardStack: string[] = [];
+
+/**
+ * Lands the stack on `pathname` after a history traversal:
+ *  - back to an entry we hold: pop to it, remembering what was popped;
+ *  - forward to the entry we just popped: push it again;
+ *  - anywhere else: restart at the current screen. Its own parent link then
+ *    handles Back, which is always a safe target.
+ */
+function reconcileTraversal(pathname: string): "pop" | "push" | "fade" {
+  const at = navStack.lastIndexOf(pathname);
+  if (at >= 0 && at < navStack.length - 1) {
+    forwardStack.unshift(...navStack.splice(at + 1).reverse());
+    return "pop";
+  }
+  if (forwardStack[0] === pathname) {
+    navStack.push(forwardStack.shift()!);
+    return "push";
+  }
+  forwardStack.length = 0;
+  navStack.length = 0;
+  navStack.push(pathname);
+  return "fade";
+}
 
 /**
  * iOS-style routed transitions with both views mounted through the move:
- * incoming travels full width while outgoing parallaxes to -32% and dims —
- * that continuity is what reads as a push rather than a pan. Tab switches
- * cross-fade (same depth, no hierarchy). A left-edge drag also pops, like the
- * system swipe-back — gated to touches starting within 20px of the edge,
- * moving mostly horizontally, never while typing or while a sheet is open.
+ * incoming travels full width while outgoing parallaxes to −30 % and dims.
+ * Tab switches cross-fade (same depth, no hierarchy).
  *
- * ── Cost, recorded deliberately ────────────────────────────────────────────
- * `key={pathname}` remounts the routed tree on every navigation, and `outgoing`
- * keeps the departing tree mounted for a further EXIT_MS. So a navigation does
- * strictly more work here than a plain swap would: two trees live at once, and
- * all derived state in the new one is rebuilt from scratch on arrival.
+ * Interactive edge-swipe back: touches starting within 22 px of the left
+ * edge follow the finger 1:1; release past 40 % of the width or with a fast
+ * flick commits, otherwise the screen springs back.
  *
- * That is accepted rather than overlooked. The measured cost of rebuilding this
- * app's derived state is small — the four ledger passes on the heaviest screen
- * benchmark at 0.52 ms against a 50 ms budget (`scripts/bench-render.mjs`) — so
- * the remount buys the animation cheaply. What actually made navigation feel
- * broken was never the remount; it was that dynamic routes were not prefetched
- * and had no loading boundary, so the router sat on the old screen waiting for a
- * server round trip with nothing to show. That is fixed separately by the
- * `loading.tsx` files, `<Link>`, and `staleTimes`.
- *
- * Revisit if `bench-render.mjs` ever reports the per-render figure approaching
- * the budget (it scales linearly, and crosses it somewhere past ~1,500 expenses
- * on a mid-range phone). At that point the remount stops being free and this
- * should hold the tree instead of rebuilding it.
+ * `key={pathname}` remounts the routed tree per navigation and the outgoing
+ * tree stays mounted for EXIT_MS. That cost is measured and accepted (see
+ * scripts/bench-render.mjs); the previous screen is not kept alive between
+ * navigations, so the swipe reveals the page background, and the previous
+ * screen appears when the gesture commits.
  */
 export default function PageTransition({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const stackRef = useRef<string[]>([]);
   const prevChildrenRef = useRef<ReactNode>(children);
-  const [direction, setDirection] = useState<Direction>("fade");
+  const [direction, setDirection] = useState<Direction>("none");
   const [outgoing, setOutgoing] = useState<{ key: string; node: ReactNode } | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const exitTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const gestureRef = useRef<{ startX: number; startY: number; active: boolean }>({
-    startX: 0,
-    startY: 0,
-    active: false,
-  });
+  const swipeCommitted = useRef(false);
+  const gestureRef = useRef({ startX: 0, startY: 0, lastX: 0, lastT: 0, v: 0, active: false, locked: false });
 
   const prevRef = useRef(pathname);
-  // Layout effect so the correct animation class is set before paint — one
-  // animation per navigation, never a flash of the wrong direction.
   useLayoutEffect(() => {
+    if (navStack.length === 0) navStack.push(pathname);
     const prev = prevRef.current;
     if (prev === pathname) {
       prevChildrenRef.current = children;
       return;
     }
-    const stack = stackRef.current;
     let dir: Direction;
-    if (stack.length >= 2 && stack[stack.length - 2] === pathname) {
-      stack.pop();
+    if (traversing) {
+      traversing = false;
+      dir = reconcileTraversal(pathname);
+    } else if (navStack.length >= 2 && navStack[navStack.length - 2] === pathname) {
+      forwardStack.unshift(navStack.pop()!);
       dir = "pop";
+    } else if (TAB_ROOTS.has(pathname) && TAB_ROOTS.has(prev)) {
+      // Switching tabs resets the stack to that tab's root.
+      forwardStack.length = 0;
+      navStack.length = 0;
+      navStack.push(pathname);
+      dir = "fade";
     } else {
-      if (stack[stack.length - 1] !== prev) stack.push(prev);
-      stack.push(pathname);
-      if (stack.length > 20) stack.splice(0, stack.length - 20);
-      // Tab-to-tab switches never slide: same depth, no hierarchy.
-      dir = TAB_ROOTS.has(prev) && TAB_ROOTS.has(pathname) ? "fade" : "push";
+      forwardStack.length = 0;
+      if (navStack[navStack.length - 1] !== prev) navStack.push(prev);
+      navStack.push(pathname);
+      if (navStack.length > 20) navStack.splice(0, navStack.length - 20);
+      dir = "push";
     }
-    // Hold the departing view for the outgoing half of the move. Effects in
-    // the old tree stay alive for EXIT_MS — reads, not writes, so nothing
-    // fires twice that matters.
-    setOutgoing({ key: prev, node: prevChildrenRef.current });
+    if (swipeCommitted.current) {
+      // The gesture already moved the old screen off; don't replay it.
+      swipeCommitted.current = false;
+      dir = "none";
+      setOutgoing(null);
+    } else {
+      setOutgoing({ key: prev, node: prevChildrenRef.current });
+    }
     prevChildrenRef.current = children;
     prevRef.current = pathname;
     setDirection(dir);
@@ -86,88 +134,123 @@ export default function PageTransition({ children }: { children: ReactNode }) {
     exitTimer.current = setTimeout(() => setOutgoing(null), EXIT_MS);
   }, [pathname, children]);
 
-  useEffect(() => () => {
-    if (exitTimer.current) clearTimeout(exitTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (exitTimer.current) clearTimeout(exitTimer.current);
+    },
+    []
+  );
 
   // Interactive edge-swipe back.
   useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
     let raf = 0;
+    const el = () => wrapRef.current?.querySelector<HTMLElement>(".route-incoming") ?? null;
+
+    const reset = (node: HTMLElement | null) => {
+      if (!node) return;
+      node.style.transition = "";
+      node.style.transform = "";
+      node.style.boxShadow = "";
+    };
 
     const onTouchStart = (e: TouchEvent) => {
       const t = e.touches[0];
-      if (!t || t.clientX > 20) return;
+      if (!t || t.clientX > 22) return;
       const target = e.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, [contenteditable]")) return;
       if (document.body.hasAttribute("data-sheet-open")) return;
       if (TAB_ROOTS.has(window.location.pathname)) return;
-      gestureRef.current = { startX: t.clientX, startY: t.clientY, active: true };
+      gestureRef.current = { startX: t.clientX, startY: t.clientY, lastX: t.clientX, lastT: e.timeStamp, v: 0, active: true, locked: false };
     };
     const onTouchMove = (e: TouchEvent) => {
       const g = gestureRef.current;
-      if (!g.active || !el) return;
+      if (!g.active) return;
       const t = e.touches[0];
       if (!t) return;
       const dx = t.clientX - g.startX;
       const dy = Math.abs(t.clientY - g.startY);
-      if (dx < 0 || dy > dx * 0.6) {
-        g.active = false;
-        el.style.transform = "";
-        return;
+      if (!g.locked) {
+        if (dy > 10 && dy > Math.abs(dx)) {
+          g.active = false;
+          return;
+        }
+        if (dx > 8) g.locked = true;
+        else return;
       }
+      const dt = Math.max(1, e.timeStamp - g.lastT);
+      g.v = ((t.clientX - g.lastX) / dt) * 1000;
+      g.lastX = t.clientX;
+      g.lastT = e.timeStamp;
+      const node = el();
       cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
-        if (el) el.style.transform = `translateX(${Math.min(dx, 120)}px)`;
+        if (!node) return;
+        node.style.transition = "none";
+        node.style.transform = `translateX(${Math.max(0, dx)}px)`;
+        node.style.boxShadow = "-10px 0 30px rgba(0,0,0,0.12)";
       });
     };
-    const onTouchEnd = (e: TouchEvent) => {
+    const onTouchEnd = () => {
       const g = gestureRef.current;
-      if (!g.active || !el) return;
+      if (!g.active) return;
       g.active = false;
       cancelAnimationFrame(raf);
-      const t = e.changedTouches[0];
-      const dx = t ? t.clientX - g.startX : 0;
-      el.style.transition = "transform 0.25s cubic-bezier(0.32,0.72,0,1)";
-      if (dx > 96) {
-        el.style.transform = "translateX(40px)";
-        el.style.opacity = "0.4";
-        setTimeout(() => router.back(), 60);
+      const node = el();
+      if (!node || !g.locked) return reset(node);
+      const width = window.innerWidth;
+      const dx = g.lastX - g.startX;
+      // Only commit when there is somewhere to go back to: a deep-linked
+      // screen (opened from a notification) has no in-app history, and
+      // router.back() would leave a blank, slid-away page.
+      const target = previousPath();
+      const commit = !!target && (dx > width * 0.4 || (g.v > 520 && dx > 20));
+      node.style.transition = "transform 0.32s cubic-bezier(0.32,0.72,0,1)";
+      if (commit) {
+        node.style.transform = `translateX(${width}px)`;
+        swipeCommitted.current = true;
+        // A real history pop, so browser Back/Forward stay consistent with
+        // the in-app stack (the stack is only ever pushed by in-app links).
+        setTimeout(() => router.back(), 200);
+        setTimeout(() => reset(el()), 700);
       } else {
-        el.style.transform = "";
+        node.style.transform = "translateX(0)";
+        setTimeout(() => reset(node), 340);
       }
-      setTimeout(() => {
-        if (el) {
-          el.style.transition = "";
-          el.style.transform = "";
-          el.style.opacity = "";
-        }
-      }, 300);
     };
 
     document.addEventListener("touchstart", onTouchStart, { passive: true });
     document.addEventListener("touchmove", onTouchMove, { passive: true });
     document.addEventListener("touchend", onTouchEnd, { passive: true });
+    // The system took the touch over (edge gesture, call): never navigate.
+    const onTouchCancel = () => {
+      gestureRef.current.active = false;
+      cancelAnimationFrame(raf);
+      reset(el());
+    };
+    document.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
+      document.removeEventListener("touchcancel", onTouchCancel);
       cancelAnimationFrame(raf);
     };
   }, [router]);
 
   const incomingCls =
-    direction === "push" ? "page-push-in" : direction === "pop" ? "page-pop-in" : "page-enter";
+    direction === "push" ? "page-push-in" : direction === "pop" ? "page-pop-in" : direction === "fade" ? "page-enter" : "";
   const outgoingCls =
     direction === "push" ? "page-push-out" : direction === "pop" ? "page-pop-out" : "page-fade-out";
   return (
-    <div key={pathname} ref={wrapRef} className="route-stage flex-1 flex flex-col min-h-full">
-      <div className={`route-incoming flex-1 flex flex-col min-h-full ${incomingCls}`}>
+    <div
+      ref={wrapRef}
+      className={`route-stage flex-1 flex flex-col min-h-full ${direction === "pop" ? "is-pop" : ""}`}
+    >
+      <div key={pathname} className={`route-incoming flex-1 flex flex-col min-h-full ${incomingCls}`}>
         {children}
       </div>
       {outgoing && (
-        <div key={outgoing.key} aria-hidden className={`route-outgoing ${outgoingCls}`}>
+        <div key={outgoing.key} aria-hidden inert className={`route-outgoing ${outgoingCls}`}>
           {outgoing.node}
         </div>
       )}

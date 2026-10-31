@@ -313,14 +313,43 @@ export async function addExpense(
     createdAt: Date.now(),
   });
 
-  // Best-effort and not awaited. The server resolves the members and titles it
-  // with the group name, so there's no group read here any more.
-  notifyGroupMembers(groupId, {
-    body: `${actorName()} added ${data.description} · ${rupees(amount)}`,
-    link: groupItemLink(groupId, { kind: "expense", id: ref.id }),
-  });
+  // Best-effort and not awaited. Only the people the expense touches (everyone
+  // in the split, plus the payer) hear about it: in a 10-person flat, the
+  // three who shared a taxi shouldn't buzz the other seven. Each person sees
+  // their own share, which is the number they actually care about. The server
+  // still checks that every recipient is a member and titles it with the group.
+  notifyExpenseParticipants(groupId, data.paidBy, splits, (uid, share) =>
+    uid === data.paidBy
+      ? `${actorName()} added ${data.description} that you paid · ${rupees(amount)}`
+      : share > 0
+      ? `${actorName()} added ${data.description} · your share ${rupees(share)}`
+      : `${actorName()} added ${data.description} · ${rupees(amount)}`,
+    groupItemLink(groupId, { kind: "expense", id: ref.id })
+  );
 
   return ref.id;
+}
+
+/**
+ * One push per involved person, worded with their own share. Batches people
+ * who'd get the same text into one request. Never throws.
+ */
+function notifyExpenseParticipants(
+  groupId: string,
+  paidBy: string,
+  splits: ExpenseSplit[],
+  bodyFor: (uid: string, myShare: number) => string,
+  link: string
+): void {
+  const shareOf = new Map<string, number>();
+  for (const s of splits) shareOf.set(s.uid, s.amount);
+  if (!shareOf.has(paidBy)) shareOf.set(paidBy, 0);
+  const byBody = new Map<string, string[]>();
+  for (const [uid, share] of shareOf) {
+    const body = bodyFor(uid, share);
+    byBody.set(body, [...(byBody.get(body) ?? []), uid]);
+  }
+  for (const [body, uids] of byBody) notifyUsers(uids, { groupId, body, link });
 }
 
 export async function updateExpense(

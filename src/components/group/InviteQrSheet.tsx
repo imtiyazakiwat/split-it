@@ -2,6 +2,8 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import GlassModal from "@/components/ui/GlassModal";
+import { ButtonRow, ListSection } from "@/components/ui/List";
+import { Copy, Share } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
 
 /** The join URL for a code, on whichever host the app is served from. */
@@ -100,67 +102,47 @@ export default function InviteQrSheet({
   }
 
   return (
-    <GlassModal title="Invite to this group" onClose={onClose}>
-      <div className="space-y-4">
-        <p className="text-[14px] text-[var(--text-secondary)]">
-          Have them scan this, or send them the link. They&rsquo;ll join{" "}
-          <span className="font-semibold text-[var(--text-primary)]">{groupName}</span>.
-        </p>
+    <GlassModal title="Invite People" onClose={onClose}>
+      <p className="t-subhead text-[var(--text-secondary)] text-center px-6 pt-1">
+        Have them scan this code with their camera, or send them the link to join{" "}
+        <span className="font-semibold text-[var(--text-primary)]">{groupName}</span>.
+      </p>
 
-        {/* White plate regardless of theme: QR contrast has to be fixed, and a
-            dark-mode surface behind a dark QR does not scan. */}
-        <div className="flex justify-center">
-          <div className="rounded-[var(--radius-inner)] bg-white p-3 shadow-[var(--shadow-card)]">
-            {dataUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={dataUrl}
-                alt={`QR code to join ${groupName}`}
-                width={232}
-                height={232}
-                className="block w-[232px] h-[232px]"
-              />
-            ) : (
-              <div className="w-[232px] h-[232px] grid place-items-center text-center px-4">
-                <p className="text-[13px] text-neutral-500">
-                  {failed ? "Couldn’t draw the QR code — use the code below." : "Generating…"}
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* The code itself, for anyone whose camera won't cooperate. */}
-        <button
-          type="button"
-          onClick={() => copy(inviteCode, "code")}
-          className="w-full rounded-[var(--radius-inner)] bg-[var(--fill-soft)] px-4 py-3 tap-shrink"
-        >
-          <span className="block text-[11px] font-semibold tracking-wide text-[var(--text-tertiary)]">
-            INVITE CODE {copied === "code" ? "· COPIED" : "· TAP TO COPY"}
-          </span>
-          <span className="block text-[26px] font-extrabold tracking-[0.2em] text-[var(--text-primary)] mt-0.5">
-            {inviteCode}
-          </span>
-        </button>
-
-        <div className="flex gap-2">
-          <button
-            type="button"
-            onClick={share}
-            className="flex-1 rounded-full bg-[var(--brand-solid)] text-white px-4 py-3 text-[15px] font-semibold tap-shrink"
-          >
-            Share link
-          </button>
-          <button
-            type="button"
-            onClick={() => copy(inviteLink(inviteCode), "link")}
-            className="flex-1 rounded-full bg-[var(--surface)] border border-[var(--border-subtle)] px-4 py-3 text-[15px] font-semibold text-[var(--text-primary)] tap-shrink"
-          >
-            {copied === "link" ? "Copied!" : "Copy link"}
-          </button>
+      {/* White plate regardless of theme: a dark QR on a dark surface won't scan. */}
+      <div className="flex justify-center mt-5">
+        <div className="rounded-[24px] bg-white p-3.5 shadow-[0_0_0_0.5px_var(--separator)]">
+          {dataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={dataUrl} alt={`QR code to join ${groupName}`} width={220} height={220} className="block w-[220px] h-[220px]" />
+          ) : (
+            <div className="w-[220px] h-[220px] grid place-items-center text-center px-4">
+              <p className="text-[13px] text-neutral-500">
+                {failed ? "Couldn’t draw the QR code. Use the code below." : "Generating…"}
+              </p>
+            </div>
+          )}
         </div>
       </div>
+
+      <button
+        type="button"
+        onClick={() => copy(inviteCode, "code")}
+        className="w-full flex flex-col items-center mt-4 py-2 tap-shrink"
+        aria-label={`Invite code ${inviteCode}. Tap to copy.`}
+      >
+        <span className="text-[28px] font-bold tracking-[0.22em] t-numeral text-[var(--text-primary)] selectable">{inviteCode}</span>
+        <span className="t-footnote text-[var(--text-secondary)]">{copied === "code" ? "Copied" : "Invite Code · Tap to Copy"}</span>
+      </button>
+
+      <ListSection elevated>
+        <ButtonRow onClick={share} leading={<span className="text-[var(--brand)]"><Share size={20} /></span>} title="Share Invite Link" action />
+        <ButtonRow
+          onClick={() => copy(inviteLink(inviteCode), "link")}
+          leading={<span className="text-[var(--brand)]"><Copy size={19} /></span>}
+          title={copied === "link" ? "Copied" : "Copy Link"}
+          action
+        />
+      </ListSection>
     </GlassModal>
   );
 }

@@ -2,6 +2,9 @@
 
 import { Expense, Settlement } from "@/lib/types";
 import { canRespondToSettlement, formatCurrency } from "@/lib/balance";
+import { ListSection, SwipeRow } from "@/components/ui/List";
+import { EmptyState } from "@/components/ui/Controls";
+import { Arrows, CategoryGlyph, CheckCircle, ChevronRight, Clock, categoryTint } from "@/components/ui/Icons";
 
 type Item =
   | { type: "expense"; data: Expense; ts: number }
@@ -14,41 +17,25 @@ function dateBucket(ts: number): string {
   const days = Math.round((startOfDay(now) - startOfDay(d)) / 86400000);
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
-  if (days < 7) return `${days} days ago`;
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+  if (days < 7) return d.toLocaleDateString("en-IN", { weekday: "long" });
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-function ReceiptIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2z" />
-      <path d="M9 8h6M9 12h6" />
-    </svg>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--pos)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" />
-      <path d="m8.5 12 2.5 2.5 4.5-5" />
-    </svg>
-  );
-}
-
-/** Cross-group offset: balances cancelled out, no money moved. */
-function OffsetIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M7 8h13M7 8l3-3M7 8l3 3M17 16H4M17 16l-3-3M17 16l-3 3" />
-    </svg>
-  );
-}
-
+/**
+ * The group's ledger as an inset-grouped list, sectioned by day. One row =
+ * one tap target (opens the detail sheet). Expenses swipe left to delete
+ * (with Undo, handled by the parent); the detail sheet holds Edit and Delete
+ * for anyone not using gestures. Settlement requests keep their decision
+ * buttons inline, because that decision is the reason the row exists.
+ */
 export default function ActivityTimeline({
   expenses,
   settlements,
@@ -56,7 +43,6 @@ export default function ActivityTimeline({
   currentUid,
   isAdmin,
   limit,
-  onEditExpense,
   onDeleteExpense,
   onApprove,
   onReject,
@@ -71,7 +57,7 @@ export default function ActivityTimeline({
   currentUid: string;
   isAdmin: boolean;
   limit?: number;
-  onEditExpense: (e: Expense) => void;
+  onEditExpense?: (e: Expense) => void;
   onDeleteExpense: (e: Expense) => void;
   onApprove: (s: Settlement) => void;
   onReject: (s: Settlement) => void;
@@ -90,134 +76,161 @@ export default function ActivityTimeline({
   const shown = limit ? items.slice(0, limit) : items;
 
   if (shown.length === 0) {
-    return <p className="text-center text-[var(--text-tertiary)] text-sm py-10">No activity yet.</p>;
+    return (
+      <EmptyState
+        icon={<Clock size={52} weight={1.4} />}
+        title="No Expenses Yet"
+        message="Tap + to add the first expense. Everyone in the group sees it straight away."
+      />
+    );
   }
 
-  const rows = shown.map((item, i) => {
+  // Group into day sections, preserving order.
+  const sections: { bucket: string; items: Item[] }[] = [];
+  for (const item of shown) {
     const bucket = dateBucket(item.ts);
-    const prevBucket = i > 0 ? dateBucket(shown[i - 1].ts) : null;
-    return {
-      item,
-      bucket,
-      showBucket: bucket !== prevBucket,
-      // Stable per-record key: indexes made React reuse rows across updates,
-      // which is how stale text and mismatched action buttons showed up.
-      key: `${item.type}-${item.data.id}`,
-    };
-  });
+    const last = sections[sections.length - 1];
+    if (last && last.bucket === bucket) last.items.push(item);
+    else sections.push({ bucket, items: [item] });
+  }
 
   return (
-    <div className="relative">
-      {/* connecting line */}
-      <div className="absolute left-[18px] top-2 bottom-2 w-px bg-[var(--fill)]" aria-hidden />
-      <div className="space-y-1">
-        {rows.map(({ item, bucket, showBucket, key }) => {
-          const isSettlement = item.type === "settlement";
-          const s = isSettlement ? (item.data as Settlement) : null;
-          const e = !isSettlement ? (item.data as Expense) : null;
-          const isOffset = s?.kind === "offset";
-
-          return (
-            <div key={key}>
-              {showBucket && (
-                <div className="relative z-[1] inline-block bg-[var(--background)] rounded-full px-2.5 py-0.5 my-1.5 ml-0.5">
-                  <span className="text-[12px] font-medium text-[var(--text-secondary)]">{bucket}</span>
-                </div>
-              )}
-              <div
-                className="relative flex items-start gap-3 py-1.5 cursor-pointer"
-                onClick={() => (e ? onOpenExpense(e) : s ? onOpenSettlement(s) : undefined)}
-              >
-                <span
-                  className={`relative z-[1] w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${
-                    isOffset
-                      ? "bg-[var(--tint-accent-2)]"
-                      : isSettlement
-                      ? "bg-[var(--tint-success)]"
-                      : "bg-[var(--tint-accent-2)]"
-                  }`}
+    <>
+      {sections.map((section) => (
+        <ListSection key={`${section.items[0].type}-${section.items[0].data.id}`} header={section.bucket} className="!mt-5 first:!mt-0">
+          {section.items.map((item) => {
+            if (item.type === "expense") {
+              const e = item.data;
+              const myShare = e.splits.find((sp) => sp.uid === currentUid)?.amount ?? 0;
+              const iPaid = e.paidBy === currentUid;
+              const row = (
+                <button
+                  type="button"
+                  onClick={() => onOpenExpense(e)}
+                  className="list-row is-tall"
+                  style={{ ["--sep-inset" as string]: "58px" }}
                 >
-                  {isOffset ? <OffsetIcon /> : isSettlement ? <CheckIcon /> : <ReceiptIcon />}
-                </span>
-
-                <div className="flex-1 min-w-0">
-                  {e && (
-                    <>
-                      <p className="text-[15px] text-[var(--text-primary)]">
-                        <span className="font-semibold">{memberName(e.createdBy)}</span>
-                        <span className="text-[var(--text-tertiary)]">
-                          {e.editAction === "edited" ? " edited " : " added "}
+                  <span className="icon-tile" style={{ background: categoryTint(e.category) }}>
+                    <CategoryGlyph id={e.category} size={18} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block t-body text-[var(--text-primary)] truncate">{e.description}</span>
+                    <span className="block t-subhead text-[var(--text-secondary)] truncate mt-px">
+                      {memberName(e.paidBy)} paid {formatCurrency(e.amount)}
+                      {e.editAction === "edited" ? " · Edited" : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    {myShare > 0 || iPaid ? (
+                      <>
+                        <span className="block t-caption text-[var(--text-secondary)]">
+                          {iPaid ? "you lent" : "you owe"}
                         </span>
-                        <span className="font-semibold text-[var(--brand)]">{e.description}</span>
-                      </p>
-                      <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                        {formatCurrency(e.amount)} · split {e.splits.length} ways
-                      </p>
-                      {isAdmin && (
-                        <div className="flex gap-3 mt-1">
-                          <button onClick={(ev) => { ev.stopPropagation(); onEditExpense(e); }} className="text-[12px] text-[var(--brand)] tap-shrink">Edit</button>
-                          <button onClick={(ev) => { ev.stopPropagation(); onDeleteExpense(e); }} className="text-[12px] text-[var(--neg)] tap-shrink">Delete</button>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {s && (
-                    <>
-                      <p className="text-[15px] text-[var(--text-primary)]">
-                        {s.kind === "transfer" ? (
-                          <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> sent </span><span className="font-semibold text-[var(--pos)]">{memberName(s.toUid)}</span><span className="text-[var(--text-tertiary)]"> directly</span></>
-                        ) : isOffset ? (
-                          <><span className="text-[var(--text-tertiary)]">Cross-group offset · </span><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> and </span><span className="font-semibold">{memberName(s.toUid)}</span></>
-                        ) : s.status === "pending" ? (
-                          <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> requested from </span><span className="font-semibold">{memberName(s.toUid)}</span></>
-                        ) : s.status === "rejected" ? (
-                          <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> — request rejected</span></>
-                        ) : (
-                          <><span className="font-semibold">{memberName(s.fromUid)}</span><span className="text-[var(--text-tertiary)]"> paid </span><span className="font-semibold text-[var(--pos)]">{memberName(s.toUid)}</span></>
-                        )}
-                      </p>
-                      <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                        {formatCurrency(s.amount)}
-                        {s.kind === "transfer" ? " · direct payment" : isOffset ? " · no money moved" : ""}
-                        {s.note ? ` · ${s.note}` : ""}
-                      </p>
-                      {s.receiptUrls.length > 0 && (
-                        <div className="flex gap-2 mt-1">
-                          {s.receiptUrls.map((url, ri) => (
-                            <a key={ri} href={url} target="_blank" rel="noopener noreferrer" className="text-[12px] text-[var(--brand)]">Screenshot {ri + 1}</a>
-                          ))}
-                        </div>
-                      )}
-                      {/* Whoever didn't raise the record is the one who acts on
-                          it — that's the payee for a normal claim, and the other
-                          side for a cross-group offset. */}
-                      {canRespondToSettlement(s, currentUid) && (
-                        <div className="flex gap-2 mt-1.5">
-                          <button onClick={(ev) => { ev.stopPropagation(); onApprove(s); }} className="rounded-full bg-[var(--brand-solid)] text-white px-3 py-1 text-[12px] font-medium tap-shrink">
-                            {isOffset ? "Accept offset" : "Approve"}
-                          </button>
-                          {canForward && !isOffset && s.toUid === currentUid && (
-                            <button onClick={(ev) => { ev.stopPropagation(); onForward(s); }} className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3 py-1 text-[12px] font-medium tap-shrink">Forward</button>
-                          )}
-                          <button onClick={(ev) => { ev.stopPropagation(); onReject(s); }} className="rounded-full bg-[var(--fill)] text-[var(--text-secondary)] px-3 py-1 text-[12px] font-medium tap-shrink">Reject</button>
-                        </div>
-                      )}
-                    </>
-                  )}
+                        <span
+                          className={`block t-subhead font-semibold t-numeral ${
+                            iPaid ? "text-[var(--pos)]" : "text-[var(--neg)]"
+                          }`}
+                        >
+                          {formatCurrency(iPaid ? e.amount - myShare : myShare)}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="t-footnote text-[var(--text-secondary)]">not involved</span>
+                    )}
+                  </span>
+                  <ChevronRight className="row-chevron -mr-1" />
+                </button>
+              );
+              return isAdmin && !e.id.startsWith("tmp-") ? (
+                <SwipeRow
+                  key={`expense-${e.id}`}
+                  separatorInset={58}
+                  actions={[{ label: "Delete", tone: "destructive", onClick: () => onDeleteExpense(e) }]}
+                >
+                  {row}
+                </SwipeRow>
+              ) : (
+                <div key={`expense-${e.id}`} className="list-row-wrap" style={{ ["--sep-inset" as string]: "58px" }}>
+                  {row}
                 </div>
+              );
+            }
 
-                <div className="flex items-center gap-1 shrink-0">
-                  <span className="text-[12px] text-[var(--text-tertiary)]">{timeLabel(item.ts)}</span>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text-quaternary)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="m9 18 6-6-6-6" />
-                  </svg>
-                </div>
+            const s = item.data;
+            const isOffset = s.kind === "offset";
+            const respond = canRespondToSettlement(s, currentUid);
+            const title =
+              s.kind === "transfer"
+                ? `${memberName(s.fromUid)} paid ${memberName(s.toUid)} directly`
+                : isOffset
+                ? `${memberName(s.fromUid)} and ${memberName(s.toUid)} offset balances`
+                : s.status === "pending"
+                ? `${memberName(s.fromUid)} → ${memberName(s.toUid)}`
+                : s.status === "rejected"
+                ? `${memberName(s.fromUid)} → ${memberName(s.toUid)}`
+                : `${memberName(s.fromUid)} paid ${memberName(s.toUid)}`;
+            const status =
+              s.status === "pending"
+                ? respond
+                  ? "Waiting for you"
+                  : "Waiting for approval"
+                : s.status === "rejected"
+                ? "Declined"
+                : isOffset
+                ? "No money moved"
+                : "Settled";
+            const statusTone =
+              s.status === "pending" ? "text-[var(--warning)]" : s.status === "rejected" ? "text-[var(--neg)]" : "text-[var(--text-secondary)]";
+            return (
+              <div key={`settlement-${s.id}`} className="list-row-wrap" style={{ ["--sep-inset" as string]: "58px" }}>
+                <button type="button" onClick={() => onOpenSettlement(s)} className="list-row is-tall">
+                  <span
+                    className="icon-tile"
+                    style={{
+                      background: isOffset ? "var(--indigo)" : s.status === "rejected" ? "var(--gray)" : s.status === "pending" ? "var(--orange)" : "var(--green)",
+                    }}
+                  >
+                    {isOffset ? <Arrows size={17} /> : <CheckCircle size={18} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block t-body text-[var(--text-primary)] truncate">{title}</span>
+                    <span className={`block t-subhead truncate mt-px ${statusTone}`}>
+                      {status}
+                      {s.note ? <span className="text-[var(--text-secondary)]"> · {s.note}</span> : null}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block t-subhead font-semibold t-numeral text-[var(--text-primary)]">
+                      {formatCurrency(s.amount)}
+                    </span>
+                    <span className="block t-caption text-[var(--text-secondary)]">{timeLabel(item.ts)}</span>
+                  </span>
+                  <ChevronRight className="row-chevron -mr-1" />
+                </button>
+                {respond && (
+                  <div className="flex gap-2 px-4 pb-3 -mt-0.5 pl-[58px]">
+                    <button
+                      type="button"
+                      onClick={() => onApprove(s)}
+                      className="btn-prominent btn-small"
+                    >
+                      {isOffset ? "Accept" : "Approve"}
+                    </button>
+                    {canForward && !isOffset && s.toUid === currentUid && (
+                      <button type="button" onClick={() => onForward(s)} className="btn-gray btn-small">
+                        Forward
+                      </button>
+                    )}
+                    <button type="button" onClick={() => onReject(s)} className="btn-gray btn-small !text-[var(--neg)]">
+                      Decline
+                    </button>
+                  </div>
+                )}
               </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
+            );
+          })}
+        </ListSection>
+      ))}
+    </>
   );
 }

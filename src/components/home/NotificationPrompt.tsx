@@ -75,51 +75,35 @@ export default function NotificationPrompt({ uid, hasGroups }: { uid: string; ha
   }
 
   return (
-    <section
-      aria-labelledby="push-prompt-title"
-      className="mt-4 bg-[var(--surface)] rounded-[var(--radius-card)] p-4 shadow-[var(--shadow-card)]"
-    >
+    <section aria-labelledby="push-prompt-title" className="list-section mt-4 px-4 pt-4 pb-3">
       <div className="flex items-start gap-3">
-        <span
-          aria-hidden
-          className="w-10 h-10 shrink-0 rounded-xl bg-[var(--tint-accent)] text-[var(--brand)] flex items-center justify-center"
-        >
+        <span aria-hidden className="icon-tile !w-10 !h-10 !rounded-[11px]" style={{ background: "var(--red)" }}>
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
-            <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+            <path d="M18 8.5a6 6 0 0 0-12 0c0 6.5-2.5 8.5-2.5 8.5h17S18 15 18 8.5" />
+            <path d="M10.3 20.5a2 2 0 0 0 3.4 0" />
           </svg>
         </span>
         <div className="min-w-0 flex-1">
-          <h2 id="push-prompt-title" className="text-[16px] font-semibold text-[var(--text-primary)]">
-            Turn on notifications
+          <h2 id="push-prompt-title" className="t-headline text-[var(--text-primary)]">
+            Turn On Notifications
           </h2>
-          <p className="text-[14px] text-[var(--text-secondary)] mt-0.5">
+          <p className="t-subhead text-[var(--text-secondary)] mt-0.5">
             Know when friends add expenses, ask you to confirm a payment, or pay you back.
           </p>
           {message && (
-            <p role="status" className="text-[13px] text-[var(--text-secondary)] mt-2">
+            <p role="status" className="t-footnote text-[var(--neg)] mt-2">
               {message}
             </p>
           )}
-          <div className="flex items-center gap-2 mt-3">
-            <button
-              type="button"
-              onClick={turnOn}
-              disabled={busy}
-              className="min-h-11 px-4 rounded-full bg-[var(--brand-solid)] text-[var(--brand-fg)] text-[15px] font-semibold tap-shrink disabled:opacity-50"
-            >
-              {busy ? "Turning on…" : "Turn on"}
-            </button>
-            <button
-              type="button"
-              onClick={notNow}
-              disabled={busy}
-              className="min-h-11 px-4 rounded-full text-[15px] font-medium text-[var(--text-secondary)] tap-shrink"
-            >
-              Not now
-            </button>
-          </div>
         </div>
+      </div>
+      <div className="flex items-center gap-2 mt-3.5">
+        <button type="button" onClick={notNow} disabled={busy} className="btn-gray btn-small flex-1 !min-h-[40px]">
+          Not Now
+        </button>
+        <button type="button" onClick={turnOn} disabled={busy} className="btn-prominent btn-small flex-1 !min-h-[40px]">
+          {busy ? "Turning On…" : "Turn On"}
+        </button>
       </div>
     </section>
   );

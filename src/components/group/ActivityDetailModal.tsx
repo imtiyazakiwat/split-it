@@ -1,9 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { Group, Expense, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
 import { categoryMeta } from "@/lib/categories";
 import GlassModal from "@/components/ui/GlassModal";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
+import { ButtonRow, ListSection, Row } from "@/components/ui/List";
+import { Avatar } from "@/components/ui/Controls";
+import { CategoryGlyph, CheckCircle, categoryTint } from "@/components/ui/Icons";
 
 function fullDate(ts: number): string {
   return new Date(ts).toLocaleString("en-IN", {
@@ -15,6 +20,27 @@ function fullDate(ts: number): string {
   });
 }
 
+function Receipts({ urls, label }: { urls: string[]; label: string }) {
+  if (urls.length === 0) return null;
+  return (
+    <ListSection elevated header={label}>
+      <div className="flex gap-2.5 flex-wrap p-3">
+        {urls.map((url, i) => (
+          <a key={url + i} href={url} target="_blank" rel="noopener noreferrer" className="tap-shrink">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={url} alt={`${label} ${i + 1}`} className="w-[72px] h-[72px] rounded-[12px] object-cover bg-[var(--fill-soft)]" />
+          </a>
+        ))}
+      </div>
+    </ListSection>
+  );
+}
+
+/**
+ * Detail for one ledger item. Edit opens the edit sheet; Delete lives at the
+ * bottom behind a confirmation (the list also offers swipe-to-delete with
+ * Undo).
+ */
 export default function ActivityDetailModal({
   expense,
   settlement,
@@ -36,155 +62,113 @@ export default function ActivityDetailModal({
   onDeleteExpense?: (e: Expense) => void;
   onClose: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   if (expense) {
     const cat = categoryMeta(expense.category);
     return (
-      <GlassModal title="Expense details" onClose={onClose}>
-        <div className="space-y-4">
-          <div className="flex items-center gap-3">
-            <span className="w-12 h-12 rounded-2xl bg-[var(--tint-accent-2)] flex items-center justify-center text-[24px] shrink-0">
-              {cat.emoji}
-            </span>
-            <div className="min-w-0">
-              <p className="text-[18px] font-bold text-[var(--text-primary)] truncate">{expense.description}</p>
-              <p className="text-[13px] text-[var(--text-tertiary)]">{cat.label}</p>
-            </div>
-            <p className="ml-auto text-[22px] font-extrabold text-[var(--text-primary)]">{formatCurrency(expense.amount)}</p>
-          </div>
-
-          <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3 space-y-1.5">
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Paid by</span>
-              <span className="font-medium text-[var(--text-primary)]">{memberName(expense.paidBy)}</span>
-            </div>
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Split</span>
-              <span className="font-medium text-[var(--text-primary)]">
-                {expense.splitType === "equal" ? "Equally" : expense.splitType} · {expense.splits.length} ways
-              </span>
-            </div>
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Date</span>
-              <span className="font-medium text-[var(--text-primary)]">{fullDate(expense.updatedAt || expense.createdAt)}</span>
-            </div>
-          </div>
-
-          <div>
-            <p className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Breakdown</p>
-            <div className="space-y-1.5">
-              {expense.splits.map((sp) => {
-                const isPayer = sp.uid === expense.paidBy;
-                const isMe = sp.uid === currentUid;
-                return (
-                  <div key={sp.uid} className="flex items-center gap-2.5">
-                    {group.members[sp.uid]?.photoURL ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={group.members[sp.uid].photoURL} alt="" className="w-8 h-8 rounded-full object-cover shrink-0" />
-                    ) : (
-                      <span className="w-8 h-8 rounded-full bg-[var(--fill)] flex items-center justify-center text-[12px] font-medium text-[var(--text-secondary)] shrink-0">
-                        {(group.members[sp.uid]?.displayName || "?").charAt(0).toUpperCase()}
-                      </span>
-                    )}
-                    <span className="text-[14px] text-[var(--text-primary)] flex-1 truncate">
-                      {isMe ? "You" : memberName(sp.uid)}
-                      {isPayer && <span className="ml-1.5 text-[11px] text-[var(--pos)] font-medium">paid</span>}
-                    </span>
-                    <span className="text-[14px] font-semibold text-[var(--text-primary)]">{formatCurrency(sp.amount)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {expense.receiptUrls.length > 0 && (
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Receipts</p>
-              <div className="flex gap-2 flex-wrap">
-                {expense.receiptUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`Receipt ${i + 1}`} className="w-16 h-16 rounded-lg object-cover border border-[var(--border-subtle)]" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {isAdmin && (
-            <div className="flex gap-2 pt-1">
-              {onEditExpense && (
-                <button
-                  onClick={() => { onEditExpense(expense); onClose(); }}
-                  className="flex-1 rounded-full bg-[var(--brand-solid)] text-white py-2.5 text-[14px] font-medium tap-shrink"
-                >
-                  Edit
-                </button>
-              )}
-              {onDeleteExpense && (
-                <button
-                  onClick={() => { onDeleteExpense(expense); onClose(); }}
-                  className="flex-1 rounded-full bg-[var(--tint-danger-soft)] text-[var(--neg)] py-2.5 text-[14px] font-medium tap-shrink"
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          )}
+      <GlassModal title="Expense" onClose={onClose}>
+        <div className="flex flex-col items-center text-center pt-2 pb-1">
+          <span className="w-14 h-14 rounded-[16px] grid place-items-center text-white" style={{ background: categoryTint(expense.category) }}>
+            <CategoryGlyph id={expense.category} size={28} />
+          </span>
+          <p className="t-headline text-[var(--text-primary)] mt-3 max-w-full truncate selectable">{expense.description}</p>
+          <p className="t-large-title t-numeral text-[var(--text-primary)] mt-0.5">{formatCurrency(expense.amount)}</p>
+          <p className="t-subhead text-[var(--text-secondary)]">{cat.label}</p>
         </div>
+
+        <ListSection elevated>
+          <Row title="Paid by" detail={memberName(expense.paidBy)} />
+          <Row
+            title="Split"
+            detail={`${expense.splitType === "equal" ? "Equally" : expense.splitType === "exact" ? "By amount" : "By percentage"} · ${expense.splits.length}`}
+          />
+          <Row title="Date" detail={fullDate(expense.updatedAt || expense.createdAt)} />
+        </ListSection>
+
+        <ListSection elevated header="Shares">
+          {expense.splits.map((sp) => (
+            <Row
+              key={sp.uid}
+              leading={<Avatar name={group.members[sp.uid]?.displayName || memberName(sp.uid)} photoURL={group.members[sp.uid]?.photoURL} size={30} seed={sp.uid} />}
+              separatorInset={58}
+              title={sp.uid === currentUid ? "You" : memberName(sp.uid)}
+              subtitle={sp.uid === expense.paidBy ? "Paid" : undefined}
+              detail={<span className="t-numeral text-[var(--text-primary)]">{formatCurrency(sp.amount)}</span>}
+            />
+          ))}
+        </ListSection>
+
+        <Receipts urls={expense.receiptUrls} label="Receipts" />
+
+        {isAdmin && (onEditExpense || onDeleteExpense) && (
+          <ListSection elevated>
+            {onEditExpense && (
+              <ButtonRow
+                onClick={() => {
+                  onEditExpense(expense);
+                  onClose();
+                }}
+                title="Edit Expense"
+                action
+              />
+            )}
+            {onDeleteExpense && <ButtonRow onClick={() => setConfirmDelete(true)} title="Delete Expense" destructive />}
+          </ListSection>
+        )}
+
+        {confirmDelete && onDeleteExpense && (
+          <ConfirmDialog
+            title={`Delete “${expense.description}”?`}
+            message="It’s removed from everyone’s balances. You can undo for a few seconds."
+            confirmLabel="Delete Expense"
+            destructive
+            onConfirm={() => {
+              onDeleteExpense(expense);
+              onClose();
+            }}
+            onClose={() => setConfirmDelete(false)}
+          />
+        )}
       </GlassModal>
     );
   }
 
   if (settlement) {
     const s = settlement;
+    const isOffset = s.kind === "offset";
+    const statusText =
+      s.status === "pending"
+        ? "Waiting for approval"
+        : s.status === "rejected"
+        ? "Declined"
+        : isOffset
+        ? "Offset · no money moved"
+        : "Settled";
     const statusColor =
-      s.status === "approved" ? "text-[var(--pos)] bg-[var(--tint-success-soft)]" : s.status === "pending" ? "text-[var(--warning)] bg-[var(--tint-warning)]" : "text-[var(--neg)] bg-[var(--tint-danger-soft)]";
+      s.status === "approved" ? "var(--green)" : s.status === "pending" ? "var(--orange)" : "var(--gray)";
     return (
-      <GlassModal title="Payment details" onClose={onClose}>
-        <div className="space-y-4">
-          <div className="text-center">
-            <p className="text-[28px] font-extrabold text-[var(--text-primary)]">{formatCurrency(s.amount)}</p>
-            <p className="text-[14px] text-[var(--text-secondary)] mt-1">
-              <span className="font-medium">{memberName(s.fromUid)}</span> → <span className="font-medium">{memberName(s.toUid)}</span>
-            </p>
-            <span className={`inline-block mt-2 rounded-full px-3 py-0.5 text-[12px] font-medium capitalize ${statusColor}`}>
-              {s.status}
-            </span>
-          </div>
-
-          <div className="rounded-[var(--radius-md)] bg-[var(--fill-soft)] p-3 space-y-1.5">
-            <div className="flex justify-between text-[14px]">
-              <span className="text-[var(--text-tertiary)]">Date</span>
-              <span className="font-medium text-[var(--text-primary)]">{fullDate(s.createdAt)}</span>
-            </div>
-            {s.note && (
-              <div className="flex justify-between text-[14px] gap-4">
-                <span className="text-[var(--text-tertiary)]">Note</span>
-                <span className="font-medium text-[var(--text-primary)] text-right">{s.note}</span>
-              </div>
-            )}
-            {s.expenseIds && s.expenseIds.length > 0 && (
-              <div className="flex justify-between text-[14px]">
-                <span className="text-[var(--text-tertiary)]">Covers</span>
-                <span className="font-medium text-[var(--text-primary)]">{s.expenseIds.length} expense{s.expenseIds.length !== 1 ? "s" : ""}</span>
-              </div>
-            )}
-          </div>
-
-          {s.receiptUrls.length > 0 && (
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-secondary)] mb-2">Screenshots</p>
-              <div className="flex gap-2 flex-wrap">
-                {s.receiptUrls.map((url, i) => (
-                  <a key={i} href={url} target="_blank" rel="noopener noreferrer">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={url} alt={`Screenshot ${i + 1}`} className="w-16 h-16 rounded-lg object-cover border border-[var(--border-subtle)]" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
+      <GlassModal title="Payment" onClose={onClose}>
+        <div className="flex flex-col items-center text-center pt-2 pb-1">
+          <span className="w-14 h-14 rounded-full grid place-items-center text-white" style={{ background: statusColor }}>
+            <CheckCircle size={28} />
+          </span>
+          <p className="t-large-title t-numeral text-[var(--text-primary)] mt-3">{formatCurrency(s.amount)}</p>
+          <p className="t-subhead text-[var(--text-secondary)] mt-0.5">
+            {memberName(s.fromUid)} → {memberName(s.toUid)}
+          </p>
         </div>
+
+        <ListSection elevated>
+          <Row title="Status" detail={statusText} />
+          <Row title="Date" detail={fullDate(s.createdAt)} />
+          {s.note && <Row title="Note" detail={<span className="selectable">{s.note}</span>} />}
+          {s.expenseIds && s.expenseIds.length > 0 && (
+            <Row title="Covers" detail={`${s.expenseIds.length} expense${s.expenseIds.length !== 1 ? "s" : ""}`} />
+          )}
+        </ListSection>
+
+        <Receipts urls={s.receiptUrls} label="Screenshots" />
       </GlassModal>
     );
   }

@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { GroupDataProvider } from "@/lib/group-data-context";
@@ -9,15 +9,14 @@ import NotificationSetup from "@/components/NotificationSetup";
 import SplashGate from "@/components/SplashGate";
 import { ToastProvider } from "@/components/ui/Toast";
 import PageTransition from "@/components/PageTransition";
+import BottomNav from "@/components/home/BottomNav";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// SF Pro renders on Apple devices via -apple-system; Inter is the closest
+// fallback elsewhere, so non-Apple screens keep SF-like metrics.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -27,7 +26,9 @@ export const metadata: Metadata = {
   applicationName: "SplitIt",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    // "default" keeps dark status-bar text on light backgrounds; the
+    // translucent style forced white text that vanished on #F2F2F7.
+    statusBarStyle: "default",
     title: "SplitIt",
   },
   icons: {
@@ -60,7 +61,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${inter.variable} h-full antialiased`}
     >
       <head>
         {/* Apple splash screens — matched by exact device-width/height/ratio media queries */}
@@ -80,6 +81,8 @@ export default function RootLayout({
             <PaymentsProvider>
               <ToastProvider>
                 <PageTransition>{children}</PageTransition>
+                {/* Outside the transition so it persists across pushes. */}
+                <BottomNav />
                 <SplashGate />
                 <PwaBootstrap />
                 <NotificationSetup />

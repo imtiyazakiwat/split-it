@@ -1,28 +1,15 @@
-import Logo from "@/components/Logo";
+import Image from "next/image";
 
 /**
- * Full-screen animated brand splash. The "split it" wordmark pops in with a
- * shimmer sweep, over a soft indigo-tinted backdrop, with a small loader.
+ * Launch screen. Apple's guidance: show the app's first frame, not a branded
+ * animation, so launch feels instant. The icon fades in on the system
+ * background and the screen dissolves once auth resolves.
  */
 export default function SplashScreen() {
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-b from-white to-indigo-50 dark:from-black dark:to-indigo-950">
-      <div className="relative animate-splash-logo">
-        <Logo className="h-16 w-auto" />
-        {/* shimmer sweep clipped to the logo area */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden">
-          <div className="animate-splash-shimmer absolute top-0 -left-1/3 h-full w-1/3 bg-gradient-to-r from-transparent via-white/70 to-transparent" />
-        </div>
-      </div>
-
-      <div className="flex items-center gap-1.5 mt-8">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="w-2 h-2 rounded-full bg-indigo-500 dark:bg-indigo-400 animate-splash-dot"
-            style={{ animationDelay: `${i * 0.16}s` }}
-          />
-        ))}
+    <div className="w-full h-full flex items-center justify-center bg-[var(--background)]">
+      <div className="animate-splash-logo w-[96px] h-[96px] rounded-[24px] overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+        <Image src="/icon-512.png" alt="SplitIt" width={96} height={96} priority className="w-full h-full" />
       </div>
     </div>
   );

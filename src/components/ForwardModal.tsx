@@ -5,7 +5,9 @@ import { addSettlementRequest, updateSettlementStatus } from "@/lib/firestore";
 import { formatCurrency } from "@/lib/balance";
 import { toPaise } from "@/lib/money";
 import GlassModal from "@/components/ui/GlassModal";
-import GlassButton from "@/components/ui/GlassButton";
+import { FieldRow, ListSection } from "@/components/ui/List";
+import { EmptyState } from "@/components/ui/Controls";
+import { Arrows, Checkmark } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
 
 interface Creditor {
@@ -91,32 +93,29 @@ export default function ForwardModal({
   }
 
   return (
-    <GlassModal title="Forward payment" onClose={onClose}>
+    <GlassModal
+      title="Forward Payment"
+      onClose={onClose}
+      confirm={
+        creditors.length > 0
+          ? { label: "Forward", formId: "forward-form", disabled: !target || !(parseFloat(amount) > 0), busy, onConfirm: () => {} }
+          : undefined
+      }
+    >
       {creditors.length === 0 ? (
-        <div className="space-y-4">
-          <p className="text-sm text-[var(--text-secondary)]">
-            You don&apos;t owe anyone in this group, so there&apos;s no one to
-            forward this payment to.
-          </p>
-          <GlassButton type="button" variant="ghost" onClick={onClose} className="w-full">
-            Close
-          </GlassButton>
-        </div>
+        <EmptyState
+          icon={<Arrows size={48} weight={1.4} />}
+          title="No One to Forward To"
+          message="You don’t owe anyone in this group, so there’s no one to pass this payment on to."
+        />
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            {fromName} is paying you {formatCurrency(incomingAmount)}. Pass it on
-            to someone you owe.
+        <form id="forward-form" onSubmit={handleSubmit}>
+          <p className="t-subhead text-[var(--text-secondary)] text-center px-4 pt-1">
+            {fromName} is paying you {formatCurrency(incomingAmount)}. Pass it on to someone you owe.
           </p>
 
-          {/* Option rows with checkmarks, not a <select>: recognition over
-              recall — every creditor and what you owe them stays visible, so
-              nothing has to be remembered to choose. */}
-          <div role="radiogroup" aria-label="Forward to">
-            <p className="text-sm font-medium text-[var(--text-secondary)] mb-1.5">
-              Forward to
-            </p>
-            <div className="divide-y divide-[var(--border-subtle)] rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] overflow-hidden">
+          <ListSection elevated header="Forward to">
+            <div role="radiogroup" aria-label="Forward to">
               {creditors.map((c) => {
                 const selected = c.uid === targetUid;
                 return (
@@ -126,52 +125,38 @@ export default function ForwardModal({
                     role="radio"
                     aria-checked={selected}
                     onClick={() => handleTargetChange(c.uid)}
-                    className="w-full flex items-center gap-3 px-3.5 py-3 text-left tap-shrink min-h-[44px]"
+                    className="list-row"
                   >
                     <span className="min-w-0 flex-1">
-                      <span className="block text-[16px] text-[var(--text-primary)] truncate">
-                        {c.name}
-                      </span>
-                      <span className="block text-[13px] text-[var(--text-tertiary)]">
-                        you owe {formatCurrency(c.amount)}
-                      </span>
+                      <span className="block t-body truncate text-[var(--text-primary)]">{c.name}</span>
+                      <span className="block t-footnote text-[var(--text-secondary)]">You owe {formatCurrency(c.amount)}</span>
                     </span>
-                    {selected && (
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                        <path d="m5 12.5 4.5 4.5L19 7.5" />
-                      </svg>
-                    )}
+                    {selected && <span className="text-[var(--brand)]"><Checkmark size={20} /></span>}
                   </button>
                 );
               })}
             </div>
-          </div>
+          </ListSection>
 
-          <div>
-            <label className="text-sm font-medium text-[var(--text-secondary)] block mb-1">
-              Amount
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              inputMode="decimal"
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              placeholder="0.00"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-            />
-          </div>
+          <ListSection
+            elevated
+            footer={`This approves ${fromName}'s payment and sends a request to ${target?.name ?? "them"}, who approves it.`}
+          >
+            <FieldRow label="Amount">
+              <input
+                type="number"
+                step="0.01"
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                placeholder="0.00"
+                aria-label="Amount"
+                className="row-input is-trailing py-[13px] t-numeral"
+              />
+            </FieldRow>
+          </ListSection>
 
-          <p className="text-[13px] text-[var(--text-tertiary)]">
-            This approves {fromName}&apos;s payment and sends a settlement request
-            to {target?.name}, who will need to approve it.
-          </p>
-
-          {error && <p className="text-sm text-[var(--danger)]">{error}</p>}
-
-          <GlassButton disabled={busy} className="w-full">
-            {busy ? "Forwarding…" : "Forward Payment"}
-          </GlassButton>
+          {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
         </form>
       )}
     </GlassModal>

@@ -9,6 +9,7 @@ import {
   ReactNode,
 } from "react";
 import { useAuth } from "./auth-context";
+import { useGroupData } from "./group-data-context";
 // Pure selectors only — the subscribe functions are dynamically imported in the
 // effects below so Firestore stays off the critical path.
 import { pendingForMe, unappliedForMe } from "./transfer-queries";
@@ -32,7 +33,7 @@ interface PaymentsContextValue {
   transfers: DirectTransfer[];
   /** Incoming transfers waiting on the user to say what they were. */
   pendingIncoming: DirectTransfer[];
-  /** Confirmed transfers the user never attributed to a group. */
+  /** Confirmed transfers that could still settle a group balance the sender owes. */
   unattributed: DirectTransfer[];
   threads: ChatThread[];
   threadWith: (otherUid: string) => ChatThread | undefined;
@@ -140,6 +141,10 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
   // Only report a failure belonging to the uid currently in play.
   const error = errorState && errorState.uid === uid ? errorState.message : null;
 
+  // Group balances decide whether a confirmed-but-unassigned payment still
+  // needs the receiver's attention (see unappliedForMe).
+  const { datasets } = useGroupData();
+
   const value = useMemo<PaymentsContextValue>(() => {
     const transfers = transferState.uid === uid ? transferState.items : NO_TRANSFERS;
     const threads = threadState.uid === uid ? threadState.items : NO_THREADS;
@@ -150,7 +155,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
     return {
       transfers,
       pendingIncoming: uid ? pendingForMe(transfers, uid) : NO_TRANSFERS,
-      unattributed: uid ? unappliedForMe(transfers, uid) : NO_TRANSFERS,
+      unattributed: uid ? unappliedForMe(transfers, uid, datasets) : NO_TRANSFERS,
       threads,
       threadWith,
       unreadFrom: (otherUid: string) => (uid ? hasUnread(threadWith(otherUid), uid) : false),
@@ -162,7 +167,7 @@ export function PaymentsProvider({ children }: { children: ReactNode }) {
         threadState.loaded,
       error,
     };
-  }, [uid, transferState, threadState, error]);
+  }, [uid, transferState, threadState, error, datasets]);
 
   return <PaymentsContext.Provider value={value}>{children}</PaymentsContext.Provider>;
 }

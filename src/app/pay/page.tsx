@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
@@ -11,11 +10,13 @@ import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { DirectTransfer } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
-import BottomNav from "@/components/home/BottomNav";
 import GlassModal from "@/components/ui/GlassModal";
 import Skeleton from "@/components/ui/Skeleton";
-import NavHint from "@/components/NavHint";
 import IncludeTransferSheet from "@/components/pay/IncludeTransferSheet";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import { ButtonRow, IconTile, LinkRow, ListSection } from "@/components/ui/List";
+import { Avatar, EmptyState, SearchField } from "@/components/ui/Controls";
+import { Plus, RupeeCircle } from "@/components/ui/Icons";
 
 /**
  * The Pay tab: one row per person, the way a payments app lists contacts rather
@@ -36,37 +37,6 @@ function timeAgo(ts: number): string {
   const d = Math.floor(h / 24);
   if (d < 7) return `${d}d`;
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-}
-
-function Avatar({
-  name,
-  photoURL,
-  size = 44,
-}: {
-  name: string;
-  photoURL?: string;
-  size?: number;
-}) {
-  if (photoURL) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={photoURL}
-        alt=""
-        className="rounded-full object-cover shrink-0"
-        style={{ width: size, height: size }}
-      />
-    );
-  }
-  return (
-    <span
-      className="rounded-full bg-[var(--fill)] flex items-center justify-center shrink-0 font-semibold text-[var(--text-secondary)]"
-      style={{ width: size, height: size, fontSize: size * 0.36 }}
-      aria-hidden
-    >
-      {name.charAt(0).toUpperCase()}
-    </span>
-  );
 }
 
 export default function PayPage() {
@@ -148,13 +118,19 @@ export default function PayPage() {
 
   if (loading || (user && !groupsLoaded)) {
     return (
-      <div className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] space-y-3">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-11 w-full" />
-        {[0, 1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-16 w-full" />
-        ))}
-      </div>
+      <Screen title="Pay" large>
+        <div className="list-section">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="list-row is-tall">
+              <Skeleton className="w-11 h-11 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-1/2 rounded-md" />
+                <Skeleton className="h-3 w-2/3 rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Screen>
     );
   }
   if (!user) return <LoginScreen />;
@@ -163,224 +139,146 @@ export default function PayPage() {
   const needsDecision = pendingIncoming.length + unattributed.length;
 
   return (
-    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
-      <main className="flex-1 max-w-md w-full mx-auto px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[calc(var(--nav-h)+env(safe-area-inset-bottom)+6rem)] scroll-momentum">
-        <div className="flex items-center justify-between pt-2">
-          <h1 className="text-[28px] font-extrabold text-[var(--text-primary)]">Pay</h1>
-          <div className="flex items-center gap-2">
-            {unreadCount > 0 && (
-              <span className="rounded-full bg-[var(--tint-accent)] px-3 py-1 text-[12px] font-semibold text-[var(--brand)]">
-                {unreadCount} unread
-              </span>
-            )}
-            <button
-              onClick={() => setShowPicker(true)}
-              aria-label="Send money"
-              className="grid place-items-center w-11 h-11 rounded-full bg-[var(--brand-solid)] text-white shadow-[var(--shadow-button)] tap-shrink"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        <p className="text-[15px] text-[var(--text-tertiary)] mt-1 mb-4">
-          Send money straight to someone, and see everything you&rsquo;ve settled.
-        </p>
-
-        {/* Money waiting on a decision from the current user. Deliberately the
-            first thing on the screen: until it's answered, somebody's balance is
-            wrong. */}
-        {needsDecision > 0 && (
-          <section className="mb-5">
-            <h2 className="text-[13px] font-semibold tracking-wide text-[var(--text-tertiary)] mb-2">
-              WAITING ON YOU
-            </h2>
-            <div className="space-y-2">
-              {pendingIncoming.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDecide(t)}
-                  className="w-full text-left rounded-[var(--radius-inner)] bg-[var(--tint-warning)] p-3.5 tap-shrink"
-                >
-                  <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                    {nameOf(t.fromUid)} sent you {formatCurrency(t.amount)}
-                  </p>
-                  <p className="text-[13px] text-[var(--text-secondary)] mt-0.5">
-                    {t.note ? `“${t.note}” · ` : ""}Confirm it and choose which balance it
-                    settles
-                  </p>
-                </button>
-              ))}
-              {unattributed.map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setDecide(t)}
-                  className="w-full text-left rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] p-3.5 tap-shrink"
-                >
-                  <p className="text-[15px] font-semibold text-[var(--text-primary)]">
-                    {formatCurrency(t.amount)} from {nameOf(t.fromUid)} isn&rsquo;t in any
-                    group
-                  </p>
-                  <p className="text-[13px] text-[var(--text-tertiary)] mt-0.5">
-                    You confirmed it — it counts as personal. Attach it to a group to settle a group balance.
-                  </p>
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {counterparties.length > 3 && (
-          <label className="block mb-3">
-            <span className="sr-only">Search people</span>
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search people"
-              className="w-full rounded-full border border-[var(--border-subtle)] bg-[var(--surface)] px-4 py-2.5 text-[16px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none focus:border-[var(--accent)]"
+    <Screen
+      title="Pay"
+      large
+      subtitle={unreadCount > 0 ? `${unreadCount} unread` : undefined}
+      trailing={
+        <BarButton prominent onClick={() => setShowPicker(true)} aria-label="Send money">
+          <Plus size={21} />
+        </BarButton>
+      }
+    >
+      {/* Money waiting on a decision from the current user comes first: until
+          it's answered, somebody's balance is wrong. */}
+      {needsDecision > 0 && (
+        <ListSection header="Waiting on You" className="!mt-0">
+          {pendingIncoming.map((t) => (
+            <ButtonRow
+              key={t.id}
+              onClick={() => setDecide(t)}
+              leading={<IconTile color="var(--orange)"><RupeeCircle size={18} /></IconTile>}
+              separatorInset={58}
+              tall
+              title={`${nameOf(t.fromUid)} sent you ${formatCurrency(t.amount)}`}
+              subtitle={t.note ? `“${t.note}” · Confirm and choose a group` : "Confirm and choose which balance it settles"}
+              chevron
             />
-          </label>
-        )}
+          ))}
+          {unattributed.map((t) => (
+            <ButtonRow
+              key={t.id}
+              onClick={() => setDecide(t)}
+              leading={<IconTile color="var(--gray)"><RupeeCircle size={18} /></IconTile>}
+              separatorInset={58}
+              tall
+              title={`${formatCurrency(t.amount)} from ${nameOf(t.fromUid)}`}
+              subtitle="Not in a group yet · Attach it to settle a group balance"
+              chevron
+            />
+          ))}
+        </ListSection>
+      )}
 
-        {counterparties.length === 0 ? (
-          <div className="rounded-[var(--radius-card)] bg-[var(--tint-accent)] p-6 text-center">
-            <p className="text-[17px] font-bold text-[var(--text-primary)]">
-              Nobody to pay yet
-            </p>
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-              Join or create a group first — you can pay anyone you share one with.
-            </p>
-            <button
-              onClick={() => router.push("/")}
-              className="mt-3 rounded-full bg-[var(--brand-solid)] text-white px-5 py-2.5 text-[15px] font-semibold tap-shrink"
-            >
-              Go to groups
+      {counterparties.length > 6 && (
+        <SearchField value={search} onChange={setSearch} placeholder="Search" label="Search people" className={needsDecision > 0 ? "mt-6" : ""} />
+      )}
+
+      {counterparties.length === 0 ? (
+        <EmptyState
+          icon={<RupeeCircle size={56} weight={1.4} />}
+          title="No One to Pay Yet"
+          message="You can pay anyone you share a group with. Create or join a group first."
+          action={
+            <button onClick={() => router.push("/")} className="btn-prominent">
+              Go to Groups
             </button>
-          </div>
-        ) : rows.length === 0 ? (
-          <p className="text-center text-[14px] text-[var(--text-tertiary)] py-10">
-            Nobody matches that search.
-          </p>
-        ) : (
-          <div className="space-y-1.5 stagger">
-            {rows.map((r) => {
-              const iOwe = !isSettled(r.net) && r.net > 0;
-              const theyOwe = !isSettled(r.net) && r.net < 0;
-              return (
-                // Link, not router.push: /chat/[uid] is a dynamic route, so
-                // without a prefetched shell every tap paid a cold server round
-                // trip while this screen stayed frozen on top.
-                <Link
-                  key={r.uid}
-                  href={`/chat/${r.uid}`}
-                  className="w-full text-left flex items-center gap-3 rounded-[var(--radius-inner)] bg-[var(--surface)] shadow-[var(--shadow-sm)] px-3.5 py-3 tap-shrink"
-                >
-                  <NavHint />
-                  <Avatar name={r.displayName} photoURL={r.photoURL} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <p className="text-[15px] font-semibold text-[var(--text-primary)] truncate">
-                        {r.displayName}
-                      </p>
-                      {r.unread && (
-                        <span
-                          className="h-2 w-2 rounded-full bg-[var(--brand)] shrink-0"
-                          aria-label="Unread messages"
-                        />
-                      )}
-                    </div>
-                    <p
-                      className={`text-[13px] truncate ${
-                        r.awaitingMe
-                          ? "text-[var(--warning)] font-medium"
-                          : "text-[var(--text-tertiary)]"
-                      }`}
-                    >
-                      {r.awaitingMe ? "Waiting for you to confirm a payment" : r.preview}
-                    </p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p
-                      className={`text-[15px] font-bold ${
-                        iOwe
-                          ? "text-[var(--neg)]"
-                          : theyOwe
-                          ? "text-[var(--pos)]"
-                          : "text-[var(--text-tertiary)]"
-                      }`}
-                    >
-                      {iOwe || theyOwe ? formatCurrency(Math.abs(r.net)) : "settled"}
-                    </p>
-                    <p className="text-[11px] text-[var(--text-tertiary)]">
-                      {iOwe
-                        ? "you owe"
-                        : theyOwe
-                        ? "owes you"
-                        : r.lastActivityAt
-                        ? timeAgo(r.lastActivityAt)
-                        : ""}
-                    </p>
-                  </div>
-                </Link>
-              );
-            })}
-          </div>
-        )}
-      </main>
-
-      <BottomNav active="pay" payBadge={unreadCount > 0 || needsDecision > 0} />
+          }
+        />
+      ) : rows.length === 0 ? (
+        <EmptyState icon={<RupeeCircle size={48} weight={1.4} />} title="No Results" message={`No one matches “${search}”.`} />
+      ) : (
+        <ListSection header={needsDecision > 0 ? "People" : undefined} className={needsDecision > 0 ? "" : "!mt-3"}>
+          {rows.map((r) => {
+            const iOwe = !isSettled(r.net) && r.net > 0;
+            const theyOwe = !isSettled(r.net) && r.net < 0;
+            return (
+              <LinkRow
+                key={r.uid}
+                href={`/chat/${r.uid}`}
+                tall
+                leading={
+                  <span className="relative">
+                    <Avatar name={r.displayName} photoURL={r.photoURL} size={44} seed={r.uid} />
+                    {r.unread && (
+                      <span className="absolute top-0 -left-1 w-[11px] h-[11px] rounded-full bg-[var(--blue)] ring-2 ring-[var(--surface)]" aria-label="Unread" />
+                    )}
+                  </span>
+                }
+                separatorInset={72}
+                title={<span className={r.unread ? "font-semibold" : ""}>{r.displayName}</span>}
+                subtitle={
+                  r.awaitingMe ? (
+                    <span className="text-[var(--warning)]">Waiting for you to confirm a payment</span>
+                  ) : (
+                    r.preview
+                  )
+                }
+                detail={
+                  <span className="flex flex-col items-end leading-tight">
+                    {iOwe || theyOwe ? (
+                      <>
+                        <span className="t-caption text-[var(--text-secondary)]">{iOwe ? "you owe" : "owes you"}</span>
+                        <span className={`t-subhead font-semibold t-numeral ${iOwe ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                          {formatCurrency(Math.abs(r.net))}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="t-subhead text-[var(--text-secondary)]">{r.lastActivityAt ? timeAgo(r.lastActivityAt) : "Settled"}</span>
+                    )}
+                  </span>
+                }
+              />
+            );
+          })}
+        </ListSection>
+      )}
 
       {showPicker && (
-        <GlassModal title="Send money to" onClose={() => setShowPicker(false)}>
-          <div className="space-y-3">
-            <input
-              type="search"
-              autoFocus
-              value={pickerQuery}
-              onChange={(e) => setPickerQuery(e.target.value)}
-              placeholder="Search people"
-              aria-label="Search people"
-              className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface)] px-3.5 py-2.5 text-[16px] text-[var(--text-primary)] outline-none focus:border-[var(--accent)]"
-            />
-            {pickerRows.length === 0 ? (
-              <p className="text-[13px] text-[var(--text-tertiary)] py-4 text-center">
-                {counterparties.length === 0
-                  ? "You can pay anyone you share a group with. Join a group first."
-                  : "Nobody matches that search."}
-              </p>
-            ) : (
-              <div className="space-y-1 max-h-72 overflow-y-auto scroll-momentum">
-                {pickerRows.map((c) => (
-                  <button
-                    key={c.uid}
-                    onClick={() => {
-                      setShowPicker(false);
-                      // The conversation is where paying happens, so the picker
-                      // hands off rather than stacking a second sheet on top.
-                      router.push(`/chat/${c.uid}?pay=1`);
-                    }}
-                    className="w-full text-left flex items-center gap-3 rounded-[var(--radius-md)] px-2 py-2 tap-shrink hover:bg-[var(--fill-soft)]"
-                  >
-                    <Avatar name={c.displayName} photoURL={c.photoURL} size={36} />
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[15px] font-medium text-[var(--text-primary)] truncate">
-                        {c.displayName}
-                      </p>
-                      <p className="text-[12px] text-[var(--text-tertiary)]">
-                        {!isSettled(c.net) && c.net > 0
-                          ? `You owe ${formatCurrency(c.net)}`
-                          : !isSettled(c.net) && c.net < 0
-                          ? `Owes you ${formatCurrency(-c.net)}`
-                          : "Settled up"}
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+        <GlassModal title="Send Money" large onClose={() => setShowPicker(false)}>
+          <SearchField value={pickerQuery} onChange={setPickerQuery} placeholder="Search" label="Search people" autoFocus className="mt-1" />
+          {pickerRows.length === 0 ? (
+            <p className="list-footer text-center !pt-6">
+              {counterparties.length === 0
+                ? "You can pay anyone you share a group with. Join a group first."
+                : `No one matches “${pickerQuery}”.`}
+            </p>
+          ) : (
+            <ListSection elevated className="!mt-4">
+              {pickerRows.map((c) => (
+                <ButtonRow
+                  key={c.uid}
+                  onClick={() => {
+                    setShowPicker(false);
+                    // The conversation is where paying happens, so the picker
+                    // hands off rather than stacking a second sheet on top.
+                    router.push(`/chat/${c.uid}?pay=1`);
+                  }}
+                  leading={<Avatar name={c.displayName} photoURL={c.photoURL} size={36} seed={c.uid} />}
+                  separatorInset={64}
+                  title={c.displayName}
+                  subtitle={
+                    !isSettled(c.net) && c.net > 0
+                      ? `You owe ${formatCurrency(c.net)}`
+                      : !isSettled(c.net) && c.net < 0
+                      ? `Owes you ${formatCurrency(-c.net)}`
+                      : "Settled up"
+                  }
+                  chevron
+                />
+              ))}
+            </ListSection>
+          )}
         </GlassModal>
       )}
 
@@ -393,6 +291,6 @@ export default function PayPage() {
           onClose={() => setDecide(null)}
         />
       )}
-    </div>
+    </Screen>
   );
 }
