@@ -58,3 +58,6 @@ ui-debug.log
 # committed so it can't be pulled into this repo's history by a stray `git add -A`.
 # Better still, move it out of the working tree.
 /mac-facelock/
+
+# Migration backups hold user ids and image URLs: keep them local.
+scripts/backups/

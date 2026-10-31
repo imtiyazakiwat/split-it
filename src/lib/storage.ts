@@ -1,46 +1,66 @@
-async function uploadToImgBB(file: File | Blob, _filename?: string): Promise<string> {
-  const apiKey = process.env.NEXT_PUBLIC_IMGBB_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      "NEXT_PUBLIC_IMGBB_API_KEY is not set. Add it to .env.local to enable image uploads."
-    );
+/**
+ * Image uploads go to Firebase Storage (the project's default bucket).
+ *
+ * ImgBB used to host them. Its links failed intermittently (HTTP 503 with an
+ * "image not found" placeholder) and some files vanished, which is how
+ * profile photos broke. scripts/migrate-imgbb-to-storage.mjs moved every
+ * existing image across; this module handles new ones.
+ *
+ * Layout (enforced by storage.rules): {folder}/{uploaderUid}/{random}.{ext}.
+ * Only the signed-in uploader can write under their uid, objects are
+ * images under 10 MB, and they are readable by anyone holding the download
+ * URL, the same exposure an ImgBB link had.
+ *
+ * The SDK is imported lazily so it never lands on the cold-start path.
+ */
+
+type Folder = "avatars" | "groups" | "receipts";
+
+const EXT: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/gif": "gif",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+
+async function uploadToStorage(blob: Blob, folder: Folder): Promise<string> {
+  const [{ getStorage, ref, uploadBytes, getDownloadURL }, { app, auth }] = await Promise.all([
+    import("firebase/storage"),
+    import("./firebase"),
+  ]);
+  const uid = auth.currentUser?.uid;
+  if (!uid) throw new Error("Sign in again to upload images.");
+  const type = blob.type && blob.type.startsWith("image/") ? blob.type : "image/jpeg";
+  const name = `${folder}/${uid}/${crypto.randomUUID()}.${EXT[type] || "jpg"}`;
+  const objectRef = ref(getStorage(app), name);
+  try {
+    await uploadBytes(objectRef, blob, {
+      contentType: type,
+      cacheControl: "public, max-age=31536000, immutable",
+    });
+  } catch (err) {
+    const code = (err as { code?: string })?.code || "";
+    if (code === "storage/unauthorized") {
+      throw new Error("That file can’t be uploaded. Use an image under 10 MB.");
+    }
+    if (code === "storage/retry-limit-exceeded" || code === "storage/canceled") {
+      throw new Error("The upload didn’t finish. Check your connection and try again.");
+    }
+    throw new Error("Couldn’t upload the image. Try again.");
   }
-  const formData = new FormData();
-  formData.append("image", file);
-  const res = await fetch(`https://api.imgbb.com/1/upload?key=${apiKey}`, {
-    method: "POST",
-    body: formData,
-  });
-  if (!res.ok) throw new Error(`ImgBB upload failed: ${res.status}`);
-  const data = await res.json();
-  if (!data?.data?.url) throw new Error("ImgBB upload succeeded but no URL was returned.");
-  return data.data.url as string;
-}
-
-export async function uploadReceipt(
-  _groupId: string,
-  file: File | Blob,
-  _filename?: string
-): Promise<string> {
-  return uploadToImgBB(file, _filename);
-}
-
-export async function uploadMultipleReceipts(
-  groupId: string,
-  files: File[]
-): Promise<string[]> {
-  const urls = await Promise.all(files.map((f) => uploadReceipt(groupId, f, f.name)));
-  return urls;
+  return getDownloadURL(objectRef);
 }
 
 /**
  * Downscales a photo in the browser before upload. A phone camera photo is
- * 3–8 MB; shown in a 44 pt circle it was the slowest thing on the screen, and
- * a busy image host times out on files that size, which is when avatars fell
- * back to initials. Avatars and group photos never render above ~96 pt, so
- * 512 px is plenty even at 3x. Falls back to the original on any failure.
+ * 3–8 MB; shown in a 44 pt circle it was the slowest thing on the screen.
+ * Avatars and group photos never render above ~96 pt, so 512 px is plenty
+ * even at 3x; receipts keep enough detail to read (2048 px). Falls back to
+ * the original on any failure.
  */
-async function downscale(file: File, maxEdge = 512): Promise<Blob> {
+async function downscale(file: File, maxEdge: number): Promise<Blob> {
   if (typeof window === "undefined" || !file.type.startsWith("image/")) return file;
   try {
     const bitmap = await createImageBitmap(file);
@@ -61,8 +81,17 @@ async function downscale(file: File, maxEdge = 512): Promise<Blob> {
   }
 }
 
-/** Profile and group photos: resized first, so they load fast everywhere. */
+export async function uploadReceipt(_groupId: string, file: File): Promise<string> {
+  return uploadToStorage(await downscale(file, 2048), "receipts");
+}
+
+export async function uploadMultipleReceipts(groupId: string, files: File[]): Promise<string[]> {
+  return Promise.all(files.map((f) => uploadReceipt(groupId, f)));
+}
+
+/** Profile photos, group photos and transfer screenshots. */
 export async function uploadImage(file: File, context: string): Promise<string> {
-  const isAvatar = context === "avatar" || context === "group-avatar";
-  return uploadToImgBB(isAvatar ? await downscale(file) : file, file.name);
+  if (context === "avatar") return uploadToStorage(await downscale(file, 512), "avatars");
+  if (context === "group-avatar") return uploadToStorage(await downscale(file, 512), "groups");
+  return uploadToStorage(await downscale(file, 2048), "receipts");
 }
