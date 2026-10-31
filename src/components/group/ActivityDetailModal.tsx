@@ -90,7 +90,7 @@ export default function ActivityDetailModal({
           {expense.splits.map((sp) => (
             <Row
               key={sp.uid}
-              leading={<Avatar name={group.members[sp.uid]?.displayName || memberName(sp.uid)} photoURL={group.members[sp.uid]?.photoURL} size={30} seed={sp.uid} />}
+              leading={<Avatar name={group.members[sp.uid]?.displayName || memberName(sp.uid)} photoURL={group.members[sp.uid]?.photoURL} size={30} seed={sp.uid} uid={sp.uid} />}
               separatorInset={58}
               title={sp.uid === currentUid ? "You" : memberName(sp.uid)}
               subtitle={sp.uid === expense.paidBy ? "Paid" : undefined}

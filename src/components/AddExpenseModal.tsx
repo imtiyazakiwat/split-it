@@ -218,7 +218,7 @@ export default function AddExpenseModal({
                 >
                   <span className={`relative rounded-full p-[2.5px] ${active ? "bg-[var(--brand-solid)]" : ""}`}>
                     <span className="block rounded-full p-[2px] bg-[var(--surface-elevated)]">
-                      <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={46} seed={uid} />
+                      <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={46} seed={uid} uid={uid} />
                     </span>
                   </span>
                   <span className={`t-footnote truncate w-full text-center ${active ? "font-semibold text-[var(--brand)]" : "text-[var(--text-primary)]"}`}>
@@ -254,7 +254,7 @@ export default function AddExpenseModal({
                 className="list-row"
                 style={{ ["--sep-inset" as string]: "60px" }}
               >
-                <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={32} seed={uid} />
+                <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={32} seed={uid} uid={uid} />
                 <span className="flex-1 min-w-0 t-body truncate text-[var(--text-primary)]">{memberName(uid)}</span>
                 {inSplit && parsedAmount > 0 && (
                   <span className="t-body t-numeral text-[var(--text-secondary)]">{formatCurrency(share)}</span>

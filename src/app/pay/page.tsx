@@ -209,7 +209,7 @@ export default function PayPage() {
                 tall
                 leading={
                   <span className="relative">
-                    <Avatar name={r.displayName} photoURL={r.photoURL} size={44} seed={r.uid} />
+                    <Avatar name={r.displayName} photoURL={r.photoURL} size={44} seed={r.uid} uid={r.uid} />
                     {r.unread && (
                       <span className="absolute top-0 -left-1 w-[11px] h-[11px] rounded-full bg-[var(--blue)] ring-2 ring-[var(--surface)]" aria-label="Unread" />
                     )}
@@ -264,7 +264,7 @@ export default function PayPage() {
                     // hands off rather than stacking a second sheet on top.
                     router.push(`/chat/${c.uid}?pay=1`);
                   }}
-                  leading={<Avatar name={c.displayName} photoURL={c.photoURL} size={36} seed={c.uid} />}
+                  leading={<Avatar name={c.displayName} photoURL={c.photoURL} size={36} seed={c.uid} uid={c.uid} />}
                   separatorInset={64}
                   title={c.displayName}
                   subtitle={

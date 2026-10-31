@@ -96,7 +96,7 @@ export default function AddMemberModal({
             results.map((u) => (
               <Row
                 key={u.uid}
-                leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={36} seed={u.uid} />}
+                leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={36} seed={u.uid} uid={u.uid} />}
                 separatorInset={64}
                 title={u.displayName}
                 subtitle={u.email}

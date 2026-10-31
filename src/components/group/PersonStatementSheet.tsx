@@ -85,7 +85,7 @@ export default function PersonStatementSheet({
       }
     >
       <div className="flex flex-col items-center text-center pt-2 pb-1">
-        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} seed={otherUid} />
+        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} seed={otherUid} uid={otherUid} />
         <p
           className={`t-title2 mt-3 ${
             settled ? "text-[var(--text-primary)]" : iOwe ? "text-[var(--neg)]" : "text-[var(--pos)]"

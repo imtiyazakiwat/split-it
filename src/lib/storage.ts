@@ -33,9 +33,36 @@ export async function uploadMultipleReceipts(
   return urls;
 }
 
-export async function uploadImage(
-  file: File,
-  _context: string
-): Promise<string> {
-  return uploadToImgBB(file, file.name);
+/**
+ * Downscales a photo in the browser before upload. A phone camera photo is
+ * 3–8 MB; shown in a 44 pt circle it was the slowest thing on the screen, and
+ * a busy image host times out on files that size, which is when avatars fell
+ * back to initials. Avatars and group photos never render above ~96 pt, so
+ * 512 px is plenty even at 3x. Falls back to the original on any failure.
+ */
+async function downscale(file: File, maxEdge = 512): Promise<Blob> {
+  if (typeof window === "undefined" || !file.type.startsWith("image/")) return file;
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size < 400_000) {
+      bitmap.close?.();
+      return file;
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d")?.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+    return blob && blob.size < file.size ? blob : file;
+  } catch {
+    return file;
+  }
+}
+
+/** Profile and group photos: resized first, so they load fast everywhere. */
+export async function uploadImage(file: File, context: string): Promise<string> {
+  const isAvatar = context === "avatar" || context === "group-avatar";
+  return uploadToImgBB(isAvatar ? await downscale(file) : file, file.name);
 }

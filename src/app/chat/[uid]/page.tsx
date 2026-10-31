@@ -537,7 +537,7 @@ function ChatPageInner() {
             <ChevronLeft size={22} />
           </BarButton>
           <div className="flex flex-col items-center min-w-0">
-            <Avatar name={otherName} photoURL={otherPhoto} size={36} seed={otherUid} />
+            <Avatar name={otherName} photoURL={otherPhoto} size={36} seed={otherUid} uid={otherUid} />
             <p className="text-[12px] leading-[15px] font-medium text-[var(--text-primary)] truncate max-w-full mt-0.5">{otherName}</p>
             <p
               className={`text-[11px] leading-[13px] truncate max-w-full ${
@@ -561,7 +561,7 @@ function ChatPageInner() {
         <div className="max-w-md mx-auto space-y-1.5">
           {items.length === 0 ? (
             <div className="flex flex-col items-center text-center px-8 pt-16">
-              <Avatar name={otherName} photoURL={otherPhoto} size={72} seed={otherUid} />
+              <Avatar name={otherName} photoURL={otherPhoto} size={72} seed={otherUid} uid={otherUid} />
               <p className="t-title3 text-[var(--text-primary)] mt-3">{otherName}</p>
               <p className="t-subhead text-[var(--text-secondary)] mt-1.5 max-w-[280px]">
                 Send money or say hello. Every payment and settled balance between you shows up here.

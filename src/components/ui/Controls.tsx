@@ -2,6 +2,7 @@
 
 import { ReactNode, useCallback, useLayoutEffect, useRef, useState } from "react";
 import { Magnifier, Xmark } from "@/components/ui/Icons";
+import { requestAccountPhoto, useAccountPhoto } from "@/lib/account-photos";
 
 /* ── Avatar ─────────────────────────────────────────────────────────────── */
 
@@ -29,57 +30,151 @@ function tintFor(seed: string): string {
  * soft gradient. A broken photo URL falls back to initials instead of an
  * empty box.
  */
+/**
+ * ImgBB answers a missing or unavailable image with HTTP 404/503 *and* a
+ * 180×180 "image not found" PNG. Browsers render that body, so it counts as a
+ * successful load and the placeholder logo showed up as someone's photo. Real
+ * uploads are never exactly 180×180 (camera photos aren't square at that size,
+ * and avatars are resized to 512 px), so treat that shape from ImgBB as a miss.
+ */
+function isImgbbPlaceholder(el: HTMLImageElement): boolean {
+  return /(^|\.)ibb\.co$/.test(safeHost(el.currentSrc || el.src)) && el.naturalWidth === 180 && el.naturalHeight === 180;
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return "";
+  }
+}
+
 export function Avatar({
   name,
-  photoURL,
+  photoURL: primaryURL,
+  fallbackURL,
+  uid,
   size = 40,
   seed,
   ring = false,
 }: {
   name: string;
   photoURL?: string | null;
+  /** Tried when `photoURL` fails. Defaults to the person's account photo when `uid` is given. */
+  fallbackURL?: string | null;
+  /** A person's uid: enables the account-photo fallback. Omit for groups. */
+  uid?: string;
   size?: number;
   seed?: string;
   ring?: boolean;
 }) {
-  const [failed, setFailed] = useState<string | null>(null);
-  const showPhoto = !!photoURL && failed !== photoURL;
-  // An image that failed before hydration never fires React's onError, so
-  // also check on attach.
+  const [primaryDead, setPrimaryDead] = useState<string | null>(null);
+  const accountPhoto = useAccountPhoto(primaryDead || !primaryURL ? uid : undefined);
+  const fallback = fallbackURL ?? accountPhoto;
+  const usePrimary = !!primaryURL && primaryDead !== primaryURL;
+  const photoURL = usePrimary ? primaryURL : fallback && fallback !== primaryURL ? fallback : null;
+  // Per URL: "loaded" shows the photo, "failed" keeps the initials. Anything
+  // else (still loading) shows the initials with the photo fading in on top,
+  // so a slow photo never leaves a blank circle and a fast one never flashes.
+  const [state, setState] = useState<{ url: string; status: "loaded" | "retrying" | "failed"; retried: boolean } | null>(null);
+  const current = state?.url === photoURL ? state : null;
+  const tint = tintFor(seed || name || "?");
+  const ringStyle = ring ? { boxShadow: "0 0 0 2px var(--surface)" } : {};
+
+  // A photo that finished before hydration fired its load/error events before
+  // React was listening. Read the real outcome when the node attaches, and
+  // only call it a failure once the browser has actually tried a source:
+  // `complete` is also true for an image that hasn't started, which used to
+  // mark good photos as broken and show initials instead.
   const imgRef = useCallback(
     (el: HTMLImageElement | null) => {
-      if (el && el.complete && el.naturalWidth === 0 && photoURL) setFailed(photoURL);
+      if (!el || !photoURL || !el.complete || !el.currentSrc) return;
+      if (el.naturalWidth > 0 && isImgbbPlaceholder(el)) {
+        setState((prev) => (prev?.url === photoURL ? prev : { url: photoURL, status: "failed", retried: true }));
+        if (photoURL === primaryURL) {
+          setPrimaryDead(primaryURL);
+          requestAccountPhoto(uid);
+        }
+        return;
+      }
+      if (el.naturalWidth > 0) {
+        setState((prev) => (prev?.url === photoURL ? prev : { url: photoURL, status: "loaded", retried: false }));
+        return;
+      }
+      // Failed before React listened: give it the same single retry.
+      setState((prev) => (prev?.url === photoURL ? prev : { url: photoURL, status: "retrying", retried: true }));
+      setTimeout(() => {
+        el.src = photoURL + (photoURL.includes("?") ? "&" : "?") + "r=1";
+      }, 1200);
     },
-    [photoURL]
+    [photoURL, primaryURL, uid]
   );
-  const tint = tintFor(seed || name || "?");
-  const style = { width: size, height: size, ...(ring ? { boxShadow: "0 0 0 2px var(--surface)" } : {}) };
-  if (showPhoto) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        ref={imgRef}
-        src={photoURL!}
-        alt=""
-        onError={() => setFailed(photoURL!)}
-        className="rounded-full object-cover shrink-0 bg-[var(--fill-soft)]"
-        style={style}
-        referrerPolicy="no-referrer"
-      />
-    );
-  }
+
+  const onError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    if (!photoURL) return;
+    const el = e.currentTarget;
+    // One retry: the image host (ImgBB) intermittently answers 503, and
+    // Google profile photos rate-limit bursts. A second try usually succeeds.
+    if (!current?.retried) {
+      setState({ url: photoURL, status: "retrying", retried: true });
+      setTimeout(() => {
+        el.src = photoURL + (photoURL.includes("?") ? "&" : "?") + "r=1";
+      }, 1200);
+      return;
+    }
+    setState({ url: photoURL, status: "failed", retried: true });
+    if (photoURL === primaryURL) {
+      setPrimaryDead(primaryURL);
+      requestAccountPhoto(uid);
+    }
+  };
+
+  // Kept mounted through the single retry; dropped once that retry fails too.
+  const gaveUp = current?.status === "failed" && current.retried;
+  const showImg = !!photoURL && !gaveUp;
+  const loaded = current?.status === "loaded";
+
   return (
     <span
+      className="relative rounded-full shrink-0 inline-flex items-center justify-center overflow-hidden select-none"
+      style={{ width: size, height: size, ...ringStyle }}
       aria-hidden
-      className="rounded-full shrink-0 inline-flex items-center justify-center font-semibold text-white select-none"
-      style={{
-        ...style,
-        fontSize: Math.round(size * 0.4),
-        letterSpacing: "0.01em",
-        background: `linear-gradient(180deg, color-mix(in srgb, ${tint} 72%, white), ${tint})`,
-      }}
     >
-      {initials(name)}
+      <span
+        className="absolute inset-0 inline-flex items-center justify-center font-semibold text-white"
+        style={{
+          fontSize: Math.round(size * 0.4),
+          letterSpacing: "0.01em",
+          background: `linear-gradient(180deg, color-mix(in srgb, ${tint} 72%, white), ${tint})`,
+        }}
+      >
+        {initials(name)}
+      </span>
+      {showImg && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={photoURL}
+          ref={imgRef}
+          src={photoURL!}
+          alt=""
+          decoding="async"
+          referrerPolicy="no-referrer"
+          onLoad={(e) => {
+            if (isImgbbPlaceholder(e.currentTarget)) {
+              setState({ url: photoURL!, status: "failed", retried: true });
+              if (photoURL === primaryURL) {
+                setPrimaryDead(primaryURL!);
+                requestAccountPhoto(uid);
+              }
+              return;
+            }
+            setState({ url: photoURL!, status: "loaded", retried: current?.retried ?? false });
+          }}
+          onError={onError}
+          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200"
+          style={{ opacity: loaded ? 1 : 0 }}
+        />
+      )}
     </span>
   );
 }
@@ -100,7 +195,7 @@ export function AvatarStack({
     <span className="inline-flex items-center">
       {shown.map((p, i) => (
         <span key={p.id} style={{ marginLeft: i === 0 ? 0 : -size * 0.3 }} className="rounded-full">
-          <Avatar name={p.name} photoURL={p.photoURL} size={size} seed={p.id} ring />
+          <Avatar name={p.name} photoURL={p.photoURL} size={size} seed={p.id} uid={p.id} ring />
         </span>
       ))}
       {extra > 0 && (

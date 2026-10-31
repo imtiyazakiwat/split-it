@@ -748,7 +748,7 @@ function GroupPageInner() {
             </span>
           );
           const leading = (
-            <Avatar name={group.members[b.uid]?.displayName || name} photoURL={group.members[b.uid]?.photoURL} size={36} seed={b.uid} />
+            <Avatar name={group.members[b.uid]?.displayName || name} photoURL={group.members[b.uid]?.photoURL} size={36} seed={b.uid} uid={b.uid} />
           );
           return isMe ? (
             <Row key={b.uid} leading={leading} separatorInset={64} title={name} subtitle="Your balance in this group" detail={detail} />
@@ -885,7 +885,7 @@ function GroupPageInner() {
           >
             {group.memberIds.map((uid) => {
               const leading = (
-                <Avatar name={group.members[uid]?.displayName || "Member"} photoURL={group.members[uid]?.photoURL} size={36} seed={uid} />
+                <Avatar name={group.members[uid]?.displayName || "Member"} photoURL={group.members[uid]?.photoURL} size={36} seed={uid} uid={uid} />
               );
               const props = {
                 leading,
