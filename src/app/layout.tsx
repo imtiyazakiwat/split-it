@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth-context";
 import { GroupDataProvider } from "@/lib/group-data-context";
@@ -8,15 +8,15 @@ import PwaBootstrap from "@/components/PwaBootstrap";
 import NotificationSetup from "@/components/NotificationSetup";
 import SplashGate from "@/components/SplashGate";
 import { ToastProvider } from "@/components/ui/Toast";
-import TabBar from "@/components/TabBar";
-import EdgeSwipe from "@/components/EdgeSwipe";
+import PageTransition from "@/components/PageTransition";
+import BottomNav from "@/components/home/BottomNav";
 
-// SF Pro is used on Apple devices (it leads the font stack in globals.css);
-// Geist is the fallback everywhere else. Geist Mono was loaded and preloaded
-// on every route but never used, so it's gone.
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// SF Pro renders on Apple devices via -apple-system; Inter is the closest
+// fallback elsewhere, so non-Apple screens keep SF-like metrics.
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
+  display: "swap",
 });
 
 export const metadata: Metadata = {
@@ -26,9 +26,8 @@ export const metadata: Metadata = {
   applicationName: "SplitIt",
   appleWebApp: {
     capable: true,
-    // "default", not "black-translucent": translucent forces white status-bar
-    // text, which disappeared against the light grouped background. Default
-    // follows theme-color below, so the bar matches the screen in both modes.
+    // "default" keeps dark status-bar text on light backgrounds; the
+    // translucent style forced white text that vanished on #F2F2F7.
     statusBarStyle: "default",
     title: "SplitIt",
   },
@@ -44,8 +43,8 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  // Keyboard resizes the layout viewport instead of overlaying it (where
-  // supported), so sheets and the chat composer stay above it.
+  // Keyboard resizes the layout viewport instead of overlaying it, so sticky
+  // save/send bars above the fold stay reachable. Ignored where unsupported.
   interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f2f2f7" },
@@ -60,7 +59,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} h-full antialiased`}>
+    <html
+      lang="en"
+      className={`${inter.variable} h-full antialiased`}
+    >
       <head>
         {/* Apple splash screens — matched by exact device-width/height/ratio media queries */}
         <link rel="apple-touch-startup-image" href="/splash-640x1136.png" media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2)" />
@@ -72,15 +74,15 @@ export default function RootLayout({
         <link rel="apple-touch-startup-image" href="/splash-1536x2048.png" media="(device-width: 768px) and (device-height: 1024px) and (-webkit-device-pixel-ratio: 2)" />
         <link rel="apple-touch-startup-image" href="/splash-2048x2732.png" media="(device-width: 1024px) and (device-height: 1366px) and (-webkit-device-pixel-ratio: 2)" />
       </head>
-      <body>
+      <body className="min-h-full flex flex-col bg-[var(--background)]">
         <AuthProvider>
           {/* One shared set of Firestore listeners for every screen. */}
           <GroupDataProvider>
             <PaymentsProvider>
               <ToastProvider>
-                {children}
-                <TabBar />
-                <EdgeSwipe />
+                <PageTransition>{children}</PageTransition>
+                {/* Outside the transition so it persists across pushes. */}
+                <BottomNav />
                 <SplashGate />
                 <PwaBootstrap />
                 <NotificationSetup />

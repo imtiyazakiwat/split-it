@@ -1,24 +1,16 @@
 import Image from "next/image";
 
 /**
- * The first web frame. It reproduces the static apple-touch-startup-image —
- * the blue gradient, the app icon, the name — so the launch screen iOS shows
- * before any JavaScript runs continues seamlessly into the app instead of
- * cutting to a different design. No spinner: this is shown for a few hundred
- * milliseconds while a cached session resolves, not while anything loads.
+ * Launch screen. Apple's guidance: show the app's first frame, not a branded
+ * animation, so launch feels instant. The icon fades in on the system
+ * background and the screen dissolves once auth resolves.
  */
-export default function SplashScreen({ leaving = false }: { leaving?: boolean }) {
+export default function SplashScreen() {
   return (
-    <div className={`splash ${leaving ? "is-leaving" : ""}`}>
-      <Image
-        src="/icon-512.png"
-        alt=""
-        width={86}
-        height={86}
-        priority
-        className="splash-icon"
-      />
-      <p className="splash-name">SplitIt</p>
+    <div className="w-full h-full flex items-center justify-center bg-[var(--background)]">
+      <div className="animate-splash-logo w-[96px] h-[96px] rounded-[24px] overflow-hidden shadow-[0_8px_24px_rgba(0,0,0,0.12)]">
+        <Image src="/icon-512.png" alt="SplitIt" width={96} height={96} priority className="w-full h-full" />
+      </div>
     </div>
   );
 }

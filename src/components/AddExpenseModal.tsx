@@ -7,15 +7,12 @@ import { uploadMultipleReceipts } from "@/lib/storage";
 import { rescaleSplits, splitEqually, formatCurrency } from "@/lib/balance";
 import { EXPENSE_CATEGORIES } from "@/lib/categories";
 import { useToast } from "@/components/ui/Toast";
-import { hapticSuccess, hapticTap } from "@/lib/haptics";
-import { Sheet, SheetIconButton, type SheetHandle } from "@/components/kit/Sheet";
-import { List, Section, sepInset } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
-import { CategoryTile } from "@/components/kit/Tile";
-import { AmountField } from "@/components/kit/AmountField";
-import { Attachments } from "@/components/kit/Attachments";
-import { Menu } from "@/components/kit/Menu";
-import { Icon } from "@/components/kit/Icon";
+import { hapticSuccess } from "@/lib/haptics";
+import { activateFileInputOnKey } from "@/lib/keyboard";
+import GlassModal from "@/components/ui/GlassModal";
+import { FieldRow, ListSection, Row } from "@/components/ui/List";
+import { AmountInput, Avatar } from "@/components/ui/Controls";
+import { CategoryGlyph, Checkmark, Paperclip, categoryTint } from "@/components/ui/Icons";
 
 export interface NewExpenseInput {
   description: string;
@@ -31,12 +28,6 @@ export interface NewExpenseInput {
   receiptFiles: File[];
 }
 
-/**
- * Add or edit an expense: a large sheet, amount first.
- *
- * ✕ leading, ✓ trailing (disabled until there's an amount and at least one
- * person in the split). Closing with anything typed asks before discarding.
- */
 export default function AddExpenseModal({
   group,
   currentUid,
@@ -50,12 +41,12 @@ export default function AddExpenseModal({
   onClose: () => void;
   prefillReceipt?: File | null;
   /** When provided, the parent persists the expense (enabling optimistic UI):
-   *  the sheet builds the input, hands it off, and closes immediately. */
+   *  the modal builds the input, hands it off, and closes immediately. */
   onSubmit?: (input: NewExpenseInput) => void;
-  /** Editing reuses this whole sheet, so adding and editing behave the same. */
+  /** Editing an existing expense reuses this whole screen rather than a
+   *  cut-down form, so adding and editing look and behave the same. */
   expense?: Expense | null;
 }) {
-  const sheetRef = useRef<SheetHandle>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const isEdit = !!expense;
   const [amount, setAmount] = useState(expense ? String(expense.amount) : "");
@@ -71,10 +62,13 @@ export default function AddExpenseModal({
   const showToast = useToast();
 
   const parsedAmount = parseFloat(amount) || 0;
-  const valid = parsedAmount > 0 && splitMembers.length > 0;
+  const eachPays = splitMembers.length > 0 ? parsedAmount / splitMembers.length : 0;
 
-  // A legacy exact/percentage expense keeps its shape on edit while the same
-  // people are involved; the preview has to describe whichever will be saved.
+  // A legacy exact/percentage expense keeps its shape on edit: the parent
+  // rescales the original amounts instead of re-splitting evenly, and that only
+  // happens while the same people are involved. The panel below has to describe
+  // whichever of the two is actually going to be saved — it used to always say
+  // "Split equally", which was wrong for every uneven expense.
   const originalSplits = expense?.splits ?? [];
   const sameMembers =
     originalSplits.length === splitMembers.length &&
@@ -83,28 +77,20 @@ export default function AddExpenseModal({
   const previewSplits = keepsCustomSplit
     ? rescaleSplits(originalSplits, parsedAmount)
     : splitEqually(parsedAmount, splitMembers);
-  const shareOf = (uid: string) => previewSplits.find((s) => s.uid === uid)?.amount ?? 0;
-  const memberName = (uid: string) =>
-    uid === currentUid ? "You" : group.members[uid]?.displayName || "Member";
+  const memberName = (uid: string) => (uid === currentUid ? "You" : group.members[uid]?.displayName || "User");
   const categoryLabel = EXPENSE_CATEGORIES.find((c) => c.id === category)?.label || "Expense";
 
-  const dirty = isEdit
-    ? amount !== String(expense!.amount) ||
-      note !== (expense!.description || "") ||
-      category !== (expense!.category || "meal") ||
-      paidBy !== expense!.paidBy ||
-      !sameMembers ||
-      receiptFiles.length > 0
-    : !!amount || !!note.trim() || receiptFiles.length > (prefillReceipt ? 1 : 0);
-
   function toggleSplit(uid: string) {
-    hapticTap();
     setSplitMembers((prev) => (prev.includes(uid) ? prev.filter((m) => m !== uid) : [...prev, uid]));
   }
 
-  async function handleSubmit(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (!valid) {
+  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
+    setReceiptFiles((prev) => [...prev, ...Array.from(e.target.files || [])]);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (parsedAmount <= 0 || splitMembers.length === 0) {
       setError("Enter an amount and pick who's splitting.");
       return;
     }
@@ -120,14 +106,14 @@ export default function AddExpenseModal({
       receiptFiles,
     };
 
-    // Optimistic path: the parent persists and reconciles; close at once.
+    // Optimistic path: parent persists + reconciles; close instantly.
     if (onSubmit) {
       onSubmit(input);
-      sheetRef.current?.dismiss();
+      onClose();
       return;
     }
 
-    // Fallback path (share-receipt): persist here.
+    // Fallback path (e.g. share-receipt): persist here.
     setBusy(true);
     try {
       let receiptUrls: string[] = [];
@@ -146,7 +132,7 @@ export default function AddExpenseModal({
       });
       showToast({ message: `Expense added · ${formatCurrency(parsedAmount)}` });
       hapticSuccess();
-      sheetRef.current?.dismiss();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add expense");
     } finally {
@@ -154,174 +140,174 @@ export default function AddExpenseModal({
     }
   }
 
-  return (
-    <Sheet
-      ref={sheetRef}
-      large
-      title={isEdit ? "Edit Expense" : "Add Expense"}
-      subtitle={group.name}
-      dirty={dirty && !busy}
-      onClose={onClose}
-      trailing={
-        <SheetIconButton
-          icon="checkmark"
-          label={isEdit ? "Save expense" : "Add expense"}
-          prominent
-          disabled={!valid || busy}
-          onClick={() => formRef.current?.requestSubmit()}
-        />
-      }
-    >
-      <form ref={formRef} onSubmit={handleSubmit} noValidate>
-        {/* Amount */}
-        <AmountField
-          id="expense-amount"
-          value={amount}
-          onChange={setAmount}
-          autoFocus={!isEdit}
-          caption={
-            splitMembers.length > 0 && parsedAmount > 0 && !keepsCustomSplit
-              ? `${formatCurrency(shareOf(splitMembers[0]))} each · ${splitMembers.length} ${
-                  splitMembers.length === 1 ? "person" : "people"
-                }`
-              : keepsCustomSplit
-              ? "Each person keeps their original share"
-              : "Indian rupees"
-          }
-        />
+  const dirty = isEdit
+    ? amount !== String(expense!.amount) ||
+      note !== (expense!.description || "") ||
+      category !== (expense!.category || "meal") ||
+      paidBy !== expense!.paidBy ||
+      receiptFiles.length > 0 ||
+      !sameMembers
+    : amount !== "" || note.trim() !== "" || receiptFiles.length > (prefillReceipt ? 1 : 0);
+  const valid = parsedAmount > 0 && splitMembers.length > 0;
 
-        {/* Description */}
-        <List>
-          <label className="row" style={{ cursor: "text" }}>
-            <CategoryTile id={category} />
+  return (
+    <GlassModal
+      title={isEdit ? "Edit Expense" : "New Expense"}
+      large
+      onClose={onClose}
+      dirty={dirty && !busy}
+      confirm={{ label: isEdit ? "Save" : "Add", formId: "expense-form", disabled: !valid, busy, onConfirm: () => {} }}
+    >
+      <form id="expense-form" ref={formRef} onSubmit={handleSubmit}>
+        {/* Amount first: money is the point. */}
+        <div className="flex flex-col items-center pt-3 pb-1">
+          <AmountInput value={amount} onChange={setAmount} autoFocus={!isEdit} />
+          <p className="t-footnote text-[var(--text-secondary)]">{group.name}</p>
+        </div>
+
+        <ListSection elevated>
+          <FieldRow label="Description">
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder={`What was it for? (${categoryLabel})`}
+              placeholder={categoryLabel}
               aria-label="Description"
-              maxLength={80}
-              className="field"
+              enterKeyHint="done"
+              className="row-input py-[13px]"
             />
-          </label>
-        </List>
+          </FieldRow>
+        </ListSection>
 
-        {/* Category */}
-        <Section header="Category">
-          <div className="grid grid-cols-3 gap-2">
+        <ListSection elevated header="Category">
+          <div className="grid grid-cols-3 gap-2 p-2.5">
             {EXPENSE_CATEGORIES.map((c) => {
               const active = category === c.id;
               return (
                 <button
                   key={c.id}
                   type="button"
+                  onClick={() => setCategory(c.id)}
                   aria-pressed={active}
-                  onClick={() => {
-                    if (!active) hapticTap();
-                    setCategory(c.id);
-                  }}
-                  className={`relative flex flex-col items-center gap-1.5 rounded-[18px] py-3 transition-[background-color,box-shadow] duration-200 ${
-                    active
-                      ? "bg-[var(--cell-elevated)] shadow-[0_0_0_2px_var(--tint)]"
-                      : "bg-[var(--cell-elevated)]"
+                  className={`flex flex-col items-center gap-1.5 rounded-[14px] py-2.5 tap-shrink ${
+                    active ? "bg-[var(--tint-accent)]" : ""
                   }`}
                 >
-                  <CategoryTile id={c.id} size="lg" />
-                  <span className={`t-footnote ${active ? "font-semibold text-tint" : "text-label"}`}>{c.label}</span>
+                  <span className="icon-tile !w-9 !h-9 !rounded-[10px]" style={{ background: categoryTint(c.id) }}>
+                    <CategoryGlyph id={c.id} size={19} />
+                  </span>
+                  <span className={`t-footnote ${active ? "font-semibold text-[var(--brand)]" : "text-[var(--text-primary)]"}`}>
+                    {c.label}
+                  </span>
                 </button>
               );
             })}
           </div>
-        </Section>
+        </ListSection>
 
-        {/* Paid by */}
-        <Section header="Paid by">
-          <List>
-            <Menu
-              align="end"
-              title="Who paid?"
-              items={group.memberIds.map((uid) => ({
-                label: memberName(uid),
-                checked: paidBy === uid,
-                onSelect: () => setPaidBy(uid),
-              }))}
-            >
-              {(props) => (
-                <button type="button" {...props} className="row is-pressable" style={sepInset(16)}>
-                  <Avatar
-                    name={group.members[paidBy]?.displayName || memberName(paidBy)}
-                    photoURL={group.members[paidBy]?.photoURL}
-                    size={30}
-                  />
-                  <span className="row-main">
-                    <span className="row-title">{memberName(paidBy)}</span>
-                  </span>
-                  <span className="flex items-center gap-1 text-label-2">
-                    <span className="t-subhead">Change</span>
-                    <Icon name="chevron.up.down" size={15} strokeWidth={2.2} />
-                  </span>
-                </button>
-              )}
-            </Menu>
-          </List>
-        </Section>
-
-        {/* Split between */}
-        <Section
-          header="Split between"
-          footer={
-            keepsCustomSplit
-              ? "This expense had a custom split. Each person keeps their original share of the new total."
-              : splitMembers.length === 0
-              ? "Pick at least one person."
-              : `Split equally between ${splitMembers.length} ${splitMembers.length === 1 ? "person" : "people"}.`
-          }
-        >
-          <List>
+        <ListSection elevated header="Paid by">
+          <div className="flex gap-1 overflow-x-auto no-scrollbar px-2 py-3">
             {group.memberIds.map((uid) => {
-              const inSplit = splitMembers.includes(uid);
+              const active = paidBy === uid;
               return (
                 <button
                   key={uid}
                   type="button"
-                  role="checkbox"
-                  aria-checked={inSplit}
-                  onClick={() => toggleSplit(uid)}
-                  className="row is-pressable"
-                  style={sepInset(58)}
+                  onClick={() => setPaidBy(uid)}
+                  aria-pressed={active}
+                  className="flex flex-col items-center gap-1.5 shrink-0 w-[72px] tap-shrink"
                 >
-                  <span className={inSplit ? "text-tint" : "text-label-3"} aria-hidden>
-                    <Icon
-                      name={inSplit ? "checkmark.circle.fill" : "circle"}
-                      size={26}
-                      strokeWidth={1.6}
-                    />
+                  <span className={`relative rounded-full p-[2.5px] ${active ? "bg-[var(--brand-solid)]" : ""}`}>
+                    <span className="block rounded-full p-[2px] bg-[var(--surface-elevated)]">
+                      <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={46} seed={uid} />
+                    </span>
                   </span>
-                  <span className="row-main">
-                    <span className="row-title">{memberName(uid)}</span>
-                  </span>
-                  <span className={`num t-body shrink-0 ${inSplit ? "text-label" : "text-label-3"}`}>
-                    {inSplit ? formatCurrency(shareOf(uid)) : "—"}
+                  <span className={`t-footnote truncate w-full text-center ${active ? "font-semibold text-[var(--brand)]" : "text-[var(--text-primary)]"}`}>
+                    {memberName(uid)}
                   </span>
                 </button>
               );
             })}
-          </List>
-        </Section>
+          </div>
+        </ListSection>
 
-        {/* Receipt */}
-        <Section header="Receipt">
-          <Attachments
-            files={receiptFiles}
-            onChange={setReceiptFiles}
-            label="Add Receipt Photo"
-            addMoreLabel="Add Another Photo"
-            footer="Images up to 10 MB."
-          />
-        </Section>
+        <ListSection
+          elevated
+          header="Split between"
+          footer={
+            keepsCustomSplit
+              ? "Each person keeps their original share of the total."
+              : splitMembers.length > 0
+              ? `Split equally · ${formatCurrency(eachPays)} each`
+              : "Pick at least one person."
+          }
+        >
+          {group.memberIds.map((uid) => {
+            const inSplit = splitMembers.includes(uid);
+            const share = previewSplits.find((p) => p.uid === uid)?.amount ?? 0;
+            return (
+              <button
+                key={uid}
+                type="button"
+                role="checkbox"
+                aria-checked={inSplit}
+                onClick={() => toggleSplit(uid)}
+                className="list-row"
+                style={{ ["--sep-inset" as string]: "60px" }}
+              >
+                <Avatar name={group.members[uid]?.displayName || memberName(uid)} photoURL={group.members[uid]?.photoURL} size={32} seed={uid} />
+                <span className="flex-1 min-w-0 t-body truncate text-[var(--text-primary)]">{memberName(uid)}</span>
+                {inSplit && parsedAmount > 0 && (
+                  <span className="t-body t-numeral text-[var(--text-secondary)]">{formatCurrency(share)}</span>
+                )}
+                <span
+                  className={`w-[22px] h-[22px] rounded-full grid place-items-center shrink-0 ${
+                    inSplit ? "bg-[var(--brand-solid)] text-white" : "ring-[1.5px] ring-inset ring-[var(--text-tertiary)]"
+                  }`}
+                  aria-hidden
+                >
+                  {inSplit && <Checkmark size={13} weight={3.2} />}
+                </span>
+              </button>
+            );
+          })}
+        </ListSection>
 
-        {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
-        <button type="submit" hidden aria-hidden tabIndex={-1} />
+        <ListSection elevated footer="Images only, up to 10 MB each.">
+          <label
+            role="button"
+            tabIndex={0}
+            aria-label="Add receipt image"
+            onKeyDown={activateFileInputOnKey}
+            className="list-row cursor-pointer active:bg-[var(--pressed)]"
+          >
+            <span className="text-[var(--brand)]"><Paperclip size={20} /></span>
+            <span className="flex-1 t-body text-[var(--brand)]">
+              {receiptFiles.length > 0 ? "Add Another Receipt" : "Attach Receipt"}
+            </span>
+            {receiptFiles.length > 0 && (
+              <span className="t-body text-[var(--text-secondary)]">{receiptFiles.length}</span>
+            )}
+            <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
+          </label>
+          {receiptFiles.map((f, i) => (
+            <Row
+              key={`${f.name}-${i}`}
+              title={<span className="text-[var(--text-secondary)]">{f.name}</span>}
+              detail={
+                <button
+                  type="button"
+                  onClick={() => setReceiptFiles((prev) => prev.filter((_, j) => j !== i))}
+                  className="t-body text-[var(--neg)] min-h-[44px] -my-3 px-1"
+                >
+                  Remove
+                </button>
+              }
+            />
+          ))}
+        </ListSection>
+
+        {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
       </form>
-    </Sheet>
+    </GlassModal>
   );
 }

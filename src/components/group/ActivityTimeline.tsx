@@ -1,12 +1,10 @@
 "use client";
 
 import { Expense, Settlement } from "@/lib/types";
-import { formatCurrency } from "@/lib/balance";
-import { fromPaise, toPaise } from "@/lib/money";
-import { List, RowButton, Section } from "@/components/kit/List";
-import { CategoryTile, IconTile } from "@/components/kit/Tile";
-import { SwipeRow } from "@/components/kit/SwipeRow";
-import { EmptyState } from "@/components/kit/Controls";
+import { canRespondToSettlement, formatCurrency } from "@/lib/balance";
+import { ListSection, SwipeRow } from "@/components/ui/List";
+import { EmptyState } from "@/components/ui/Controls";
+import { Arrows, CategoryGlyph, CheckCircle, ChevronRight, Clock, categoryTint } from "@/components/ui/Icons";
 
 type Item =
   | { type: "expense"; data: Expense; ts: number }
@@ -23,7 +21,7 @@ function dateBucket(ts: number): string {
   return d.toLocaleDateString("en-IN", {
     day: "numeric",
     month: "long",
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
   });
 }
 
@@ -31,30 +29,12 @@ function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-/** What this expense did to *my* balance, in words. Display only. */
-function myEffect(e: Expense, me: string): { text: string; tone: "pos" | "neg" | "flat" } {
-  const mine = e.splits.find((s) => s.uid === me)?.amount ?? 0;
-  if (e.paidBy === me) {
-    const lent = fromPaise(toPaise(e.amount) - toPaise(mine));
-    return lent > 0 ? { text: `you lent ${formatCurrency(lent)}`, tone: "pos" } : { text: "just you", tone: "flat" };
-  }
-  if (mine > 0) return { text: `you borrowed ${formatCurrency(mine)}`, tone: "neg" };
-  return { text: "not involved", tone: "flat" };
-}
-
-function settlementTile(s: Settlement) {
-  if (s.kind === "offset") return <IconTile icon="arrow.left.right" color="var(--indigo)" />;
-  if (s.kind === "transfer") return <IconTile icon="rupee.bubble" color="var(--teal)" />;
-  if (s.status === "pending") return <IconTile icon="clock" color="var(--orange)" />;
-  if (s.status === "rejected") return <IconTile icon="xmark" color="var(--gray)" />;
-  return <IconTile icon="checkmark" color="var(--green)" />;
-}
-
 /**
- * The group's ledger, newest first, in date sections — one row per record,
- * one tap target per row (it opens the detail sheet). Admins can also swipe
- * an expense to delete it; the detail sheet is the non-gesture path, and
- * either way the delete waits out an Undo window.
+ * The group's ledger as an inset-grouped list, sectioned by day. One row =
+ * one tap target (opens the detail sheet). Expenses swipe left to delete
+ * (with Undo, handled by the parent); the detail sheet holds Edit and Delete
+ * for anyone not using gestures. Settlement requests keep their decision
+ * buttons inline, because that decision is the reason the row exists.
  */
 export default function ActivityTimeline({
   expenses,
@@ -62,20 +42,29 @@ export default function ActivityTimeline({
   memberName,
   currentUid,
   isAdmin,
+  limit,
   onDeleteExpense,
+  onApprove,
+  onReject,
+  onForward,
+  canForward,
   onOpenExpense,
   onOpenSettlement,
-  emptyAction,
 }: {
   expenses: Expense[];
   settlements: Settlement[];
   memberName: (uid: string) => string;
   currentUid: string;
   isAdmin: boolean;
+  limit?: number;
+  onEditExpense?: (e: Expense) => void;
   onDeleteExpense: (e: Expense) => void;
+  onApprove: (s: Settlement) => void;
+  onReject: (s: Settlement) => void;
+  onForward: (s: Settlement) => void;
+  canForward: boolean;
   onOpenExpense: (e: Expense) => void;
   onOpenSettlement: (s: Settlement) => void;
-  emptyAction?: React.ReactNode;
 }) {
   const items: Item[] = [
     ...expenses
@@ -84,132 +73,163 @@ export default function ActivityTimeline({
     ...settlements.map((s) => ({ type: "settlement" as const, data: s, ts: s.createdAt })),
   ].sort((a, b) => b.ts - a.ts);
 
-  if (items.length === 0) {
+  const shown = limit ? items.slice(0, limit) : items;
+
+  if (shown.length === 0) {
     return (
-      <Section header="Activity">
-        <div className="card">
-          <EmptyState
-            compact
-            icon="receipt"
-            title="No Expenses Yet"
-            message="Add the first bill and everyone's share is worked out for you."
-            action={emptyAction}
-          />
-        </div>
-      </Section>
+      <EmptyState
+        icon={<Clock size={52} weight={1.4} />}
+        title="No Expenses Yet"
+        message="Tap + to add the first expense. Everyone in the group sees it straight away."
+      />
     );
   }
 
-  // Bucket in order; items are already newest first.
-  const buckets: { label: string; items: Item[] }[] = [];
-  for (const item of items) {
-    const label = dateBucket(item.ts);
-    const last = buckets[buckets.length - 1];
-    if (last && last.label === label) last.items.push(item);
-    else buckets.push({ label, items: [item] });
+  // Group into day sections, preserving order.
+  const sections: { bucket: string; items: Item[] }[] = [];
+  for (const item of shown) {
+    const bucket = dateBucket(item.ts);
+    const last = sections[sections.length - 1];
+    if (last && last.bucket === bucket) last.items.push(item);
+    else sections.push({ bucket, items: [item] });
   }
 
   return (
     <>
-      {buckets.map((bucket, bi) => (
-        <Section key={bucket.label} header={bi === 0 ? `Activity · ${bucket.label}` : bucket.label}>
-          <List>
-            {bucket.items.map((item) => {
-              if (item.type === "expense") {
-                const e = item.data;
-                const effect = myEffect(e, currentUid);
-                const row = (
-                  <RowButton
-                    key={`expense-${e.id}`}
-                    onClick={() => onOpenExpense(e)}
-                    inset="tile"
-                    leading={<CategoryTile id={e.category} />}
-                    title={e.description}
-                    subtitle={
+      {sections.map((section) => (
+        <ListSection key={`${section.items[0].type}-${section.items[0].data.id}`} header={section.bucket} className="!mt-5 first:!mt-0">
+          {section.items.map((item) => {
+            if (item.type === "expense") {
+              const e = item.data;
+              const myShare = e.splits.find((sp) => sp.uid === currentUid)?.amount ?? 0;
+              const iPaid = e.paidBy === currentUid;
+              const row = (
+                <button
+                  type="button"
+                  onClick={() => onOpenExpense(e)}
+                  className="list-row is-tall"
+                  style={{ ["--sep-inset" as string]: "58px" }}
+                >
+                  <span className="icon-tile" style={{ background: categoryTint(e.category) }}>
+                    <CategoryGlyph id={e.category} size={18} />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block t-body text-[var(--text-primary)] truncate">{e.description}</span>
+                    <span className="block t-subhead text-[var(--text-secondary)] truncate mt-px">
+                      {memberName(e.paidBy)} paid {formatCurrency(e.amount)}
+                      {e.editAction === "edited" ? " · Edited" : ""}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    {myShare > 0 || iPaid ? (
                       <>
-                        {memberName(e.paidBy)} paid {formatCurrency(e.amount)}
-                        {e.editAction === "edited" ? " · edited" : ""}
-                      </>
-                    }
-                    trailing={
-                      <span className="flex shrink-0 flex-col items-end">
+                        <span className="block t-caption text-[var(--text-secondary)]">
+                          {iPaid ? "you lent" : "you owe"}
+                        </span>
                         <span
-                          className={`t-footnote font-semibold ${
-                            effect.tone === "pos" ? "text-pos" : effect.tone === "neg" ? "text-neg" : "text-label-3"
+                          className={`block t-subhead font-semibold t-numeral ${
+                            iPaid ? "text-[var(--pos)]" : "text-[var(--neg)]"
                           }`}
                         >
-                          {effect.text}
+                          {formatCurrency(iPaid ? e.amount - myShare : myShare)}
                         </span>
-                        <span className="t-caption text-label-3">{timeLabel(item.ts)}</span>
-                      </span>
-                    }
-                    chevron
-                  />
-                );
-                return isAdmin ? (
-                  <SwipeRow
-                    key={`expense-${e.id}`}
-                    inset={58}
-                    actions={[
-                      { label: "Delete", icon: "trash", color: "var(--red)", removesRow: true, onAction: () => onDeleteExpense(e) },
-                    ]}
-                  >
-                    {row}
-                  </SwipeRow>
-                ) : (
-                  row
-                );
-              }
-              const s = item.data;
-              const isOffset = s.kind === "offset";
-              // "You" leads; mid-sentence it's "paid you".
-              const toName = s.toUid === currentUid ? "you" : memberName(s.toUid);
-              const title =
-                s.kind === "transfer"
-                  ? `${memberName(s.fromUid)} sent ${toName}`
-                  : isOffset
-                  ? `${memberName(s.fromUid)} ⇄ ${memberName(s.toUid)}`
-                  : `${memberName(s.fromUid)} paid ${toName}`;
-              const status = isOffset
-                ? "Offset · no money moved"
-                : s.kind === "transfer"
-                ? "Direct payment"
+                      </>
+                    ) : (
+                      <span className="t-footnote text-[var(--text-secondary)]">not involved</span>
+                    )}
+                  </span>
+                  <ChevronRight className="row-chevron -mr-1" />
+                </button>
+              );
+              return isAdmin && !e.id.startsWith("tmp-") ? (
+                <SwipeRow
+                  key={`expense-${e.id}`}
+                  separatorInset={58}
+                  actions={[{ label: "Delete", tone: "destructive", onClick: () => onDeleteExpense(e) }]}
+                >
+                  {row}
+                </SwipeRow>
+              ) : (
+                <div key={`expense-${e.id}`} className="list-row-wrap" style={{ ["--sep-inset" as string]: "58px" }}>
+                  {row}
+                </div>
+              );
+            }
+
+            const s = item.data;
+            const isOffset = s.kind === "offset";
+            const respond = canRespondToSettlement(s, currentUid);
+            const title =
+              s.kind === "transfer"
+                ? `${memberName(s.fromUid)} paid ${memberName(s.toUid)} directly`
+                : isOffset
+                ? `${memberName(s.fromUid)} and ${memberName(s.toUid)} offset balances`
                 : s.status === "pending"
-                ? "Waiting for approval"
+                ? `${memberName(s.fromUid)} → ${memberName(s.toUid)}`
+                : s.status === "rejected"
+                ? `${memberName(s.fromUid)} → ${memberName(s.toUid)}`
+                : `${memberName(s.fromUid)} paid ${memberName(s.toUid)}`;
+            const status =
+              s.status === "pending"
+                ? respond
+                  ? "Waiting for you"
+                  : "Waiting for approval"
                 : s.status === "rejected"
                 ? "Declined"
-                : "Settled up";
-              return (
-                <RowButton
-                  key={`settlement-${s.id}`}
-                  onClick={() => onOpenSettlement(s)}
-                  inset="tile"
-                  leading={settlementTile(s)}
-                  title={title}
-                  subtitle={
-                    <>
-                      <span className={s.status === "pending" && !isOffset ? "text-warn" : undefined}>{status}</span>
-                      {s.note ? ` · ${s.note}` : ""}
-                    </>
-                  }
-                  trailing={
-                    <span className="flex shrink-0 flex-col items-end">
-                      <span
-                        className={`num t-subhead font-semibold ${
-                          s.status === "rejected" ? "text-label-3 line-through" : "text-label"
-                        }`}
-                      >
-                        {formatCurrency(s.amount)}
-                      </span>
-                      <span className="t-caption text-label-3">{timeLabel(item.ts)}</span>
+                : isOffset
+                ? "No money moved"
+                : "Settled";
+            const statusTone =
+              s.status === "pending" ? "text-[var(--warning)]" : s.status === "rejected" ? "text-[var(--neg)]" : "text-[var(--text-secondary)]";
+            return (
+              <div key={`settlement-${s.id}`} className="list-row-wrap" style={{ ["--sep-inset" as string]: "58px" }}>
+                <button type="button" onClick={() => onOpenSettlement(s)} className="list-row is-tall">
+                  <span
+                    className="icon-tile"
+                    style={{
+                      background: isOffset ? "var(--indigo)" : s.status === "rejected" ? "var(--gray)" : s.status === "pending" ? "var(--orange)" : "var(--green)",
+                    }}
+                  >
+                    {isOffset ? <Arrows size={17} /> : <CheckCircle size={18} />}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block t-body text-[var(--text-primary)] truncate">{title}</span>
+                    <span className={`block t-subhead truncate mt-px ${statusTone}`}>
+                      {status}
+                      {s.note ? <span className="text-[var(--text-secondary)]"> · {s.note}</span> : null}
                     </span>
-                  }
-                  chevron
-                />
-              );
-            })}
-          </List>
-        </Section>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <span className="block t-subhead font-semibold t-numeral text-[var(--text-primary)]">
+                      {formatCurrency(s.amount)}
+                    </span>
+                    <span className="block t-caption text-[var(--text-secondary)]">{timeLabel(item.ts)}</span>
+                  </span>
+                  <ChevronRight className="row-chevron -mr-1" />
+                </button>
+                {respond && (
+                  <div className="flex gap-2 px-4 pb-3 -mt-0.5 pl-[58px]">
+                    <button
+                      type="button"
+                      onClick={() => onApprove(s)}
+                      className="btn-prominent btn-small"
+                    >
+                      {isOffset ? "Accept" : "Approve"}
+                    </button>
+                    {canForward && !isOffset && s.toUid === currentUid && (
+                      <button type="button" onClick={() => onForward(s)} className="btn-gray btn-small">
+                        Forward
+                      </button>
+                    )}
+                    <button type="button" onClick={() => onReject(s)} className="btn-gray btn-small !text-[var(--neg)]">
+                      Decline
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </ListSection>
       ))}
     </>
   );

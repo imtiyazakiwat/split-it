@@ -1,20 +1,23 @@
+"use client";
+
 import Link from "next/link";
-import { EmptyState } from "@/components/kit/Controls";
+import { EmptyState } from "@/components/ui/Controls";
+import { Wifi } from "@/components/ui/Icons";
 
 /**
  * Served by the service worker when a navigation has no network and nothing
- * cached. Static only — it never touches data. Screens you've already opened
- * still load from history; only never-visited routes land here.
+ * cached. Static content only — never touches data, so it renders with or
+ * without a connection.
  */
 export default function OfflinePage() {
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-[var(--bg)] px-6">
+    <main className="flex-1 min-h-[100dvh] flex items-center justify-center max-w-md w-full mx-auto px-4 pt-[env(safe-area-inset-top)]">
       <EmptyState
-        icon="wifi.slash"
-        title="You're Offline"
-        message="SplitIt needs a connection to load this. Anything you've already opened is still available."
+        icon={<Wifi size={60} weight={1.5} />}
+        title="You’re Offline"
+        message="SplitIt needs a connection to open this screen. Anything you’ve opened before is still available."
         action={
-          <Link href="/" className="btn btn-prominent is-md">
+          <Link href="/" className="btn-prominent">
             Try Again
           </Link>
         }

@@ -1,6 +1,6 @@
 "use client";
 import { Suspense, useMemo, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
@@ -13,16 +13,12 @@ import { toCsv, downloadTextFile } from "@/lib/report";
 import { Expense, Group, Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import Menu from "@/components/ui/Menu";
+import { ButtonRow, LinkRow, ListSection, Row } from "@/components/ui/List";
+import { Avatar, EmptyState, Segmented } from "@/components/ui/Controls";
+import { Doc, Download, Ellipsis } from "@/components/ui/Icons";
 import Skeleton from "@/components/ui/Skeleton";
-import Screen from "@/components/kit/Screen";
-import { Card, List, RowLink, Section, sepInset } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
-import { CategoryTile, GroupAvatar } from "@/components/kit/Tile";
-import { EmptyState, Meter, Segmented } from "@/components/kit/Controls";
-import { Menu } from "@/components/kit/Menu";
-import { Icon } from "@/components/kit/Icon";
-import { NavLink } from "@/components/kit/nav";
-import { replaceSamePath } from "@/lib/nav-transitions";
 
 const ALL = "all";
 
@@ -54,129 +50,141 @@ function rowWording(row: StatementRow, otherName: string): string {
   }
 }
 
-/** The two-column ledger: each row lands in "You gave" or "You got". */
 function StatementTable({ stmt, otherName }: { stmt: PairStatement; otherName: string }) {
   if (stmt.rows.length === 0) {
     return (
-      <Card>
-        <EmptyState compact icon="doc.text" title="Nothing Here Yet" message={`Nothing shared with ${otherName} in this scope.`} />
-      </Card>
+      <ListSection header="Entries">
+        <Row title={<span className="text-[var(--text-secondary)]">Nothing shared with {otherName} here yet</span>} />
+      </ListSection>
     );
   }
   const gave = stmt.rows.filter((r) => r.delta > 0).reduce((s, r) => s + r.delta, 0);
   const got = stmt.rows.filter((r) => r.delta < 0).reduce((s, r) => s - r.delta, 0);
   return (
-    <Card>
-      <div className="grid grid-cols-[1fr_80px_80px] gap-2 border-b-[0.5px] border-[var(--separator)] px-4 py-2.5">
-        <span className="t-caption2 uppercase text-label-2">Date &amp; details</span>
-        <span className="t-caption2 text-right uppercase text-pos">You gave</span>
-        <span className="t-caption2 text-right uppercase text-neg">You got</span>
-      </div>
-      <ul className="list">
+    <>
+      <ListSection header={`${stmt.rows.length} ${stmt.rows.length === 1 ? "Entry" : "Entries"}`}>
         {[...stmt.rows].reverse().map((row) => (
-          <li key={row.key} className="grid grid-cols-[1fr_80px_80px] gap-2 px-4 py-3" style={sepInset(16)}>
-            <div className="min-w-0">
-              <p className="t-subhead truncate font-semibold">{row.label}</p>
-              <p className="t-caption mt-0.5 text-label-2">{fullDate(row.ts)}</p>
-              <p className="t-caption mt-0.5 text-label-2">{rowWording(row, otherName)}</p>
-              <p className="t-caption mt-1 text-label-3">
+          <div key={row.key} className="list-row is-tall !items-start">
+            <span className="min-w-0 flex-1">
+              <span className="block t-body text-[var(--text-primary)] truncate">{row.label}</span>
+              <span className="block t-subhead text-[var(--text-secondary)] mt-px">{rowWording(row, otherName)}</span>
+              <span className="block t-footnote text-[var(--text-secondary)] mt-0.5">
+                {fullDate(row.ts)} ·{" "}
                 {isSettled(row.balance)
-                  ? "Balance: settled"
+                  ? "settled"
                   : row.balance > 0
-                  ? `Balance: ${otherName} owes you ${formatCurrency(row.balance)}`
-                  : `Balance: you owe ${otherName} ${formatCurrency(-row.balance)}`}
-              </p>
-            </div>
-            <span className="num t-subhead text-right font-semibold text-pos">
-              {row.delta > 0.001 ? formatCurrency(row.delta) : ""}
+                  ? `${otherName} owes you ${formatCurrency(row.balance)}`
+                  : `you owe ${formatCurrency(-row.balance)}`}
+              </span>
             </span>
-            <span className="num t-subhead text-right font-semibold text-neg">
-              {row.delta < -0.001 ? formatCurrency(-row.delta) : ""}
+            <span className="shrink-0 text-right pt-px">
+              {row.delta > 0.001 ? (
+                <>
+                  <span className="block t-caption text-[var(--text-secondary)]">you gave</span>
+                  <span className="block t-subhead font-semibold t-numeral text-[var(--pos)]">{formatCurrency(row.delta)}</span>
+                </>
+              ) : row.delta < -0.001 ? (
+                <>
+                  <span className="block t-caption text-[var(--text-secondary)]">you got</span>
+                  <span className="block t-subhead font-semibold t-numeral text-[var(--neg)]">{formatCurrency(-row.delta)}</span>
+                </>
+              ) : (
+                <span className="block t-subhead text-[var(--text-secondary)]">—</span>
+              )}
             </span>
-          </li>
+          </div>
         ))}
-      </ul>
-      <div className="grid grid-cols-[1fr_80px_80px] gap-2 border-t-[0.5px] border-[var(--separator)] bg-[var(--fill-4)] px-4 py-3">
-        <span className="t-subhead font-semibold">Total</span>
-        <span className="num t-subhead text-right font-bold text-pos">{formatCurrency(gave)}</span>
-        <span className="num t-subhead text-right font-bold text-neg">{formatCurrency(got)}</span>
-      </div>
-    </Card>
+      </ListSection>
+      <ListSection header="Totals">
+        <Row title="You gave" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(gave)}</span>} />
+        <Row title="You got" detail={<span className="t-numeral text-[var(--neg)]">{formatCurrency(got)}</span>} />
+      </ListSection>
+    </>
   );
 }
 
-/** A pop-up menu row: label left, current choice right, ⌃⌄ glyph. */
+/** Proportion row used by the category and payer breakdowns. */
+function SpendBar({
+  label,
+  value,
+  max,
+  sub,
+}: {
+  label: string;
+  emoji?: string;
+  value: number;
+  max: number;
+  sub?: string;
+}) {
+  const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
+  return (
+    <div className="list-row !block">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="t-body text-[var(--text-primary)] truncate">{label}</span>
+        <span className="t-body font-semibold t-numeral text-[var(--text-primary)] shrink-0">{formatCurrency(value)}</span>
+      </div>
+      <div className="meter mt-2 !h-[6px]">
+        <span style={{ width: `${pct}%`, background: "var(--brand-solid)" }} />
+      </div>
+      {sub && <p className="t-footnote text-[var(--text-secondary)] mt-1.5">{sub}</p>}
+    </div>
+  );
+}
+
+/** A pop-up menu row: label left, current value + up/down chevrons right. */
 function PickerRow({
   label,
   value,
-  options,
   onChange,
+  options,
 }: {
   label: string;
   value: string;
-  options: { id: string; name: string }[];
   onChange: (id: string) => void;
+  options: { id: string; name: string }[];
 }) {
   const current = options.find((o) => o.id === value)?.name ?? options[0]?.name;
   return (
     <Menu
-      align="end"
-      title={label}
+      label={label}
+      align="right"
       items={options.map((o) => ({ label: o.name, checked: o.id === value, onSelect: () => onChange(o.id) }))}
-    >
-      {(props) => (
-        <button type="button" {...props} className="row is-pressable" style={sepInset(16)}>
-          <span className="row-main">
-            <span className="row-title">{label}</span>
-          </span>
-          <span className="flex min-w-0 items-center gap-1 text-label-2">
-            <span className="t-body max-w-[46vw] truncate">{current}</span>
-            <Icon name="chevron.up.down" size={15} strokeWidth={2.2} />
+      trigger={(t) => (
+        <button {...t} type="button" className="list-row">
+          <span className="flex-1 t-body text-[var(--text-primary)]">{label}</span>
+          <span className="t-body text-[var(--text-secondary)] truncate max-w-[55%] flex items-center gap-1">
+            {current}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m7 9 5-5 5 5M7 15l5 5 5-5" />
+            </svg>
           </span>
         </button>
       )}
-    </Menu>
-  );
-}
-
-/** Proportion rows for the spending breakdowns. */
-function SpendRows({
-  rows,
-}: {
-  rows: { key: string; leading: React.ReactNode; label: string; value: number; max: number; sub?: string }[];
-}) {
-  return (
-    <List>
-      {rows.map((r) => (
-        <div key={r.key} className="row is-tall" style={sepInset(58)}>
-          {r.leading}
-          <span className="row-main">
-            <span className="flex items-baseline justify-between gap-3">
-              <span className="row-title">{r.label}</span>
-              <span className="num t-subhead shrink-0 font-semibold">{formatCurrency(r.value)}</span>
-            </span>
-            <span className="mt-1.5 block">
-              <Meter value={r.max > 0 ? Math.max(2, Math.round((r.value / r.max) * 100)) : 0} color="var(--tint)" label={r.label} />
-            </span>
-            {r.sub && <span className="row-detail">{r.sub}</span>}
-          </span>
-        </div>
-      ))}
-    </List>
+    />
   );
 }
 
 /**
- * Pick a group, optionally a person, see what was spent. With a person picked
- * the figures cover only expenses the two of you shared — a different
- * question from "what did this group spend".
+ * Spending dashboard: pick a group, optionally pick a person, see what was
+ * spent. With a person selected the figures cover only the expenses the two of
+ * you shared, which is a different question from "what did this group spend".
  */
-function SpendingDashboard({ meUid, groups, datasets }: { meUid: string; groups: Group[]; datasets: GroupDataset[] }) {
+function SpendingDashboard({
+  meUid,
+  groups,
+  datasets,
+}: {
+  meUid: string;
+  groups: Group[];
+  datasets: GroupDataset[];
+}) {
   const [groupId, setGroupId] = useState("all");
   const [personUid, setPersonUid] = useState("all");
 
   const scopedGroups = groupId === "all" ? groups : groups.filter((g) => g.id === groupId);
-  const expenses = scopedGroups.flatMap((g) => datasets.find((d) => d.group.id === g.id)?.expenses ?? []);
+  const expenses = scopedGroups.flatMap(
+    (g) => datasets.find((d) => d.group.id === g.id)?.expenses ?? []
+  );
 
   // Everyone who shares one of the groups in scope.
   const peopleMap = new Map<string, string>();
@@ -186,143 +194,102 @@ function SpendingDashboard({ meUid, groups, datasets }: { meUid: string; groups:
       peopleMap.set(uid, g.members?.[uid]?.displayName || "Member");
     }
   }
-  const people = Array.from(peopleMap, ([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  // Switching group can strip out the selected person; fall back to everyone
-  // rather than reporting zero against someone who isn't here.
+  const people = Array.from(peopleMap, ([id, name]) => ({ id, name })).sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
+  // Switching group can strip out the person who was selected; fall back to
+  // everyone rather than reporting zero against someone who isn't here.
   const activePerson = personUid !== "all" && peopleMap.has(personUid) ? personUid : null;
   const summary = summariseSpending(meUid, expenses, activePerson);
   const otherName = activePerson ? peopleMap.get(activePerson) : null;
   const maxCategory = summary.byCategory[0]?.total ?? 0;
   const maxPayer = summary.byPayer[0]?.paid ?? 0;
-  const nameOf = (uid: string) => (uid === meUid ? "You" : peopleMap.get(uid) || "Former member");
-  const photoOf = (uid: string) => {
-    for (const g of scopedGroups) {
-      const p = g.members?.[uid]?.photoURL;
-      if (p) return p;
-    }
-    return undefined;
-  };
+  const nameOf = (uid: string) =>
+    uid === meUid ? "You" : peopleMap.get(uid) || "Former member";
 
   return (
-    <>
-      <Section tight>
-        <List>
+    <div>
+      <ListSection className="!mt-4">
+        <PickerRow
+          label="Group"
+          value={groupId}
+          onChange={setGroupId}
+          options={[{ id: "all", name: "All Groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
+        />
+        {people.length > 0 && (
           <PickerRow
-            label="Group"
-            value={groupId}
-            onChange={setGroupId}
-            options={[{ id: "all", name: "All Groups" }, ...groups.map((g) => ({ id: g.id, name: g.name }))]}
+            label="Spent With"
+            value={activePerson ?? "all"}
+            onChange={setPersonUid}
+            options={[{ id: "all", name: "Everyone" }, ...people]}
           />
-          {people.length > 0 && (
-            <PickerRow
-              label="Spent with"
-              value={activePerson ?? "all"}
-              onChange={setPersonUid}
-              options={[{ id: "all", name: "Everyone" }, ...people]}
-            />
-          )}
-        </List>
-      </Section>
+        )}
+      </ListSection>
 
-      <Section>
-        <Card className="p-4">
-          <p className="t-footnote text-label-2">
-            {otherName ? `Spent on things you and ${otherName} shared` : "Total spent"}
-            {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
-          </p>
-          <p className="amount-hero mt-1 truncate text-[34px]">{formatCurrency(summary.total)}</p>
-          <p className="t-footnote mt-1 text-label-2">
-            {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
-            {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} on average`}
-          </p>
-          {summary.firstTs && summary.lastTs && (
-            <p className="t-caption mt-0.5 text-label-2">
-              {fullDate(summary.firstTs)} – {fullDate(summary.lastTs)}
-            </p>
+      <div className="list-section px-4 pt-3.5 pb-4 mt-5">
+        <p className="t-subhead text-[var(--text-secondary)] truncate">
+          {otherName ? `Shared with ${otherName}` : "Total spent"}
+          {groupId !== "all" && scopedGroups[0] ? ` · ${scopedGroups[0].name}` : ""}
+        </p>
+        <p className="t-large-title t-numeral text-[var(--text-primary)] truncate">{formatCurrency(summary.total)}</p>
+        <p className="t-footnote text-[var(--text-secondary)]">
+          {summary.expenseCount} expense{summary.expenseCount !== 1 ? "s" : ""}
+          {summary.expenseCount > 0 && ` · ${formatCurrency(summary.average)} average`}
+          {summary.firstTs && summary.lastTs ? ` · ${fullDate(summary.firstTs)} – ${fullDate(summary.lastTs)}` : ""}
+        </p>
+      </div>
+
+      {summary.expenseCount > 0 && (
+        <ListSection>
+          <Row title="Your share" detail={<span className="t-numeral">{formatCurrency(summary.myShare)}</span>} />
+          <Row title="You paid up front" detail={<span className="t-numeral">{formatCurrency(summary.iPaid)}</span>} />
+          {otherName && (
+            <>
+              <Row title={`${otherName}’s share`} detail={<span className="t-numeral">{formatCurrency(summary.theirShare)}</span>} />
+              <Row title={`${otherName} paid up front`} detail={<span className="t-numeral">{formatCurrency(summary.theyPaid)}</span>} />
+            </>
           )}
-          {summary.expenseCount > 0 && (
-            <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 border-t-[0.5px] border-[var(--separator)] pt-4">
-              <div>
-                <p className="t-caption text-label-2">Your share</p>
-                <p className="num t-headline">{formatCurrency(summary.myShare)}</p>
-              </div>
-              <div>
-                <p className="t-caption text-label-2">You paid up front</p>
-                <p className="num t-headline">{formatCurrency(summary.iPaid)}</p>
-              </div>
-              {otherName && (
-                <>
-                  <div>
-                    <p className="t-caption truncate text-label-2">{otherName}&rsquo;s share</p>
-                    <p className="num t-headline">{formatCurrency(summary.theirShare)}</p>
-                  </div>
-                  <div>
-                    <p className="t-caption truncate text-label-2">{otherName} paid up front</p>
-                    <p className="num t-headline">{formatCurrency(summary.theyPaid)}</p>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-        </Card>
-      </Section>
+        </ListSection>
+      )}
 
       {summary.expenseCount === 0 ? (
-        <p className="section-footer mt-2">
-          {otherName ? `No expenses shared with ${otherName} in this scope yet.` : "No expenses in this scope yet."}
-        </p>
+        <EmptyState
+          icon={<Doc size={52} weight={1.4} />}
+          title="No Expenses"
+          message={otherName ? `No expenses shared with ${otherName} in this scope yet.` : "No expenses in this scope yet."}
+        />
       ) : (
         <>
-          <Section header="Where it went">
-            <SpendRows
-              rows={summary.byCategory.map((c) => ({
-                key: c.id,
-                leading: <CategoryTile id={c.id} />,
-                label: c.label,
-                value: c.total,
-                max: maxCategory,
-                sub: `${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`,
-              }))}
-            />
-          </Section>
-          <Section header="Who put the money in">
-            <SpendRows
-              rows={summary.byPayer.map((p) => ({
-                key: p.uid,
-                leading: <Avatar name={nameOf(p.uid)} photoURL={photoOf(p.uid)} size={30} />,
-                label: nameOf(p.uid),
-                value: p.paid,
-                max: maxPayer,
-                sub: `paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`,
-              }))}
-            />
-          </Section>
+          <ListSection header="Where it went">
+            {summary.byCategory.map((c) => (
+              <SpendBar
+                key={c.id}
+                label={c.label}
+                value={c.total}
+                max={maxCategory}
+                sub={`${c.count} expense${c.count !== 1 ? "s" : ""} · your share ${formatCurrency(c.myShare)}`}
+              />
+            ))}
+          </ListSection>
+          <ListSection header="Who paid">
+            {summary.byPayer.map((p) => (
+              <SpendBar
+                key={p.uid}
+                label={nameOf(p.uid)}
+                value={p.paid}
+                max={maxPayer}
+                sub={`paid for ${p.count} expense${p.count !== 1 ? "s" : ""}`}
+              />
+            ))}
+          </ListSection>
         </>
       )}
-    </>
-  );
-}
-
-function ReportsSkeleton() {
-  return (
-    <Screen title="Reports" large tabBar>
-      <Skeleton className="h-9 w-full rounded-full" />
-      <div className="card list mt-4" aria-hidden>
-        {[0, 1, 2].map((i) => (
-          <div key={i} className="row is-tall" style={sepInset(68)}>
-            <Skeleton className="h-10 w-10 rounded-full" />
-            <div className="flex-1">
-              <Skeleton className="h-4 w-32 rounded-md" />
-              <Skeleton className="mt-2 h-3 w-48 rounded-md" />
-            </div>
-          </div>
-        ))}
-      </div>
-    </Screen>
+    </div>
   );
 }
 
 function ReportsInner() {
+  const router = useRouter();
   const params = useSearchParams();
   const { user, loading } = useAuth();
   const { groups, datasets, allLoaded, groupsLoaded } = useGroupData();
@@ -331,9 +298,11 @@ function ReportsInner() {
   const personParam = params.get("person");
   const groupParam = params.get("group");
   const tabParam = params.get("tab") === "spending" ? "spending" : "statements";
-  // Tagging the scope with the person it was chosen for lets it expire by
-  // derivation when the person changes (a stale scope could otherwise render
-  // an empty statement with no way to clear it).
+  // Switching person keeps this component mounted, so a scope left over from the
+  // previous person would carry across: if that group isn't shared with the new
+  // person the statement renders empty, and when they share fewer than two groups
+  // the chip row is hidden, leaving no way to clear it. Tagging the choice with
+  // the person it was made for lets it expire by derivation.
   const [pickedScope, setPickedScope] = useState<{ person: string | null; value: string } | null>(null);
   const scope = pickedScope?.person === personParam ? pickedScope.value : groupParam || ALL;
   const setScope = (value: string) => setPickedScope({ person: personParam, value });
@@ -344,88 +313,87 @@ function ReportsInner() {
     [uid, datasets, transfers]
   );
 
-  if (loading || (!groupsLoaded && user)) return <ReportsSkeleton />;
+  if (loading || (!groupsLoaded && user)) {
+    return (
+      <Screen title="Statements" large>
+        <div className="list-section">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="list-row is-tall">
+              <Skeleton className="w-10 h-10 rounded-full" />
+              <div className="flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-1/2 rounded-md" />
+                <Skeleton className="h-3 w-2/3 rounded-md" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </Screen>
+    );
+  }
   if (!user) return <LoginScreen />;
   const meUid = user.uid;
 
-  // ── People ───────────────────────────────────────────────────
+  // ── Person list ────────────────────────────────────────────
   if (!personParam) {
-    const people = counterparties.filter((c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0));
+    const people = counterparties.filter(
+      (c) => c.sharedGroupCount > 0 || !isSettled(c.directNet || 0)
+    );
     return (
-      <Screen key="list" title="Reports" large tabBar>
+      <Screen title="Statements" large>
         <Segmented
-          label="Report type"
+          label="Statements view"
           value={tabParam}
-          // A query-only change on this static page: the History API (which the
-          // router follows) rather than router.replace, which in Next 16.2 can
-          // restore a cold-start query instead (see replaceSamePath).
-          onChange={(id) => replaceSamePath(id === "spending" ? "/reports?tab=spending" : "/reports")}
+          onChange={(id) => router.replace(id === "spending" ? "/reports?tab=spending" : "/reports", { scroll: false })}
           options={[
-            { id: "statements", label: "Statements" },
+            { id: "statements", label: "People" },
             { id: "spending", label: "Spending" },
           ]}
         />
         {tabParam === "spending" ? (
           <SpendingDashboard meUid={meUid} groups={groups} datasets={datasets} />
+        ) : people.length === 0 ? (
+          <EmptyState
+            icon={<Doc size={56} weight={1.4} />}
+            title="No Statements"
+            message="Add an expense in a group and a running account with each person shows up here."
+          />
         ) : (
-          <Section
+          <ListSection
+            className="!mt-4"
             footer={
-              <>
-                A running account with each person, entry by entry — who paid for what, and what&rsquo;s left
-                between you.
-                {!allLoaded && " Still loading every group…"}
-              </>
+              !allLoaded
+                ? "Still loading every group…"
+                : "A running account with each person: who paid for what, and what’s left between you."
             }
           >
-            {people.length === 0 ? (
-              <Card>
-                <EmptyState
-                  compact
-                  icon="doc.text"
-                  title="No Statements Yet"
-                  message="Add an expense in a group and a statement with each person appears here."
-                />
-              </Card>
-            ) : (
-              <List>
-                {people.map((p) => {
-                  const settled = isSettled(p.net);
-                  const iOwe = !settled && p.net > 0;
-                  const groupsText =
-                    p.sharedGroupCount > 0
-                      ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
-                      : "Direct payments";
-                  return (
-                    <RowLink
-                      key={p.uid}
-                      href={`/reports?person=${p.uid}`}
-                      inset="avatar"
-                      tall
-                      leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} />}
-                      title={p.displayName}
-                      titleClassName="font-semibold"
-                      subtitle={
-                        !isSettled(p.directNet || 0)
-                          ? `${groupsText} · ${formatCurrency(Math.abs(p.directNet))} direct`
-                          : groupsText
-                      }
-                      trailing={
-                        <span className="flex shrink-0 flex-col items-end">
-                          <span className="t-caption text-label-2">
-                            {settled ? "" : iOwe ? "you owe" : "owes you"}
-                          </span>
-                          <span className={`num t-headline ${settled ? "text-label-3" : iOwe ? "text-neg" : "text-pos"}`}>
-                            {settled ? "Settled" : formatCurrency(Math.abs(p.net))}
-                          </span>
-                        </span>
-                      }
-                      ariaLabel={`${p.displayName}, ${describeNet(-p.net, p.displayName, formatCurrency)}. View statement`}
-                    />
-                  );
-                })}
-              </List>
-            )}
-          </Section>
+            {people.map((p) => (
+              <LinkRow
+                key={p.uid}
+                href={`/reports?person=${p.uid}`}
+                tall
+                leading={<Avatar name={p.displayName} photoURL={p.photoURL} size={40} seed={p.uid} />}
+                separatorInset={68}
+                title={p.displayName}
+                subtitle={
+                  p.sharedGroupCount > 0
+                    ? `${p.sharedGroupCount} shared group${p.sharedGroupCount !== 1 ? "s" : ""}`
+                    : "Direct payments"
+                }
+                detail={
+                  isSettled(p.net) ? (
+                    "Settled"
+                  ) : (
+                    <span className="flex flex-col items-end leading-tight">
+                      <span className="t-caption text-[var(--text-secondary)]">{p.net > 0 ? "you owe" : "owes you"}</span>
+                      <span className={`t-subhead font-semibold t-numeral ${p.net > 0 ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                        {formatCurrency(Math.abs(p.net))}
+                      </span>
+                    </span>
+                  )
+                }
+              />
+            ))}
+          </ListSection>
         )}
       </Screen>
     );
@@ -435,9 +403,12 @@ function ReportsInner() {
   const person = counterparties.find((c) => c.uid === personParam);
   const otherName = person?.displayName || "This person";
   const sharedGroups = groups.filter((g) => g.memberIds?.includes(personParam) && g.memberIds?.includes(meUid));
-  // A scope this person doesn't share falls back to every shared group.
-  const effectiveScope = scope === ALL || sharedGroups.some((g) => g.id === scope) ? scope : ALL;
-  const scopedGroups = effectiveScope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === effectiveScope);
+  // Second guard, for the render that happens before the reset effect commits:
+  // a scope this person doesn't share falls back to showing every shared group.
+  const effectiveScope =
+    scope === ALL || sharedGroups.some((g) => g.id === scope) ? scope : ALL;
+  const scopedGroups =
+    effectiveScope === ALL ? sharedGroups : sharedGroups.filter((g) => g.id === effectiveScope);
 
   const expenses: Expense[] = [];
   const settlements: Settlement[] = [];
@@ -447,11 +418,10 @@ function ReportsInner() {
     expenses.push(...d.expenses);
     settlements.push(...d.settlements);
   }
-  // Direct payments belong to no group: shown across all shared groups,
-  // hidden when scoped to one.
+  // Direct payments belong to no group: show them when viewing all shared
+  // groups, hide them when scoped to one group.
   const scopedTransfers = effectiveScope === ALL ? transfers : [];
   const stmt = buildPairStatement(meUid, personParam, expenses, settlements, scopedTransfers);
-  const net = stmt.net;
 
   async function handleDownload() {
     const rows: (string | number)[][] = [
@@ -480,95 +450,77 @@ function ReportsInner() {
     }
   }
 
-  const tileCls =
-    "flex h-16 flex-col items-center justify-center gap-1 rounded-[18px] bg-[var(--cell)] text-tint transition-transform duration-150 active:scale-95";
-
   return (
-    <Screen key={`person-${personParam}`} title={otherName} back="/reports" heroTitle tabBar>
-      <div className="flex flex-col items-center px-2 pt-1 text-center">
-        <Avatar name={otherName} photoURL={person?.photoURL} size={84} />
-        <h2 data-hero-title className="t-title2 mt-3 max-w-full [overflow-wrap:anywhere]">{otherName}</h2>
-        <p className={`t-headline mt-1 ${isSettled(net) ? "text-label-2" : net > 0 ? "text-pos" : "text-neg"}`}>
-          {describeNet(net, otherName, formatCurrency)}
+    <Screen
+      title={otherName}
+      backHref="/reports"
+      inlineTitleAfter={90}
+      trailing={
+        stmt.rows.length > 0 ? (
+          <Menu
+            label="Statement actions"
+            items={[{ label: "Export CSV", icon: <Download size={20} />, onSelect: handleDownload }]}
+            trigger={(t) => (
+              <BarButton {...t} aria-label="More">
+                <Ellipsis size={21} />
+              </BarButton>
+            )}
+          />
+        ) : undefined
+      }
+    >
+      <div className="flex flex-col items-center text-center pt-1 pb-4">
+        <Avatar name={otherName} photoURL={person?.photoURL} size={72} seed={personParam} />
+        <h1 className="t-title2 text-[var(--text-primary)] mt-2.5 max-w-full truncate px-4">{otherName}</h1>
+        <p
+          className={`t-headline mt-1 ${
+            isSettled(stmt.net) ? "text-[var(--text-secondary)]" : stmt.net > 0 ? "text-[var(--pos)]" : "text-[var(--neg)]"
+          }`}
+        >
+          {describeNet(stmt.net, otherName, formatCurrency)}
         </p>
       </div>
 
-      {/* Contacts-style action tiles. */}
-      <div className="mt-5 grid grid-cols-3 gap-2">
-        <NavLink href={`/chat/${personParam}`} className={tileCls}>
-          <Icon name="message" size={22} />
-          <span className="t-caption font-medium">Message</span>
-        </NavLink>
-        <NavLink href={`/chat/${personParam}?pay=1`} className={tileCls}>
-          <Icon name="indianrupee" size={22} />
-          <span className="t-caption font-medium">Pay</span>
-        </NavLink>
-        <button
-          type="button"
-          onClick={() => void handleDownload()}
-          disabled={stmt.rows.length === 0}
-          className={`${tileCls} disabled:text-label-3`}
-        >
-          <Icon name="square.and.arrow.down" size={22} />
-          <span className="t-caption font-medium">Export CSV</span>
-        </button>
-      </div>
-
-      <Section header="As things stand">
-        <Card className="p-4">
-          <p className="t-subhead text-label-2">
-            You covered <span className="num font-semibold text-label">{formatCurrency(stmt.iCoveredForThem)}</span> of{" "}
-            {otherName}&rsquo;s share. {otherName} covered{" "}
-            <span className="num font-semibold text-label">{formatCurrency(stmt.theyCoveredForMe)}</span> of yours.
-          </p>
-          {!isSettled(stmt.directNet || 0) && (
-            <p className="t-subhead mt-2 text-label-2">
-              {formatCurrency(Math.abs(stmt.directNet))} is direct (not in any group) —{" "}
-              {stmt.directNet > 0 ? `${otherName} owes you` : `you owe ${otherName}`}.
-            </p>
-          )}
-          {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
-            <p className="t-footnote mt-2 text-warn">
-              A payment is still waiting to be approved, so it isn&rsquo;t counted above.
-            </p>
-          )}
-        </Card>
-      </Section>
-
       {sharedGroups.length > 1 && (
-        <Section>
-          <List>
-            <PickerRow
-              label="Groups"
-              value={effectiveScope}
-              onChange={setScope}
-              options={[{ id: ALL, name: "All Shared Groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))]}
-            />
-          </List>
-          {effectiveScope !== ALL && (
-            <p className="section-footer">Direct payments aren&rsquo;t part of any group, so they&rsquo;re hidden here.</p>
-          )}
-        </Section>
+        <ListSection className="!mt-0">
+          <PickerRow
+            label="Groups"
+            value={effectiveScope}
+            onChange={setScope}
+            options={[{ id: ALL, name: "All Shared Groups" }, ...sharedGroups.map((g) => ({ id: g.id, name: g.name }))]}
+          />
+        </ListSection>
       )}
 
-      <Section header="Statement">
-        <StatementTable stmt={stmt} otherName={otherName} />
-      </Section>
+      <ListSection
+        footer={
+          !isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)
+            ? "A payment is still waiting to be approved, so it isn’t counted here."
+            : undefined
+        }
+      >
+        <Row title={`You covered for ${otherName}`} detail={<span className="t-numeral">{formatCurrency(stmt.iCoveredForThem)}</span>} />
+        <Row title={`${otherName} covered for you`} detail={<span className="t-numeral">{formatCurrency(stmt.theyCoveredForMe)}</span>} />
+        {!isSettled(stmt.directNet || 0) && (
+          <Row
+            title="Direct (not in a group)"
+            subtitle={stmt.directNet > 0 ? `${otherName} owes you` : `You owe ${otherName}`}
+            detail={<span className="t-numeral">{formatCurrency(Math.abs(stmt.directNet))}</span>}
+          />
+        )}
+      </ListSection>
 
-      {sharedGroups.length > 0 && (
-        <Section header="Shared groups">
-          <List>
-            {sharedGroups.map((g) => (
-              <RowLink
-                key={g.id}
-                href={`/groups/${g.id}`}
-                inset={58}
-                leading={<GroupAvatar id={g.id} name={g.name} photoURL={g.photoURL} size={30} />}
-                title={g.name}
-              />
-            ))}
-          </List>
-        </Section>
+      <StatementTable stmt={stmt} otherName={otherName} />
+
+      {stmt.rows.length > 0 && (
+        <ListSection>
+          <ButtonRow
+            onClick={handleDownload}
+            leading={<span className="text-[var(--brand)]"><Download size={20} /></span>}
+            title="Export Statement"
+            action
+          />
+        </ListSection>
       )}
     </Screen>
   );
@@ -577,7 +529,7 @@ function ReportsInner() {
 export default function ReportsPage() {
   // useSearchParams needs a Suspense boundary for static rendering.
   return (
-    <Suspense fallback={<ReportsSkeleton />}>
+    <Suspense fallback={<Screen title="Statements" large>{null}</Screen>}>
       <ReportsInner />
     </Suspense>
   );

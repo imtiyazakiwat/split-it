@@ -1,12 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { searchUsers, addMemberToGroup, UserSearchResult } from "@/lib/firestore";
+import GlassModal from "@/components/ui/GlassModal";
+import { ListSection, Row } from "@/components/ui/List";
+import { Avatar, SearchField } from "@/components/ui/Controls";
 import { useToast } from "@/components/ui/Toast";
-import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
-import { Button, EmptyState, SearchField, Spinner } from "@/components/kit/Controls";
-import { List, Row } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
 
 export default function AddMemberModal({
   groupId,
@@ -20,9 +19,11 @@ export default function AddMemberModal({
   const [term, setTerm] = useState("");
   const [results, setResults] = useState<UserSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  // The term whose search last finished. Until it matches the current term,
+  // the list is still waiting (debounce included), so "No Results" isn't true yet.
+  const [searchedTerm, setSearchedTerm] = useState("");
   const [addingUid, setAddingUid] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
 
   useEffect(() => {
@@ -43,7 +44,10 @@ export default function AddMemberModal({
       } catch {
         if (!cancelled) setError("Search failed. Try again.");
       } finally {
-        if (!cancelled) setSearching(false);
+        if (!cancelled) {
+          setSearching(false);
+          setSearchedTerm(t);
+        }
       }
     }, 300);
     return () => {
@@ -62,73 +66,63 @@ export default function AddMemberModal({
         photoURL: u.photoURL,
       });
       showToast({ message: `${u.displayName} added to the group` });
-      sheetRef.current?.dismiss();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add member");
       setAddingUid(null);
     }
   }
 
-  const searched = term.trim().length >= 2;
+  const pending = searching || term.trim() !== searchedTerm;
 
   return (
-    <Sheet ref={sheetRef} large title="Add Member" onClose={onClose}>
-      <SearchField
-        value={term}
-        onChange={setTerm}
-        autoFocus
-        placeholder="Name or email"
-        label="Search people by name or email"
-        className="mt-1"
-      />
+    <GlassModal title="Add Member" large onClose={onClose}>
+      <SearchField value={term} onChange={setTerm} placeholder="Name or Email" label="Search people" autoFocus className="mt-1" />
 
-      {searching && (
-        <div className="flex justify-center py-6 text-label-2">
-          <Spinner />
-        </div>
+      {term.trim().length >= 2 && (
+        <ListSection
+          elevated
+          footer={
+            !pending && results.length === 0
+              ? "No one found. They need to have signed in to SplitIt at least once."
+              : undefined
+          }
+        >
+          {pending && results.length === 0 ? (
+            <Row title={<span className="text-[var(--text-secondary)]">Searching…</span>} />
+          ) : results.length === 0 ? (
+            <Row title={<span className="text-[var(--text-secondary)]">No Results</span>} />
+          ) : (
+            results.map((u) => (
+              <Row
+                key={u.uid}
+                leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={36} seed={u.uid} />}
+                separatorInset={64}
+                title={u.displayName}
+                subtitle={u.email}
+                detail={
+                  <button
+                    type="button"
+                    onClick={() => handleAdd(u)}
+                    disabled={addingUid !== null}
+                    className="btn-tinted btn-small -my-1"
+                  >
+                    {addingUid === u.uid ? "Adding…" : "Add"}
+                  </button>
+                }
+              />
+            ))
+          )}
+        </ListSection>
       )}
 
-      {!searching && searched && results.length === 0 && (
-        <EmptyState
-          compact
-          icon="magnifyingglass"
-          title="No Results"
-          message="They need to have signed in to SplitIt at least once. You can also send them an invite link."
-        />
-      )}
-
-      {!searched && (
-        <p className="section-footer mt-3">
-          Search for anyone who has signed in to SplitIt. For someone new, share the group&rsquo;s invite link instead.
+      {term.trim().length < 2 && (
+        <p className="list-footer text-center !px-6 !pt-6">
+          Search for someone who has signed in to SplitIt. To invite anyone else, share the group’s invite link.
         </p>
       )}
 
-      {results.length > 0 && (
-        <List className="mt-4">
-          {results.map((u) => (
-            <Row
-              key={u.uid}
-              inset="avatar"
-              leading={<Avatar name={u.displayName} photoURL={u.photoURL} size={40} />}
-              title={u.displayName}
-              subtitle={u.email}
-              trailing={
-                <Button
-                  size="sm"
-                  variant="tinted"
-                  busy={addingUid === u.uid}
-                  disabled={!!addingUid}
-                  onClick={() => handleAdd(u)}
-                >
-                  Add
-                </Button>
-              }
-            />
-          ))}
-        </List>
-      )}
-
-      {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
-    </Sheet>
+      {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
+    </GlassModal>
   );
 }

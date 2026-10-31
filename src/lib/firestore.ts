@@ -21,7 +21,7 @@ import {
   Group, Expense, Settlement, SettlementStatus, SettlementKind,
   SplitType, ExpenseSplit, UserProfile,
 } from "./types";
-import { notifyGroupMembers, notifyUsers } from "./send-notification";
+import { actorName, notifyGroupMembers, notifyUsers, rupees } from "./send-notification";
 import { groupItemLink } from "./statement";
 import { normaliseSplits } from "./balance";
 import { roundMoney, sumMoney } from "./money";
@@ -313,19 +313,43 @@ export async function addExpense(
     createdAt: Date.now(),
   });
 
-  try {
-    const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const groupName = groupSnap.data()?.name || "Group";
-    notifyGroupMembers(groupId, data.createdBy, {
-      title: groupName,
-      body: `New expense: ${data.description} — ₹${data.amount}`,
-      link: groupItemLink(groupId, { kind: "expense", id: ref.id }),
-    });
-  } catch {
-    // notification is best-effort
-  }
+  // Best-effort and not awaited. Only the people the expense touches (everyone
+  // in the split, plus the payer) hear about it: in a 10-person flat, the
+  // three who shared a taxi shouldn't buzz the other seven. Each person sees
+  // their own share, which is the number they actually care about. The server
+  // still checks that every recipient is a member and titles it with the group.
+  notifyExpenseParticipants(groupId, data.paidBy, splits, (uid, share) =>
+    uid === data.paidBy
+      ? `${actorName()} added ${data.description} that you paid · ${rupees(amount)}`
+      : share > 0
+      ? `${actorName()} added ${data.description} · your share ${rupees(share)}`
+      : `${actorName()} added ${data.description} · ${rupees(amount)}`,
+    groupItemLink(groupId, { kind: "expense", id: ref.id })
+  );
 
   return ref.id;
+}
+
+/**
+ * One push per involved person, worded with their own share. Batches people
+ * who'd get the same text into one request. Never throws.
+ */
+function notifyExpenseParticipants(
+  groupId: string,
+  paidBy: string,
+  splits: ExpenseSplit[],
+  bodyFor: (uid: string, myShare: number) => string,
+  link: string
+): void {
+  const shareOf = new Map<string, number>();
+  for (const s of splits) shareOf.set(s.uid, s.amount);
+  if (!shareOf.has(paidBy)) shareOf.set(paidBy, 0);
+  const byBody = new Map<string, string[]>();
+  for (const [uid, share] of shareOf) {
+    const body = bodyFor(uid, share);
+    byBody.set(body, [...(byBody.get(body) ?? []), uid]);
+  }
+  for (const [body, uids] of byBody) notifyUsers(uids, { groupId, body, link });
 }
 
 export async function updateExpense(
@@ -380,18 +404,10 @@ export async function updateExpense(
   });
 
   if (editedBy) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Group";
-      const desc = data.description || "Expense";
-      notifyGroupMembers(groupId, editedBy, {
-        title: groupName,
-        body: `${desc} was updated`,
-        link: groupItemLink(groupId, { kind: "expense", id: expenseId }),
-      });
-    } catch {
-      // best-effort
-    }
+    notifyGroupMembers(groupId, {
+      body: `${actorName()} updated ${data.description || "an expense"}`,
+      link: groupItemLink(groupId, { kind: "expense", id: expenseId }),
+    });
   }
 }
 
@@ -409,17 +425,10 @@ export async function deleteExpense(
   });
 
   if (deletedBy) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Group";
-      notifyGroupMembers(groupId, deletedBy, {
-        title: groupName,
-        body: `${desc} was removed`,
-        link: `/groups/${groupId}`,
-      });
-    } catch {
-      // best-effort
-    }
+    notifyGroupMembers(groupId, {
+      body: `${actorName()} removed ${desc}`,
+      link: `/groups/${groupId}`,
+    });
   }
 }
 
@@ -493,24 +502,18 @@ export async function addSettlementRequest(
   );
 
   // The person who did NOT raise the record is the one who has to act on it.
+  // `createdBy` is always the signed-in user, so they name themselves here and
+  // the server titles the push with the group name.
   const approver = data.createdBy === data.fromUid ? data.toUid : data.fromUid;
-  try {
-    const groupSnap = await getDoc(doc(db, "groups", groupId));
-    const group = groupSnap.data();
-    const creatorName =
-      (group?.members as Record<string, { displayName: string }>)?.[data.createdBy]
-        ?.displayName || "Someone";
-    notifyUsers([approver], {
-      title: group?.name || "Settlement request",
-      body:
-        data.createdBy === data.fromUid
-          ? `${creatorName} says they paid you ₹${data.amount}`
-          : `${creatorName} recorded a ₹${data.amount} payment from you`,
-      link: groupItemLink(groupId, { kind: "settlement", id: ref.id }),
-    });
-  } catch {
-    // best-effort
-  }
+  const amount = rupees(roundMoney(data.amount));
+  notifyUsers([approver], {
+    groupId,
+    body:
+      data.createdBy === data.fromUid
+        ? `${actorName()} says they paid you ${amount}. Tap to confirm.`
+        : `${actorName()} recorded a ${amount} payment from you`,
+    link: groupItemLink(groupId, { kind: "settlement", id: ref.id }),
+  });
 
   return ref.id;
 }
@@ -540,17 +543,11 @@ export async function updateSettlementStatus(
   });
 
   if (creator) {
-    try {
-      const groupSnap = await getDoc(doc(db, "groups", groupId));
-      const groupName = groupSnap.data()?.name || "Settlement";
-      notifyUsers([creator], {
-        title: groupName,
-        body: `Your settlement request of ₹${amount} was ${status}`,
-        link: groupItemLink(groupId, { kind: "settlement", id: settlementId }),
-      });
-    } catch {
-      // best-effort
-    }
+    notifyUsers([creator], {
+      groupId,
+      body: `${actorName()} ${status === "approved" ? "confirmed" : "declined"} your ${rupees(amount)} payment`,
+      link: groupItemLink(groupId, { kind: "settlement", id: settlementId }),
+    });
   }
 }
 
@@ -640,12 +637,66 @@ export async function resolveUpiId(
   }
 }
 
-// ── FCM / Notifications ─────────────────────────────────────
+// ── Push devices ────────────────────────────────────────────
+//
+// One document per install at users/{uid}/devices/{deviceId}. This replaces the
+// single users/{uid}.fcmToken field, where the last device to open the app
+// overwrote every other device's token and those devices silently stopped
+// receiving anything.
+//
+// The legacy field is still honoured in both directions until the new rules are
+// deployed: the server reads it alongside the device documents, and a device
+// whose write to devices/ is rejected by old rules falls back to it. Shipping
+// this code before the rules therefore degrades to the old behaviour instead of
+// breaking notifications.
 
-export async function saveFcmToken(uid: string, token: string): Promise<void> {
-  await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
+function isPermissionDenied(err: unknown): boolean {
+  return (err as { code?: string } | null)?.code === "permission-denied";
 }
 
-export async function removeFcmToken(uid: string): Promise<void> {
-  await setDoc(doc(db, "users", uid), { fcmToken: "" }, { merge: true });
+export type PushPlatform = "ios" | "android" | "desktop";
+
+export async function registerPushDevice(
+  uid: string,
+  deviceId: string,
+  token: string,
+  platform: PushPlatform
+): Promise<"device" | "legacy"> {
+  try {
+    // A full overwrite, not a merge: the rules accept exactly these four fields.
+    await setDoc(doc(db, "users", uid, "devices", deviceId), {
+      token,
+      platform,
+      enabled: true,
+      updatedAt: Date.now(),
+    });
+    return "device";
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+    await setDoc(doc(db, "users", uid), { fcmToken: token }, { merge: true });
+    return "legacy";
+  }
+}
+
+export async function disablePushDevice(uid: string, deviceId: string): Promise<void> {
+  const deviceRef = doc(db, "users", uid, "devices", deviceId);
+  let deviceToken: string | undefined;
+  try {
+    const snap = await getDoc(deviceRef);
+    if (snap.exists()) {
+      deviceToken = snap.get("token") as string | undefined;
+      await updateDoc(deviceRef, { enabled: false, updatedAt: Date.now() });
+    }
+  } catch (err) {
+    if (!isPermissionDenied(err)) throw err;
+  }
+
+  // Clear the legacy field when it points at this device — or when there's no
+  // device document to compare against, which is the only way "off" can work
+  // while the old rules are still deployed.
+  const userSnap = await getDoc(doc(db, "users", uid));
+  const legacy = userSnap.get("fcmToken") as string | undefined;
+  if (legacy && (!deviceToken || legacy === deviceToken)) {
+    await setDoc(doc(db, "users", uid), { fcmToken: "" }, { merge: true });
+  }
 }

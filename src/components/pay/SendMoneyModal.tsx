@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { resolveUpiId } from "@/lib/firestore";
 import { createTransfer } from "@/lib/transfers";
 import { uploadImage } from "@/lib/storage";
 import { formatCurrency } from "@/lib/balance";
 import { roundMoney } from "@/lib/money";
-import { hapticSuccess } from "@/lib/haptics";
 import {
+  UPI_APPS,
   UpiApp,
   UpiPaymentParams,
   copyToClipboard,
@@ -16,31 +16,30 @@ import {
   isValidUpiId,
   launchUpi,
 } from "@/lib/upi";
+import { UpiAppIcon } from "@/components/UpiAppIcon";
+import GlassModal from "@/components/ui/GlassModal";
+import { ButtonRow, FieldRow, ListSection, Row } from "@/components/ui/List";
+import { AmountInput } from "@/components/ui/Controls";
+import { Copy, Paperclip } from "@/components/ui/Icons";
 import { useToast } from "@/components/ui/Toast";
-import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
-import { AmountField } from "@/components/kit/AmountField";
-import { Attachments } from "@/components/kit/Attachments";
-import { Button, FieldRow } from "@/components/kit/Controls";
-import { List, Section } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
-import { Icon } from "@/components/kit/Icon";
-import UpiPayPanel from "@/components/pay/UpiPayPanel";
+import { activateFileInputOnKey } from "@/lib/keyboard";
 
 /**
- * Send money straight to a person, no group involved.
+ * Send money straight to a person, with no group involved.
  *
- * The app doesn't move money — UPI, cash or a bank app does. So: hand off to
- * a UPI app to pay, then record that you paid. The other person confirms it
- * and decides whether it settles a group balance (IncludeTransferSheet); until
- * then it counts as a personal balance between the two of you.
+ * The app doesn't move money — UPI, cash or a bank app does. So this screen has
+ * two halves: hand off to a UPI app to actually pay, then record that you paid.
+ * Recording is what the other person sees, and only they can decide whether it
+ * settles a group balance (see IncludeTransferSheet). Until they book it into
+ * a group it counts as a personal direct balance once they confirm it.
  */
 export default function SendMoneyModal({
   fromUid,
   toUid,
   toName,
-  toPhotoURL,
   toUpiId,
   suggestedAmount = 0,
+  /** Optional context line, e.g. "You owe Asha ₹450 across 2 groups". */
   contextLine,
   onClose,
   onSent,
@@ -48,16 +47,13 @@ export default function SendMoneyModal({
   fromUid: string;
   toUid: string;
   toName: string;
-  toPhotoURL?: string;
   toUpiId?: string;
   suggestedAmount?: number;
-  /** e.g. "You owe Asha ₹450 across 2 groups". */
   contextLine?: string;
   onClose: () => void;
   onSent?: () => void;
 }) {
-  const initialAmount = suggestedAmount > 0 ? suggestedAmount.toFixed(2) : "";
-  const [amount, setAmount] = useState(initialAmount);
+  const [amount, setAmount] = useState(suggestedAmount > 0 ? suggestedAmount.toFixed(2) : "");
   const [note, setNote] = useState("");
   const [receiptFiles, setReceiptFiles] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
@@ -65,18 +61,25 @@ export default function SendMoneyModal({
   const [handedOff, setHandedOff] = useState(false);
   const [resolvedUpiId, setResolvedUpiId] = useState<string | undefined>(toUpiId);
   const [upiChecked, setUpiChecked] = useState(false);
-  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
 
-  // Whole paise: no payment rail can move a third of a paise.
+  // Snapped to whole paise: a sub-paise transfer leaves a balance that can
+  // never be paid off, since no payment rail can move a third of a paise.
   const parsedAmount = roundMoney(parseFloat(amount) || 0);
   /**
-   * Overpaying doesn't fail, it flips the balance — exactly how a stubborn
-   * leftover appears. Say so before the money moves.
+   * Overpaying doesn't fail, it flips the balance — and that is exactly how a
+   * stubborn leftover appears. Sending ₹438.68 against a ₹279.09 debt makes the
+   * other person owe you ₹159.59; if they then round their refund up, you owe
+   * them the difference and the group looks unsettled forever. So say so before
+   * the money moves rather than leaving it to be discovered in the ledger.
    */
   const overpayBy = suggestedAmount > 0 ? roundMoney(parsedAmount - suggestedAmount) : 0;
+  // Both Android (intent://) and iOS (app-specific schemes) can hand off to a
+  // named UPI app; desktop can't, and there the copy-the-ID route is the answer.
   const canHandOff = isLikelyAndroid() || isLikelyIOS();
 
+  // The group's copy of a member's UPI ID can be missing or stale, so fall back
+  // to their user document — the same resolution the settle-up sheet does.
   useEffect(() => {
     let cancelled = false;
     resolveUpiId(toUid, toUpiId).then((resolved) => {
@@ -98,8 +101,6 @@ export default function SendMoneyModal({
         note: note.trim() || "SplitIt payment",
       }
     : null;
-
-  const dirty = amount !== initialAmount || !!note.trim() || receiptFiles.length > 0 || handedOff;
 
   function handlePayWithApp(app: UpiApp) {
     if (!upiParams) return;
@@ -125,7 +126,12 @@ export default function SendMoneyModal({
     showToast({ message: ok ? "UPI ID copied" : "Couldn't copy — long-press to select" });
   }
 
-  async function handleSubmit() {
+  function handleReceipts(e: React.ChangeEvent<HTMLInputElement>) {
+    setReceiptFiles((prev) => [...prev, ...Array.from(e.target.files || [])]);
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
     if (parsedAmount <= 0) {
       setError("Enter a valid amount.");
       return;
@@ -133,7 +139,8 @@ export default function SendMoneyModal({
     setBusy(true);
     setError("");
     try {
-      // A transfer belongs to no group, so the group receipt helper doesn't apply.
+      // A transfer belongs to no group, so the group-scoped receipt helper
+      // doesn't apply here.
       const receiptUrls =
         receiptFiles.length > 0
           ? await Promise.all(receiptFiles.map((f) => uploadImage(f, "transfer-receipt")))
@@ -145,10 +152,9 @@ export default function SendMoneyModal({
         note: note.trim() || undefined,
         receiptUrls,
       });
-      hapticSuccess();
       showToast({ message: `Sent ${formatCurrency(parsedAmount)} to ${toName}` });
       onSent?.();
-      sheetRef.current?.dismiss();
+      onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't record the payment");
     } finally {
@@ -157,83 +163,117 @@ export default function SendMoneyModal({
   }
 
   return (
-    <Sheet
-      ref={sheetRef}
-      large
+    <GlassModal
       title={`Pay ${toName}`}
-      dirty={dirty && !busy}
+      large
       onClose={onClose}
+      dirty={!busy && (note.trim() !== "" || receiptFiles.length > 0 || handedOff)}
       footer={
-        <>
-          <Button block busy={busy} disabled={parsedAmount <= 0} onClick={() => void handleSubmit()}>
-            {parsedAmount > 0 ? `I've Sent ${formatCurrency(parsedAmount)}` : "I've Sent It"}
-          </Button>
-          <p className="t-caption mt-2 text-center text-label-2">
-            {toName} confirms it and chooses whether it settles a group balance.
-          </p>
-        </>
+        <button type="submit" form="send-form" disabled={busy || parsedAmount <= 0} className="btn-prominent w-full">
+          {busy ? "Recording…" : parsedAmount > 0 ? `I’ve Sent ${formatCurrency(parsedAmount)}` : "I’ve Sent It"}
+        </button>
       }
     >
-      <div className="flex justify-center pt-3">
-        <Avatar name={toName} photoURL={toPhotoURL} size={56} />
-      </div>
-      <AmountField
-        id="send-amount"
-        value={amount}
-        onChange={setAmount}
-        autoFocus={!initialAmount}
-        caption={contextLine}
-      />
-
-      {overpayBy > 0 && (
-        <div className="card mb-1 flex items-start gap-3 p-4 rise-in">
-          <span className="mt-0.5 text-[var(--orange)]">
-            <Icon name="exclamationmark.triangle" size={20} />
-          </span>
-          <div className="min-w-0">
-            <p className="t-footnote text-label-2">
-              That&rsquo;s {formatCurrency(overpayBy)} more than the {formatCurrency(suggestedAmount)} you owe.
-              After this,{" "}
-              <span className="font-semibold text-label">
-                {toName} will owe you {formatCurrency(overpayBy)}
-              </span>
-              , and your groups keep showing a balance until it comes back.
-            </p>
-            <Button size="sm" variant="tinted" className="mt-2" onClick={() => setAmount(suggestedAmount.toFixed(2))}>
-              Send Exactly {formatCurrency(suggestedAmount)}
-            </Button>
-          </div>
+      <form id="send-form" onSubmit={handleSubmit}>
+        <div className="flex flex-col items-center pt-3 pb-1 text-center">
+          <AmountInput id="send-amount" value={amount} onChange={setAmount} autoFocus />
+          {contextLine && <p className="t-footnote text-[var(--text-secondary)] max-w-[300px]">{contextLine}</p>}
         </div>
-      )}
 
-      <UpiPayPanel
-        toName={toName}
-        upiId={resolvedUpiId}
-        checked={upiChecked}
-        usable={upiUsable}
-        canHandOff={canHandOff}
-        handedOff={handedOff}
-        onPay={handlePayWithApp}
-        onCopy={handleCopyUpi}
-      />
+        {overpayBy > 0 && (
+          <ListSection
+            elevated
+            footer={`After this, ${toName} will owe you ${formatCurrency(overpayBy)}, and your groups keep showing a balance until it comes back.`}
+          >
+            <Row title={<span className="text-[var(--warning)]">{formatCurrency(overpayBy)} more than you owe</span>} />
+            <ButtonRow onClick={() => setAmount(suggestedAmount.toFixed(2))} title={`Send Exactly ${formatCurrency(suggestedAmount)}`} action />
+          </ListSection>
+        )}
 
-      <Section header="Note">
-        <List>
-          <FieldRow
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="For Friday's dinner…"
-            aria-label="Note"
-            maxLength={120}
-          />
-        </List>
-      </Section>
+        {upiUsable ? (
+          <ListSection
+            elevated
+            header="Pay with UPI"
+            footer={
+              !canHandOff
+                ? `UPI apps open only on a phone. Copy ${toName}'s UPI ID and pay from your bank app.`
+                : handedOff
+                ? "Nothing opened? Copy the UPI ID and pay from your bank app."
+                : "Opens the app with the amount filled in. Come back here to record it."
+            }
+          >
+            <div className="grid grid-cols-4 gap-1 px-2 py-3">
+              {UPI_APPS.map((app) => (
+                <button
+                  key={app.id}
+                  type="button"
+                  onClick={() => handlePayWithApp(app)}
+                  className="flex flex-col items-center gap-1.5 py-1 tap-shrink"
+                >
+                  <span className="w-12 h-12 rounded-[13px] bg-[var(--surface)] grid place-items-center shadow-[0_0_0_0.5px_var(--separator)]">
+                    <UpiAppIcon id={app.id} className="w-7 h-7" />
+                  </span>
+                  <span className="t-caption text-[var(--text-primary)] truncate max-w-full">{app.label}</span>
+                </button>
+              ))}
+            </div>
+            <ButtonRow
+              onClick={handleCopyUpi}
+              leading={<span className="text-[var(--brand)]"><Copy size={19} /></span>}
+              title="Copy UPI ID"
+              detail={<span className="selectable">{resolvedUpiId}</span>}
+              action
+            />
+          </ListSection>
+        ) : (
+          <ListSection elevated>
+            <Row
+              title={
+                <span className="whitespace-normal t-subhead text-[var(--text-secondary)]">
+                  {resolvedUpiId
+                    ? `${toName}'s saved UPI ID (${resolvedUpiId}) isn't a valid handle@bank address, so UPI apps can't open it.`
+                    : upiChecked
+                    ? `${toName} hasn't added a UPI ID. Pay them however you like (cash, UPI, bank transfer) and record it here.`
+                    : "Checking for a UPI ID…"}
+                </span>
+              }
+            />
+          </ListSection>
+        )}
 
-      <Section header="Payment screenshot" footer="Until they book it into a group, it shows as a personal balance between you two.">
-        <Attachments files={receiptFiles} onChange={setReceiptFiles} label="Add Screenshot" />
-      </Section>
+        <ListSection
+          elevated
+          footer={`${toName} confirms the payment and chooses whether it settles a group balance. Until then it shows as a personal balance between you.`}
+        >
+          <FieldRow label="Note">
+            <input
+              id="send-note"
+              type="text"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Optional"
+              aria-label="Note"
+              className="row-input py-[13px]"
+            />
+          </FieldRow>
+          <label
+            role="button"
+            tabIndex={0}
+            aria-label="Add a payment screenshot"
+            onKeyDown={activateFileInputOnKey}
+            className="list-row cursor-pointer active:bg-[var(--pressed)]"
+          >
+            <span className="text-[var(--brand)]"><Paperclip size={20} /></span>
+            <span className="flex-1 t-body text-[var(--brand)]">
+              {receiptFiles.length > 0 ? "Add Another Screenshot" : "Attach Screenshot"}
+            </span>
+            {receiptFiles.length > 0 && <span className="t-body text-[var(--text-secondary)]">{receiptFiles.length}</span>}
+            <input type="file" accept="image/*" multiple onChange={handleReceipts} className="hidden" />
+          </label>
+        </ListSection>
 
-      {error && <p className="t-footnote mt-4 px-4 text-neg">{error}</p>}
-    </Sheet>
+        {error && <p className="list-footer !text-[var(--neg)]">{error}</p>}
+      </form>
+    </GlassModal>
   );
 }

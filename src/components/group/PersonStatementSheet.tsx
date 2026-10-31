@@ -1,14 +1,11 @@
 "use client";
-import { useRef } from "react";
+import GlassModal from "@/components/ui/GlassModal";
+import { LinkRow, ListSection, Row } from "@/components/ui/List";
+import { Avatar } from "@/components/ui/Controls";
 import { Expense, Group, Settlement } from "@/lib/types";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { buildPairStatement, describeNet, StatementRow } from "@/lib/statement";
-import { Sheet, type SheetHandle } from "@/components/kit/Sheet";
-import { DetailRow, List, Row, Section } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
-import { Button } from "@/components/kit/Controls";
-import { useNav } from "@/components/kit/nav";
 
 function shortDate(ts: number): string {
   return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
@@ -40,7 +37,6 @@ function rowWords(row: StatementRow, otherName: string): { text: string; tone: "
   }
 }
 
-/** "Why do I owe this?" — the running account with one person in one group. */
 export default function PersonStatementSheet({
   group,
   meUid,
@@ -58,57 +54,48 @@ export default function PersonStatementSheet({
   onClose: () => void;
   onSettle: (toUid: string, amount: number) => void;
 }) {
-  const nav = useNav();
-  const sheetRef = useRef<SheetHandle>(null);
   const otherName = group.members[otherUid]?.displayName || "Member";
   const stmt = buildPairStatement(meUid, otherUid, expenses, settlements);
   const settled = isSettled(stmt.net);
   const iOwe = !settled && stmt.net < 0;
-  // With simplified debts on, the group's plan chains balances through third
-  // parties, so this pairwise figure is history — not an amount to pay.
+  // With simplified debts on, the group's payment plan chains balances through
+  // third parties, so this pairwise figure is history between the two of you —
+  // not an amount to pay. Offering "Settle X" here would contradict the plan on
+  // the group screen, so the action is withheld and we point at the plan instead.
   const simplified = group.useSimplifiedDebts === true;
-  const pending = !isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem);
 
   return (
-    <Sheet
-      ref={sheetRef}
-      large
+    <GlassModal
       title={otherName}
-      subtitle={group.name}
+      large
       onClose={onClose}
       footer={
-        <div className="flex gap-2">
-          {iOwe && !simplified && (
-            <Button
-              block
-              onClick={() => {
-                onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
-                sheetRef.current?.dismiss();
-              }}
-            >
-              Settle {formatCurrency(-stmt.net)}
-            </Button>
-          )}
-          <Button
-            block
-            variant={iOwe && !simplified ? "tinted" : "prominent"}
-            onClick={() => nav.push(`/reports?person=${otherUid}&group=${group.id}`)}
+        iOwe && !simplified ? (
+          <button
+            type="button"
+            onClick={() => {
+              onSettle(otherUid, Math.round(-stmt.net * 100) / 100);
+              onClose();
+            }}
+            className="btn-prominent w-full"
           >
-            Full Statement
-          </Button>
-        </div>
+            Settle {formatCurrency(-stmt.net)}
+          </button>
+        ) : undefined
       }
     >
-      <div className="flex flex-col items-center px-2 pb-2 pt-3 text-center">
-        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} />
+      <div className="flex flex-col items-center text-center pt-2 pb-1">
+        <Avatar name={otherName} photoURL={group.members[otherUid]?.photoURL} size={64} seed={otherUid} />
         <p
-          className={`t-title3 mt-3 ${settled ? "text-label" : iOwe ? "text-neg" : "text-pos"}`}
+          className={`t-title2 mt-3 ${
+            settled ? "text-[var(--text-primary)]" : iOwe ? "text-[var(--neg)]" : "text-[var(--pos)]"
+          }`}
         >
           {describeNet(stmt.net, otherName, formatCurrency)}
         </p>
-        <p className="t-footnote mt-1 text-label-2">Just between you two, in {group.name}</p>
-        {pending && (
-          <p className="t-footnote mt-2 max-w-[320px] text-warn">
+        <p className="t-footnote text-[var(--text-secondary)] mt-0.5">Just between you two, in {group.name}</p>
+        {(!isSettled(stmt.pendingFromMe) || !isSettled(stmt.pendingFromThem)) && (
+          <p className="t-footnote text-[var(--warning)] mt-2 max-w-[320px]">
             {!isSettled(stmt.pendingFromThem)
               ? `${formatCurrency(stmt.pendingFromThem)} from ${otherName} is waiting for your approval`
               : `${formatCurrency(stmt.pendingFromMe)} you sent is waiting for ${otherName} to approve`}
@@ -117,71 +104,63 @@ export default function PersonStatementSheet({
         )}
       </div>
 
-      <Section header="Where it comes from">
-        <List>
-          <DetailRow label={`You covered for ${otherName}`} value={formatCurrency(stmt.iCoveredForThem)} />
-          <DetailRow label={`${otherName} covered for you`} value={formatCurrency(stmt.theyCoveredForMe)} />
-          {!isSettled(stmt.iPaid) && (
-            <DetailRow label="Payments you sent" value={formatCurrency(stmt.iPaid)} valueClassName="text-pos" />
-          )}
-          {!isSettled(stmt.theyPaid) && (
-            <DetailRow label={`Payments ${otherName} sent`} value={formatCurrency(stmt.theyPaid)} valueClassName="text-pos" />
-          )}
-        </List>
-      </Section>
+      <ListSection elevated>
+        <Row title={`You covered for ${otherName}`} detail={<span className="t-numeral">{formatCurrency(stmt.iCoveredForThem)}</span>} />
+        <Row title={`${otherName} covered for you`} detail={<span className="t-numeral">{formatCurrency(stmt.theyCoveredForMe)}</span>} />
+        {!isSettled(stmt.iPaid) && (
+          <Row title="Payments you sent" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(stmt.iPaid)}</span>} />
+        )}
+        {!isSettled(stmt.theyPaid) && (
+          <Row title={`Payments ${otherName} sent`} detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(stmt.theyPaid)}</span>} />
+        )}
+      </ListSection>
 
-      <Section
-        header={
-          stmt.rows.length > 0
-            ? `${stmt.rows.length} entr${stmt.rows.length === 1 ? "y" : "ies"} between you`
-            : "History"
-        }
+      <ListSection
+        elevated
+        header={stmt.rows.length > 0 ? `${stmt.rows.length} ${stmt.rows.length === 1 ? "Entry" : "Entries"}` : "History"}
         footer={
           simplified && !settled
-            ? "This group combines payments, so these amounts are your shared history. The group's balances show who to pay."
+            ? "This group combines payments, so these amounts are your shared history. Use the group’s balances to see who to pay."
             : undefined
         }
       >
         {stmt.rows.length === 0 ? (
-          <div className="card p-4">
-            <p className="t-subhead text-label-2">You haven&rsquo;t shared any expenses with {otherName} in this group.</p>
-          </div>
+          <Row title={<span className="text-[var(--text-secondary)]">No shared expenses in this group yet</span>} />
         ) : (
-          <List>
-            {[...stmt.rows].reverse().map((row) => {
-              const words = rowWords(row, otherName);
-              return (
-                <Row
-                  key={row.key}
-                  tall
-                  title={row.label}
-                  subtitle={`${shortDate(row.ts)} · ${words.text}`}
-                  trailing={
-                    <span className="flex shrink-0 flex-col items-end">
-                      <span
-                        className={`num t-subhead font-semibold ${
-                          words.tone === "owe" ? "text-neg" : words.tone === "get" ? "text-pos" : "text-label-3"
-                        }`}
-                      >
-                        {row.informationalOnly
-                          ? "—"
-                          : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
-                      </span>
-                      <span className="t-caption text-label-2">
-                        {isSettled(row.balance)
-                          ? "settled"
-                          : row.balance > 0
-                          ? `owes you ${formatCurrency(row.balance)}`
-                          : `you owe ${formatCurrency(-row.balance)}`}
-                      </span>
+          [...stmt.rows].reverse().map((row) => {
+            const words = rowWords(row, otherName);
+            return (
+              <Row
+                key={row.key}
+                title={row.label}
+                subtitle={`${shortDate(row.ts)} · ${words.text}`}
+                detail={
+                  <span className="flex flex-col items-end leading-tight">
+                    <span
+                      className={`t-subhead font-semibold t-numeral ${
+                        words.tone === "owe" ? "text-[var(--neg)]" : words.tone === "get" ? "text-[var(--pos)]" : "text-[var(--text-secondary)]"
+                      }`}
+                    >
+                      {row.informationalOnly ? "—" : `${row.delta > 0 ? "+" : "−"}${formatCurrency(Math.abs(row.delta))}`}
                     </span>
-                  }
-                />
-              );
-            })}
-          </List>
+                    <span className="t-caption text-[var(--text-secondary)]">
+                      {isSettled(row.balance)
+                        ? "settled"
+                        : row.balance > 0
+                        ? `owes you ${formatCurrency(row.balance)}`
+                        : `you owe ${formatCurrency(-row.balance)}`}
+                    </span>
+                  </span>
+                }
+              />
+            );
+          })
         )}
-      </Section>
-    </Sheet>
+      </ListSection>
+
+      <ListSection elevated>
+        <LinkRow href={`/reports?person=${otherUid}&group=${group.id}`} title="Full Statement" subtitle="Every group you share, with export" />
+      </ListSection>
+    </GlassModal>
   );
 }

@@ -18,7 +18,27 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn() && request.auth.uid == userId;
+
+      // Push devices: one document per install, replacing the single
+      // `fcmToken` field on the user document (where each new device silently
+      // overwrote the last). Owner-only; /api/notify reads them with the Admin
+      // SDK. The shape is pinned so a client can't park arbitrary data here.
+      match /devices/{deviceId} {
+        allow read, delete: if isSignedIn() && request.auth.uid == userId;
+        allow create, update: if isSignedIn() && request.auth.uid == userId
+          && request.resource.data.keys().hasOnly(['token', 'platform', 'enabled', 'updatedAt'])
+          && request.resource.data.token is string
+          && request.resource.data.token.size() > 0
+          && request.resource.data.token.size() <= 4096
+          && request.resource.data.platform in ['ios', 'android', 'desktop']
+          && request.resource.data.enabled is bool
+          && request.resource.data.updatedAt is number;
+      }
     }
+
+    // rateLimits/{uid} is written by /api/notify with the Admin SDK only. There
+    // is deliberately no match block for it: with none, every client read and
+    // write is denied by default.
 
     match /groups/{groupId} {
       allow read: if isGroupMember(resource.data);
