@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Images only: profile photos, group photos and receipt screenshots.
+//
+// Reads are public by URL. The app stores download URLs in Firestore and
+// renders them in <img> tags, and every object name carries a random id, so a
+// file can only be fetched by someone who was given its link (the same
+// exposure ImgBB links had, minus the listing). Listing is never allowed.
+//
+// Writes need a signed-in user, are capped at 10 MB, must be images, and land
+// only under the caller's own uid, so nobody can overwrite another person's
+// files. Nothing is ever deleted from the client.
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{folder}/{uid}/{fileName} {
+      allow get: if folder in ['avatars', 'groups', 'receipts'];
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && folder in ['avatars', 'groups', 'receipts']
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow update, delete: if false;
+    }
+  }
+}
