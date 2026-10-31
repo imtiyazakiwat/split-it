@@ -12,9 +12,8 @@ import {
   reportFilename,
 } from "@/lib/report";
 import { useToast } from "@/components/ui/Toast";
-import { Card, List, RowButton, Section, sepInset } from "@/components/kit/List";
-import { CategoryTile, GroupAvatar, IconTile } from "@/components/kit/Tile";
-import { Meter, Spinner } from "@/components/kit/Controls";
+import { ButtonRow, ListSection, Row } from "@/components/ui/List";
+import { CategoryGlyph, Download, categoryTint } from "@/components/ui/Icons";
 
 function Stat({
   label,
@@ -24,66 +23,58 @@ function Stat({
 }: {
   label: string;
   value: string;
-  tone?: "neutral" | "pos" | "neg";
+  tone?: "neutral" | "pos" | "neg" | "brand";
   hint?: string;
 }) {
-  const color = tone === "pos" ? "text-pos" : tone === "neg" ? "text-neg" : "text-label";
+  const color =
+    tone === "pos" ? "text-[var(--pos)]" : tone === "neg" ? "text-[var(--neg)]" : "text-[var(--text-primary)]";
   return (
-    <div className="min-w-0 p-4">
-      <p className="t-footnote text-label-2">{label}</p>
-      <p className={`num t-title3 mt-0.5 truncate ${color}`}>{value}</p>
-      {hint && <p className="t-caption mt-0.5 truncate text-label-2">{hint}</p>}
+    <div className="min-w-0">
+      <p className="t-caption text-[var(--text-secondary)]">{label}</p>
+      <p className={`t-title3 t-numeral truncate ${color}`}>{value}</p>
+      {hint && <p className="t-caption text-[var(--text-secondary)] truncate">{hint}</p>}
     </div>
   );
 }
 
-/** Rows with a proportion meter: category, group and month breakdowns. */
-function BarRows({
+function BarList({
   buckets,
-  leading,
-  showShare = true,
   emptyLabel,
+  showShare = true,
 }: {
   buckets: (Bucket & { net?: number; settledPct?: number })[];
-  leading?: (b: Bucket) => React.ReactNode;
-  showShare?: boolean;
   emptyLabel: string;
+  showShare?: boolean;
 }) {
   if (buckets.length === 0) {
-    return (
-      <Card className="p-4">
-        <p className="t-subhead text-label-2">{emptyLabel}</p>
-      </Card>
-    );
+    return <p className="list-row t-body text-[var(--text-secondary)]">{emptyLabel}</p>;
   }
   const max = Math.max(...buckets.map((b) => b.total), 1);
   return (
-    <List>
+    <>
       {buckets.map((b) => (
-        <div key={b.key} className="row is-tall" style={sepInset(leading ? 58 : 16)}>
-          {leading?.(b)}
-          <span className="row-main">
-            <span className="flex items-baseline justify-between gap-3">
-              <span className="row-title">{b.label}</span>
-              <span className="num t-subhead shrink-0 font-semibold">{formatCurrency(b.total)}</span>
-            </span>
-            <span className="mt-1.5 block">
-              <Meter value={Math.max(2, (b.total / max) * 100)} color="var(--tint)" label={`${b.label} share of spend`} />
-            </span>
-            <span className="row-detail">
-              {b.count} expense{b.count !== 1 ? "s" : ""}
-              {showShare ? ` · your share ${formatCurrency(b.myShare)}` : ""}
-              {typeof b.settledPct === "number" ? ` · ${b.settledPct}% settled` : ""}
-            </span>
-          </span>
+        <div key={b.key} className="list-row !block">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="t-body text-[var(--text-primary)] truncate">{b.label}</p>
+            <p className="t-body font-semibold t-numeral text-[var(--text-primary)] shrink-0">{formatCurrency(b.total)}</p>
+          </div>
+          <div className="meter mt-2 !h-[6px]">
+            <span style={{ width: `${Math.max(2, (b.total / max) * 100)}%`, background: "var(--brand-solid)" }} />
+          </div>
+          <p className="t-footnote text-[var(--text-secondary)] mt-1.5">
+            {b.count} expense{b.count !== 1 ? "s" : ""}
+            {showShare ? ` · your share ${formatCurrency(b.myShare)}` : ""}
+            {typeof b.settledPct === "number" ? ` · ${b.settledPct}% settled` : ""}
+          </p>
         </div>
       ))}
-    </List>
+    </>
   );
 }
 
 /**
- * Spend and settlement analytics across groups, plus a CSV of every
+ * The dashboard the Activity screen previously lacked entirely: spend and
+ * settlement analytics across all groups, plus a CSV export of every
  * underlying record so the numbers can be checked or archived.
  */
 export default function ReportPanel({
@@ -102,7 +93,9 @@ export default function ReportPanel({
       await downloadTextFile(reportFilename("csv"), buildExportCsv(records, report));
       showToast({ message: "Report downloaded" });
     } catch (err) {
-      showToast({ message: err instanceof Error ? `Export failed: ${err.message}` : "Export failed" });
+      showToast({
+        message: err instanceof Error ? `Export failed: ${err.message}` : "Export failed",
+      });
     } finally {
       setBusy(false);
     }
@@ -110,132 +103,108 @@ export default function ReportPanel({
 
   const period =
     report.expenseCount > 0
-      ? `${new Date(report.from).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${new Date(
-          report.to
-        ).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`
+      ? `${new Date(report.from).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+        })} – ${new Date(report.to).toLocaleDateString("en-IN", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })}`
       : "No activity yet";
 
   return (
-    <>
-      <Card className="p-4">
-        <p className="t-footnote text-label-2">Total group spend</p>
-        <p className="amount-hero mt-1 truncate text-[34px]">{formatCurrency(report.totalSpend)}</p>
-        <p className="t-footnote mt-1 text-label-2">{period}</p>
-      </Card>
-
-      <Section header="Your money">
-        <Card className="grid grid-cols-2">
+    <div>
+      <div className="list-section px-4 pt-3.5 pb-4">
+        <p className="t-subhead text-[var(--text-secondary)]">Total group spend</p>
+        <p className="t-large-title t-numeral text-[var(--text-primary)] truncate">{formatCurrency(report.totalSpend)}</p>
+        <p className="t-footnote text-[var(--text-secondary)]">{period}</p>
+        <div className="mt-4 pt-3.5 grid grid-cols-2 gap-x-4 gap-y-3.5 relative before:absolute before:inset-x-0 before:top-0 before:h-[0.5px] before:bg-[var(--separator)]">
           <Stat
             label="Your share"
             value={formatCurrency(report.myShare)}
             hint={`${report.expenseCount} expense${report.expenseCount !== 1 ? "s" : ""}`}
           />
-          <div className="border-l-[0.5px] border-[var(--separator)]">
-            <Stat
-              label="You paid upfront"
-              value={formatCurrency(report.iPaid)}
-              hint={
-                report.netPosition >= 0
-                  ? `${formatCurrency(report.netPosition)} more than your share`
-                  : `${formatCurrency(-report.netPosition)} less than your share`
-              }
-            />
-          </div>
-          <div className="border-t-[0.5px] border-[var(--separator)]">
-            <Stat
-              label="Settlements sent"
-              value={formatCurrency(report.paidOut)}
-              tone="neg"
-              hint={!isSettled(report.pendingOut) ? `${formatCurrency(report.pendingOut)} pending` : "All confirmed"}
-            />
-          </div>
-          <div className="border-l-[0.5px] border-t-[0.5px] border-[var(--separator)]">
-            <Stat
-              label="Settlements received"
-              value={formatCurrency(report.receivedIn)}
-              tone="pos"
-              hint={!isSettled(report.pendingIn) ? `${formatCurrency(report.pendingIn)} awaiting you` : "All confirmed"}
-            />
-          </div>
-        </Card>
-      </Section>
+          <Stat
+            label="You paid up front"
+            value={formatCurrency(report.iPaid)}
+            hint={
+              report.netPosition >= 0
+                ? `${formatCurrency(report.netPosition)} over your share`
+                : `${formatCurrency(-report.netPosition)} under your share`
+            }
+          />
+          <Stat
+            label="Payments sent"
+            value={formatCurrency(report.paidOut)}
+            hint={!isSettled(report.pendingOut) ? `${formatCurrency(report.pendingOut)} pending` : "All confirmed"}
+          />
+          <Stat
+            label="Payments received"
+            value={formatCurrency(report.receivedIn)}
+            hint={!isSettled(report.pendingIn) ? `${formatCurrency(report.pendingIn)} awaiting you` : "All confirmed"}
+          />
+        </div>
+      </div>
 
-      <Section
+      <ListSection
         header="Where you stand"
-        footer="Settled overall is the share of all money that ever needed to change hands and no longer does."
+        footer={
+          !isSettled(report.offsetTotal)
+            ? `${formatCurrency(report.offsetTotal)} was cleared by cancelling balances across groups. No money changed hands.`
+            : "Settled overall is the share of all money that ever needed to change hands and no longer does."
+        }
       >
-        <Card>
-          <div className="grid grid-cols-2">
-            <Stat label="You owe" value={formatCurrency(report.totalOwe)} tone="neg" />
-            <div className="border-l-[0.5px] border-[var(--separator)]">
-              <Stat label="You'll receive" value={formatCurrency(report.totalReceive)} tone="pos" />
-            </div>
+        <Row title="You owe" detail={<span className="t-numeral text-[var(--neg)]">{formatCurrency(report.totalOwe)}</span>} />
+        <Row title="You’re owed" detail={<span className="t-numeral text-[var(--pos)]">{formatCurrency(report.totalReceive)}</span>} />
+        <div className="list-row !block">
+          <div className="flex items-baseline justify-between">
+            <span className="t-body text-[var(--text-primary)]">Settled overall</span>
+            <span className="t-body font-semibold text-[var(--text-primary)]">{report.settledPct}%</span>
           </div>
-          <div className="border-t-[0.5px] border-[var(--separator)] p-4">
-            <div className="t-footnote mb-1.5 flex justify-between text-label-2">
-              <span>Settled overall</span>
-              <span className="font-semibold text-pos">{report.settledPct}%</span>
-            </div>
-            <Meter value={report.settledPct} label="Settled overall" />
-            {!isSettled(report.offsetTotal) && (
-              <p className="t-footnote mt-3 text-label-2">
-                {formatCurrency(report.offsetTotal)} was cleared by cancelling balances across groups — no money
-                changed hands.
-              </p>
-            )}
+          <div className="meter mt-2">
+            <span style={{ width: `${report.settledPct}%` }} />
           </div>
-        </Card>
-      </Section>
+        </div>
+      </ListSection>
 
-      <Section header="By category">
-        <BarRows
-          buckets={report.byCategory}
-          leading={(b) => <CategoryTile id={b.key} />}
-          emptyLabel="No expenses yet."
-        />
-      </Section>
+      <ListSection header="By category">
+        <BarList buckets={report.byCategory} emptyLabel="No expenses yet" />
+      </ListSection>
 
-      <Section header="By group">
-        <BarRows
-          buckets={report.byGroup}
-          leading={(b) => <GroupAvatar id={b.key} name={b.label} size={30} />}
-          emptyLabel="No groups yet."
-        />
-      </Section>
+      <ListSection header="By group">
+        <BarList buckets={report.byGroup} emptyLabel="No groups yet" />
+      </ListSection>
 
-      <Section header="Month by month">
-        <BarRows buckets={report.byMonth} emptyLabel="No expenses yet." />
-      </Section>
+      <ListSection header="By month">
+        <BarList buckets={report.byMonth} emptyLabel="No expenses yet" />
+      </ListSection>
 
       {report.biggestExpense && (
-        <Section header="Biggest single expense">
-          <List>
-            <div className="row is-tall" style={sepInset(58)}>
-              <CategoryTile id={report.biggestExpense.category} />
-              <span className="row-main">
-                <span className="row-title font-semibold">{report.biggestExpense.description}</span>
-                <span className="row-subtitle">
-                  {report.biggestExpense.groupName} · paid by {report.biggestExpense.paidByName}
-                </span>
+        <ListSection header="Biggest expense">
+          <Row
+            leading={
+              <span className="icon-tile" style={{ background: categoryTint(report.biggestExpense.category) }}>
+                <CategoryGlyph id={report.biggestExpense.category} size={18} />
               </span>
-              <span className="num t-headline shrink-0">{formatCurrency(report.biggestExpense.amount)}</span>
-            </div>
-          </List>
-        </Section>
+            }
+            separatorInset={58}
+            title={report.biggestExpense.description}
+            subtitle={`${report.biggestExpense.groupName} · paid by ${report.biggestExpense.paidByName}`}
+            detail={<span className="t-numeral font-semibold text-[var(--text-primary)]">{formatCurrency(report.biggestExpense.amount)}</span>}
+          />
+        </ListSection>
       )}
 
-      <Section footer="Every expense and payment in this view, as a spreadsheet.">
-        <List>
-          <RowButton
-            onClick={() => void handleDownload()}
-            disabled={busy}
-            leading={<IconTile icon="square.and.arrow.down" color="var(--green)" />}
-            title="Export CSV"
-            action
-            trailing={busy ? <Spinner size={18} className="text-label-2" /> : undefined}
-          />
-        </List>
-      </Section>
-    </>
+      <ListSection footer="A spreadsheet of every expense and payment in this view.">
+        <ButtonRow
+          onClick={handleDownload}
+          disabled={busy}
+          leading={<span className="text-[var(--brand)]"><Download size={20} /></span>}
+          title={busy ? "Exporting…" : "Export CSV"}
+          action
+        />
+      </ListSection>
+    </div>
   );
 }

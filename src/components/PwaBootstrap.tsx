@@ -1,15 +1,13 @@
 "use client";
 
-import Image from "next/image";
-import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Icon } from "@/components/kit/Icon";
-
-/** Only on the Groups screen, where it's least in the way, once per session. */
-const HINT_ROUTES = new Set(["/"]);
+import { usePathname } from "next/navigation";
+import { useAuth } from "@/lib/auth-context";
+import { getAppServiceWorker } from "@/lib/sw-registration";
 
 export default function PwaBootstrap() {
   const pathname = usePathname();
+  const { user } = useAuth();
   const [state, setState] = useState({
     mounted: false,
     isIOS: false,
@@ -18,81 +16,85 @@ export default function PwaBootstrap() {
   });
 
   useEffect(() => {
-    // Deferred to an effect (not computed during render) because window and
-    // navigator don't exist during SSR; reading them eagerly would cause a
-    // hydration mismatch.
+    // Runs only on the client, after the initial (SSR-matching) render, so
+    // there's no server/client markup mismatch from reading window/navigator.
+    // This is intentionally deferred to an effect (rather than computed
+    // during render) because `window`/`navigator` don't exist during SSR —
+    // computing this eagerly would cause a hydration mismatch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({
       mounted: true,
-      // iPadOS 13+ reports a desktop UA ("Macintosh…") with touch.
+      // iPadOS 13+ reports a desktop UA ("Macintosh…") with touch — detect it
+      // via maxTouchPoints rather than the platform string alone.
       isIOS:
         (/iPad|iPhone|iPod/.test(navigator.userAgent) ||
-          (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1)) &&
+          (navigator.userAgent.includes("Macintosh") &&
+            navigator.maxTouchPoints > 1)) &&
         !("MSStream" in window),
       isStandalone: window.matchMedia("(display-mode: standalone)").matches,
       dismissed: sessionStorage.getItem("pwa-install-dismissed") === "1",
     });
 
-    // Ask the OS to spare our origin under storage pressure. Firestore's own
-    // persistent cache holds the data; this keeps the evictor off it.
+    // Ask the OS to spare our origin under storage pressure (Safari evicts
+    // least-recently-used origins when space runs low). Firestore's own
+    // persistent cache holds the data; this keeps the evictor off our back.
     if (navigator.storage?.persist) {
-      navigator.storage.persist().catch(() => {});
-    }
-
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch(() => {
-        // Non-fatal: the app works without it, minus share-target and offline.
+      navigator.storage.persist().catch(() => {
+        // Best-effort: eviction policy is the OS's call either way.
       });
     }
+
+    // Through the shared helper so this and push-token acquisition always
+    // register the same worker at the same scope. Non-fatal on failure: the app
+    // still works, it just loses share-target capture, offline caching and push.
+    void getAppServiceWorker();
   }, []);
 
-  // Tracks the visible viewport into --app-height (keyboard and Safari chrome
-  // included) and the keyboard's overlap into --kb-inset, so bottom sheets can
-  // sit above an iOS keyboard instead of behind it. Read-only apart from the
-  // two CSS variables.
+  // Tracks the visible viewport (keyboard, Safari chrome) into --app-height so
+  // dvh-backed sheets size to what's actually on screen. Read-only: no layout
+  // writes besides the single CSS variable.
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const root = document.documentElement;
-    const sync = () => {
-      root.style.setProperty("--app-height", `${vv.height}px`);
-      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-      root.style.setProperty("--kb-inset", `${Math.round(overlap)}px`);
-      // Where the visible area starts when iOS pans the page for the keyboard,
-      // so a full-height screen (the conversation) can track it exactly.
-      root.style.setProperty("--vv-top", `${Math.round(Math.max(0, vv.offsetTop))}px`);
-    };
+    const sync = () =>
+      document.documentElement.style.setProperty("--app-height", `${vv.height}px`);
     sync();
     vv.addEventListener("resize", sync);
-    vv.addEventListener("scroll", sync);
-    return () => {
-      vv.removeEventListener("resize", sync);
-      vv.removeEventListener("scroll", sync);
-    };
+    return () => vv.removeEventListener("resize", sync);
   }, []);
 
   const { mounted, isIOS, isStandalone, dismissed } = state;
-  if (!mounted || isStandalone || dismissed || !isIOS || !HINT_ROUTES.has(pathname)) return null;
 
+  if (!mounted || isStandalone || dismissed || !isIOS) return null;
+  // Never over sign-in, a composer or a full-screen flow.
+  if (!user) return null;
+  if (/^\/(chat|join|share-receipt|offline)/.test(pathname)) return null;
+
+  // Sits above the floating tab bar, never on top of it; the page grows its
+  // bottom inset (see globals.css) so the last row can still scroll clear.
   return (
-    <div className="install-hint glass-thick rise-in" role="note">
-      <Image src="/icon-192.png" alt="" width={40} height={40} className="h-10 w-10 shrink-0 rounded-[10px]" />
-      <p className="t-footnote min-w-0 flex-1 text-label">
-        <span className="block font-semibold">Install SplitIt</span>
-        <span className="text-label-2">
-          Tap <Icon name="share" size={14} className="-mt-0.5 inline" /> then “Add to Home Screen”.
-        </span>
+    <div
+      data-install-banner
+      className="glass glass-strong fixed left-4 right-4 max-w-md mx-auto rounded-[22px] pl-4 pr-1.5 py-1.5 flex items-center gap-3 z-30 animate-sheet-up"
+      style={{ bottom: "calc(var(--tab-bottom) + var(--tab-h) + 10px)" }}
+    >
+      <p className="flex-1 t-footnote text-[var(--text-primary)] py-1.5">
+        <span className="font-semibold">Install SplitIt.</span> Tap{" "}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="inline -mt-0.5" aria-label="Share">
+          <path d="M12 3.5v11M8 7l4-3.5L16 7" />
+          <path d="M7.5 10.5H6a1.5 1.5 0 0 0-1.5 1.5v7A1.5 1.5 0 0 0 6 20.5h12a1.5 1.5 0 0 0 1.5-1.5v-7a1.5 1.5 0 0 0-1.5-1.5h-1.5" />
+        </svg>{" "}
+        then Add to Home Screen to get notifications.
       </p>
       <button
-        type="button"
         onClick={() => {
           sessionStorage.setItem("pwa-install-dismissed", "1");
           setState((s) => ({ ...s, dismissed: true }));
         }}
-        className="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-label-2"
+        className="shrink-0 w-[30px] h-[30px] m-[7px] rounded-full bg-[var(--fill)] text-[var(--text-secondary)] grid place-items-center"
         aria-label="Dismiss"
       >
-        <Icon name="xmark" size={18} strokeWidth={2.2} />
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round"><path d="M6 6l12 12M18 6 6 18" /></svg>
       </button>
     </div>
   );

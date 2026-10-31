@@ -1,12 +1,18 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
+import { useRouter } from "next/navigation";
+import NotificationPrompt from "@/components/home/NotificationPrompt";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
-// Write functions are dynamically imported at the point of use, not here: this
-// is the entry route, and a static import puts the 641 kB Firestore chunk in
-// front of first interaction for three handlers the user may never trigger.
-import { canRespondToSettlement, computeBalances, formatCurrency } from "@/lib/balance";
+// Write functions are dynamically imported at the point of use, not here: this is
+// the entry route, and a static import puts the 641 kB Firestore chunk in front of
+// first interaction for the sake of three handlers the user may never trigger.
+import {
+  canRespondToSettlement,
+  computeBalances,
+  formatCurrency,
+} from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
 import { usePayments } from "@/lib/payments-context";
@@ -19,42 +25,53 @@ import {
   isArchivedFor,
 } from "@/lib/group-filters";
 import LoginScreen from "@/components/LoginScreen";
+import GlassModal from "@/components/ui/GlassModal";
 import GroupRow from "@/components/home/GroupRow";
 import HomeSkeleton from "@/components/home/HomeSkeleton";
 import Skeleton from "@/components/ui/Skeleton";
 import { useToast } from "@/components/ui/Toast";
-import Screen from "@/components/kit/Screen";
-import { BarButton, BarLink } from "@/components/kit/BarButton";
-import { Menu } from "@/components/kit/Menu";
-import { List, RowButton, RowLink, Section, Card } from "@/components/kit/List";
-import { Avatar } from "@/components/kit/Avatar";
-import { IconTile } from "@/components/kit/Tile";
-import { EmptyState, FieldRow, SearchField, Segmented, Button } from "@/components/kit/Controls";
-import { Sheet, SheetIconButton, type SheetHandle } from "@/components/kit/Sheet";
-import { Icon } from "@/components/kit/Icon";
-import { useNav } from "@/components/kit/nav";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import { LinkRow, ListSection, Row, SwipeRow } from "@/components/ui/List";
+import { Avatar, EmptyState, SearchField, Segmented } from "@/components/ui/Controls";
+import Menu from "@/components/ui/Menu";
+import { Archive, Bell, Ellipsis, People, PersonAdd, Plus } from "@/components/ui/Icons";
+
+function todayLine(): string {
+  return new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long" });
+}
+
+const noopSubscribe = () => () => {};
+/** Today's date, computed on the client only (the page is prerendered at build time). */
+function useTodayLine(): string {
+  return useSyncExternalStore(noopSubscribe, todayLine, () => "");
+}
 
 export default function Home() {
   const { user, loading } = useAuth();
-  const nav = useNav();
-  // `allLoaded` deliberately not consumed: gating this screen on every group
-  // having reported blanked the totals and deadened the people rows. Progress
-  // is tracked per group below.
+  const router = useRouter();
+  // `allLoaded` deliberately not consumed here any more: gating this screen on
+  // every group having reported was the cause of the blanked hero and the
+  // unresponsive people rows. Progress is now tracked per group below.
   const { groups, groupsLoaded, byGroup, datasets, error } = useGroupData();
   const { transfers } = usePayments();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [tab, setTab] = useState<GroupTab>("active");
-  const [sheet, setSheet] = useState<"create" | "join" | null>(null);
+  const [showCreate, setShowCreate] = useState(false);
+  const [showJoin, setShowJoin] = useState(false);
   const [groupName, setGroupName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [formError, setFormError] = useState("");
-  const sheetRef = useRef<SheetHandle>(null);
   const showToast = useToast();
+  const today = useTodayLine();
   const uid = user?.uid;
 
-  /** Per-group figures, derived once from the shared cache. */
+  /**
+   * Per-group figures, derived once from the shared cache. Each row used to
+   * open its own listeners and report balances back up via a callback, which
+   * meant the summary could sit on stale or partial numbers.
+   */
   const rows = useMemo(() => {
     if (!uid) return [];
     return groups.map((group) => {
@@ -79,43 +96,37 @@ export default function Home() {
     });
   }, [groups, byGroup, uid]);
 
-  const tabCounts = useMemo(
-    () => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }),
-    [rows, uid]
-  );
+  const tabCounts = useMemo(() => (uid ? countByTab(rows, uid) : { active: 0, settled: 0, archived: 0 }), [rows, uid]);
 
   const counterparties = useMemo(
     () => (uid ? computeCounterpartyBalances(uid, datasets, transfers) : []),
     [uid, datasets, transfers]
   );
 
-  if (loading || (!groupsLoaded && user)) return <HomeSkeleton />;
+  if (loading || (!groupsLoaded && user)) {
+    return <HomeSkeleton />;
+  }
+
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
-  const member = {
-    displayName: currentUser.displayName || currentUser.email || "User",
-    email: (currentUser.email || "").toLowerCase(),
-    photoURL: currentUser.photoURL || "",
-  };
 
-  function openSheet(which: "create" | "join") {
-    setFormError("");
-    setSheet(which);
-  }
-
-  async function handleCreateGroup(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (!groupName.trim() || busy) return;
+  async function handleCreateGroup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!groupName.trim()) return;
     setBusy(true);
     setFormError("");
     try {
       const { createGroup } = await import("@/lib/firestore");
-      const id = await createGroup(groupName.trim(), currentUser.uid, member);
+      const id = await createGroup(groupName.trim(), currentUser.uid, {
+        displayName: currentUser.displayName || currentUser.email || "User",
+        email: (currentUser.email || "").toLowerCase(),
+        photoURL: currentUser.photoURL || "",
+      });
+      setShowCreate(false);
       setGroupName("");
       showToast({ message: "Group created" });
-      sheetRef.current?.dismiss();
-      nav.push(`/groups/${id}`);
+      router.push(`/groups/${id}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to create group");
     } finally {
@@ -123,22 +134,26 @@ export default function Home() {
     }
   }
 
-  async function handleJoinGroup(e?: React.FormEvent) {
-    e?.preventDefault();
-    if (!joinCode.trim() || busy) return;
+  async function handleJoinGroup(e: React.FormEvent) {
+    e.preventDefault();
+    if (!joinCode.trim()) return;
     setBusy(true);
     setFormError("");
     try {
       const { joinGroupByCode } = await import("@/lib/firestore");
-      const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, member);
+      const id = await joinGroupByCode(joinCode.trim(), currentUser.uid, {
+        displayName: currentUser.displayName || currentUser.email || "User",
+        email: (currentUser.email || "").toLowerCase(),
+        photoURL: currentUser.photoURL || "",
+      });
       if (!id) {
         setFormError("No group found with that invite code.");
         return;
       }
+      setShowJoin(false);
       setJoinCode("");
       showToast({ message: "Joined group" });
-      sheetRef.current?.dismiss();
-      nav.push(`/groups/${id}`);
+      router.push(`/groups/${id}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Failed to join group");
     } finally {
@@ -146,32 +161,30 @@ export default function Home() {
     }
   }
 
-  async function handleToggleArchive(groupId: string, archived: boolean) {
-    try {
-      const { setGroupArchived } = await import("@/lib/firestore");
-      await setGroupArchived(groupId, currentUser.uid, archived);
-      showToast({ message: archived ? "Group archived" : "Group restored" });
-    } catch (err) {
-      showToast({
-        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
-      });
-    }
-  }
-
   // Totals net across groups AND confirmed direct payments, so they agree with
-  // the people list below.
-  const owePeople = counterparties.filter((c) => !isSettled(c.net) && c.net > 0);
-  const owedPeople = counterparties.filter((c) => !isSettled(c.net) && c.net < 0);
+  // "By person" below. Per-group rows stay group-only; direct lives in the
+  // person totals.
   const totalOwe = counterparties.reduce((s, c) => s + (c.net > 0 ? c.net : 0), 0);
   const totalReceive = counterparties.reduce((s, c) => s + (c.net < 0 ? -c.net : 0), 0);
   const actionableCount = rows.reduce((s, r) => s + r.pendingCount, 0);
 
-  // Hiding a total computed from zero groups is right — that's a misleading
-  // ₹0. A total from four groups of five is real and only needs a note.
+  /**
+   * Two different states, previously conflated into one.
+   *
+   * The original gate was `groups.length > 0 && !allLoaded`, and `allLoaded`
+   * requires *every* group's expenses AND settlements to have arrived — ten
+   * snapshots for five groups. So one slow or failed listener blanked the
+   * headline figure and disabled the entire people list indefinitely, which is
+   * the worst of both worlds: a number the user already knew is replaced by a
+   * skeleton, and rows they can see refuse to respond to a tap.
+   *
+   * Hiding a total computed from zero groups is right — that really is a
+   * misleading ₹0. But a total from four groups out of five is a real number
+   * that only needs a quiet note that it is still settling.
+   */
   const loadedGroupCount = groups.filter((g) => byGroup[g.id]?.loaded).length;
   const noBalancesYet = groups.length > 0 && loadedGroupCount === 0;
   const balancesSettling = loadedGroupCount > 0 && loadedGroupCount < groups.length;
-  const allSquare = isSettled(totalOwe) && isSettled(totalReceive);
 
   const peopleToShow = counterparties.filter((c) => !isSettled(c.net));
 
@@ -188,334 +201,287 @@ export default function Home() {
         : (b.lastActivityTs || b.group.createdAt) - (a.lastActivityTs || a.group.createdAt)
     );
 
-  // Archiving is a view preference, never a write-off: totals keep counting
-  // archived groups. Say so when money is sitting in a tab out of sight.
-  const archivedOutstanding = rows.filter(
-    (r) => isArchivedFor(r.group, currentUser.uid) && !isSettled(r.net)
-  ).length;
+  // Archiving is a view preference, never a write-off, so the totals above keep
+  // counting archived groups. This surfaces the money that is sitting in a tab
+  // the user isn't looking at, rather than letting it quietly disappear.
+  const archivedOutstanding = rows
+    .filter((r) => isArchivedFor(r.group, currentUser.uid) && !isSettled(r.net))
+    .length;
 
-  const emptyState = query ? (
-    <EmptyState compact icon="magnifyingglass" title="No Results" message={`No groups match “${query}”.`} />
-  ) : tab === "archived" ? (
-    <EmptyState compact icon="archivebox" title="Nothing Archived" message="Swipe a group to archive it. It moves here without changing any balance." />
-  ) : tab === "settled" ? (
-    <EmptyState compact icon="checkmark.circle" title="No Settled Groups" message="Groups where everyone is square land here." />
-  ) : groups.length === 0 ? (
-    <EmptyState
-      icon="person.2"
-      title="No Groups Yet"
-      message="Create a group for a trip, a flat or a team, or join one with an invite code."
-      action={
-        <Button size="md" icon="plus" onClick={() => openSheet("create")}>
-          New Group
-        </Button>
-      }
-    />
-  ) : (
-    <EmptyState compact icon="checkmark.circle" title="Nothing Needs Attention" message="All your groups are settled. They're in the Settled tab." />
-  );
+  async function handleToggleArchive(groupId: string, archived: boolean) {
+    try {
+      const { setGroupArchived } = await import("@/lib/firestore");
+      await setGroupArchived(groupId, currentUser.uid, archived);
+      showToast({ message: archived ? "Group archived" : "Group restored" });
+    } catch (err) {
+      showToast({
+        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update the group",
+      });
+    }
+  }
+
+  const emptyCopy = query
+    ? { title: "No Results", message: `No groups match “${query}”.` }
+    : tab === "archived"
+    ? { title: "No Archived Groups", message: "Swipe left on a group to archive it. Archiving only tidies this list; balances still count." }
+    : tab === "settled"
+    ? { title: "Nothing Settled Yet", message: "Groups where everyone is square show up here." }
+    : groups.length === 0
+    ? { title: "No Groups", message: "Create a group for a trip, a flat or a dinner, or join one with an invite code." }
+    : { title: "All Caught Up", message: "Nothing needs your attention. Settled groups are under Settled." };
+
+  const openCreate = () => {
+    setFormError("");
+    setShowCreate(true);
+  };
+  const openJoin = () => {
+    setFormError("");
+    setShowJoin(true);
+  };
 
   return (
     <Screen
       title="Groups"
       large
-      tabBar
+      subtitle={today || "\u00a0"}
       trailing={
         <>
-          <BarLink
-            href="/notifications"
-            icon="bell"
-            label="Notifications"
-            badge={actionableCount}
+          <BarButton
+            onClick={() => router.push("/notifications")}
+            aria-label={actionableCount > 0 ? `Notifications, ${actionableCount} needing action` : "Notifications"}
+          >
+            <Bell size={21} />
+            {actionableCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[var(--red)] text-white text-[11px] font-semibold grid place-items-center">
+                {actionableCount}
+              </span>
+            )}
+          </BarButton>
+          <Menu
+            label="Group options"
+            items={[
+              { label: "Sort by Recent", checked: sort === "recent", onSelect: () => setSort("recent") },
+              { label: "Sort by Name", checked: sort === "name", onSelect: () => setSort("name") },
+            ]}
+            trigger={(t) => (
+              <BarButton {...t} aria-label="More">
+                <Ellipsis size={21} />
+              </BarButton>
+            )}
           />
           <Menu
+            label="Add"
             items={[
-              { label: "New Group", icon: "plus", onSelect: () => openSheet("create") },
-              { label: "Join with Code", icon: "qrcode", onSelect: () => openSheet("join") },
+              { label: "New Group", icon: <People size={20} />, onSelect: openCreate },
+              { label: "Join with Code", icon: <PersonAdd size={20} />, onSelect: openJoin },
             ]}
-          >
-            {(props) => <BarButton icon="plus" label="Add group" {...props} />}
-          </Menu>
+            trigger={(t) => (
+              <BarButton {...t} prominent aria-label="Add group">
+                <Plus size={21} />
+              </BarButton>
+            )}
+          />
         </>
       }
     >
       {error && (
-        <Card className="mb-3 flex items-start gap-3 p-4">
-          <span className="mt-0.5 text-[var(--orange)]">
-            <Icon name="exclamationmark.triangle" size={20} />
-          </span>
-          <p className="t-footnote text-label-2">
-            Couldn&rsquo;t load the latest data ({error}). Showing what&rsquo;s saved on this device.
-          </p>
-        </Card>
+        <p className="mx-1 mb-3 t-footnote text-[var(--neg)]">
+          Couldn&rsquo;t load the latest data. Showing what&rsquo;s saved on this iPhone.
+        </p>
       )}
 
-      {/* Balance summary — answers "what needs my attention?" first. */}
-      <Card className="mt-1 p-4" style={{ minHeight: 104 }}>
+      {/* Summary: the one number that matters, then where it comes from. */}
+      <div className="list-section px-4 pt-3.5 pb-4">
         {noBalancesYet ? (
-          <div className="grid grid-cols-2" aria-label="Loading balances">
-            {[0, 1].map((i) => (
-              <div key={i} className={i ? "border-l-[0.5px] border-[var(--separator)] pl-4" : "pr-4"}>
-                <Skeleton className="h-3 w-14 rounded-md" />
-                <Skeleton className="mt-2 h-7 w-24 rounded-lg" />
-              </div>
-            ))}
+          <div>
+            <Skeleton className="h-4 w-20 rounded-md" />
+            <Skeleton className="h-9 w-40 mt-2 rounded-lg" />
           </div>
-        ) : groups.length > 0 && allSquare ? (
-          <div className="flex items-center gap-3 py-1">
-            <IconTile icon="checkmark" color="var(--green)" size="lg" />
-            <div className="min-w-0">
-              <p className="t-headline">All settled up</p>
-              <p className="t-subhead text-label-2">No outstanding balances in any group.</p>
-            </div>
+        ) : !isSettled(totalOwe) ? (
+          <div>
+            <p className="t-subhead text-[var(--text-secondary)]">You owe</p>
+            <p className="t-large-title t-numeral text-[var(--neg)] truncate">{formatCurrency(totalOwe)}</p>
+            {!isSettled(totalReceive) && (
+              <p className="t-subhead text-[var(--text-secondary)] mt-0.5">
+                and you&rsquo;re owed <span className="font-semibold text-[var(--pos)]">{formatCurrency(totalReceive)}</span>
+              </p>
+            )}
+          </div>
+        ) : !isSettled(totalReceive) ? (
+          <div>
+            <p className="t-subhead text-[var(--text-secondary)]">You&rsquo;re owed</p>
+            <p className="t-large-title t-numeral text-[var(--pos)] truncate">{formatCurrency(totalReceive)}</p>
+            <p className="t-subhead text-[var(--text-secondary)] mt-0.5">Across all your groups</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2">
-            <div className="min-w-0 pr-4">
-              <p className="t-footnote font-medium uppercase text-label-2">You owe</p>
-              <p className={`num t-title1 mt-0.5 truncate ${isSettled(totalOwe) ? "text-label-3" : "text-neg"}`}>
-                {formatCurrency(totalOwe)}
-              </p>
-              <p className="t-footnote mt-0.5 text-label-2">
-                {owePeople.length === 0
-                  ? "Nothing to pay"
-                  : `${owePeople.length} ${owePeople.length === 1 ? "person" : "people"}`}
-              </p>
-            </div>
-            <div className="min-w-0 border-l-[0.5px] border-[var(--separator)] pl-4">
-              <p className="t-footnote font-medium uppercase text-label-2">You&rsquo;re owed</p>
-              <p className={`num t-title1 mt-0.5 truncate ${isSettled(totalReceive) ? "text-label-3" : "text-pos"}`}>
-                {formatCurrency(totalReceive)}
-              </p>
-              <p className="t-footnote mt-0.5 text-label-2">
-                {owedPeople.length === 0
-                  ? "Nobody owes you"
-                  : `${owedPeople.length} ${owedPeople.length === 1 ? "person" : "people"}`}
-              </p>
-            </div>
+          <div>
+            <p className="t-subhead text-[var(--text-secondary)]">Balance</p>
+            <p className="t-title1 text-[var(--text-primary)]">All settled up</p>
+            <p className="t-subhead text-[var(--text-secondary)] mt-0.5">No one owes anyone</p>
           </div>
         )}
         {balancesSettling && (
-          <p role="status" className="t-footnote mt-3 flex items-center gap-1.5 text-label-2">
-            <span aria-hidden className="dot animate-pulse bg-[var(--tint)]" style={{ width: 6, height: 6 }} />
-            Still adding up {groups.length - loadedGroupCount} of {groups.length} groups
+          <p role="status" className="mt-2 t-footnote text-[var(--text-secondary)]">
+            Still adding up {groups.length - loadedGroupCount} of {groups.length} groups…
           </p>
         )}
-      </Card>
+      </div>
 
-      {/* People with an open balance, netted across groups + direct payments. */}
+      <NotificationPrompt uid={currentUser.uid} hasGroups={groups.length > 0} />
+
       {peopleToShow.length > 0 && (
-        <Section
-          header="People"
-          footer="Netted across every group you share, plus direct payments. Tap for the full statement."
-        >
-          <List>
-            {peopleToShow.map((person) => {
-              const iOwe = person.net > 0;
-              const hasDirect = !isSettled(person.directNet || 0);
-              const sub =
-                person.groups.length > 0
-                  ? person.groups.map((g) => g.groupName).join(" · ") +
-                    (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
-                  : person.sharedGroupCount > 0
-                  ? `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}` +
-                    (hasDirect ? ` · ${formatCurrency(Math.abs(person.directNet))} direct` : "")
-                  : "Direct payment";
-              return (
-                <RowLink
-                  key={person.uid}
-                  href={`/reports?person=${person.uid}`}
-                  inset="avatar"
-                  leading={<Avatar name={person.displayName} photoURL={person.photoURL} size={40} />}
-                  title={person.displayName}
-                  subtitle={sub}
-                  trailing={
-                    <span className="flex shrink-0 flex-col items-end">
-                      <span className="t-caption text-label-2">{iOwe ? "you owe" : "owes you"}</span>
-                      <span className={`num t-headline ${iOwe ? "text-neg" : "text-pos"}`}>
-                        {formatCurrency(Math.abs(person.net))}
-                      </span>
+        <ListSection header="People" footer="Netted across every group you share, plus direct payments.">
+          {peopleToShow.map((person) => {
+            const iOweNet = person.net > 0;
+            const hasDirect = !isSettled(person.directNet || 0);
+            const sub =
+              person.groups.length > 0
+                ? person.groups.map((g) => g.groupName).join(", ") + (hasDirect ? " · direct" : "")
+                : person.sharedGroupCount > 0
+                ? `${person.sharedGroupCount} shared group${person.sharedGroupCount !== 1 ? "s" : ""}`
+                : "Direct payment";
+            return (
+              <LinkRow
+                key={person.uid}
+                href={`/reports?person=${person.uid}`}
+                leading={<Avatar name={person.displayName} photoURL={person.photoURL} size={36} seed={person.uid} />}
+                separatorInset={64}
+                title={person.displayName}
+                subtitle={sub}
+                detail={
+                  <span className="flex flex-col items-end leading-tight">
+                    <span className="t-caption text-[var(--text-secondary)]">{iOweNet ? "you owe" : "owes you"}</span>
+                    <span className={`t-headline t-numeral ${iOweNet ? "text-[var(--neg)]" : "text-[var(--pos)]"}`}>
+                      {formatCurrency(Math.abs(person.net))}
                     </span>
-                  }
-                />
-              );
-            })}
-          </List>
-        </Section>
-      )}
-
-      {/* Groups */}
-      <Section
-        header="Your Groups"
-        headerAction={
-          <Menu
-            align="end"
-            title="Sort by"
-            items={[
-              { label: "Recent Activity", checked: sort === "recent", onSelect: () => setSort("recent") },
-              { label: "Name", checked: sort === "name", onSelect: () => setSort("name") },
-            ]}
-          >
-            {(props) => (
-              <button
-                type="button"
-                {...props}
-                className="inline-flex min-h-[32px] items-center gap-1 text-[15px] text-tint"
-                aria-label={`Sorted by ${sort === "recent" ? "recent activity" : "name"}. Change sort.`}
-              >
-                {sort === "recent" ? "Recent" : "Name"}
-                <Icon name="chevron.up.down" size={14} strokeWidth={2.2} />
-              </button>
-            )}
-          </Menu>
-        }
-      >
-        {groups.length > 0 && (
-          <div className="mb-3 space-y-3">
-            <SearchField value={query} onChange={setQuery} placeholder="Search groups" label="Search groups" />
-            <Segmented
-              label="Show groups"
-              value={tab}
-              onChange={setTab}
-              options={GROUP_TABS.map((t) => ({ id: t.id, label: t.label, count: tabCounts[t.id] }))}
-            />
-          </div>
-        )}
-        {sortedRows.length === 0 ? (
-          <Card>{emptyState}</Card>
-        ) : (
-          <List>
-            {sortedRows.map((row) => (
-              <GroupRow
-                key={row.group.id}
-                group={row.group}
-                net={row.net}
-                loaded={row.loaded}
-                lastActivityTs={row.lastActivityTs}
-                pendingCount={row.pendingCount}
-                href={`/groups/${row.group.id}`}
-                action={
-                  tab === "archived"
-                    ? {
-                        label: "Restore",
-                        ariaLabel: `Restore ${row.group.name} to your active groups`,
-                        onClick: () => handleToggleArchive(row.group.id, false),
-                      }
-                    : {
-                        label: "Archive",
-                        ariaLabel: `Archive ${row.group.name}`,
-                        onClick: () => handleToggleArchive(row.group.id, true),
-                      }
+                  </span>
                 }
               />
-            ))}
-          </List>
+            );
+          })}
+        </ListSection>
+      )}
+
+      <section id="your-groups" className="mt-7 scroll-mt-24">
+        <div className="list-header-prominent">Your Groups</div>
+        {groups.length > 4 && (
+          <SearchField value={query} onChange={setQuery} placeholder="Search" label="Search groups" className="mb-3" />
         )}
+        <Segmented
+          label="Show groups"
+          value={tab}
+          onChange={setTab}
+          options={GROUP_TABS.map((t) => ({
+            id: t.id,
+            label: tabCounts[t.id] > 0 ? `${t.label} ${tabCounts[t.id]}` : t.label,
+          }))}
+        />
         {tab === "archived" && archivedOutstanding > 0 && (
-          <p className="section-footer text-warn">
-            {archivedOutstanding} archived group{archivedOutstanding !== 1 ? "s" : ""} still
-            {archivedOutstanding !== 1 ? " have" : " has"} an open balance. Archiving only tidies
-            this list — they still count in your totals.
+          <p className="list-footer !px-1 !pt-2.5">
+            {archivedOutstanding} archived group{archivedOutstanding !== 1 ? "s" : ""} still{" "}
+            {archivedOutstanding !== 1 ? "have" : "has"} an open balance, still counted in your totals.
           </p>
         )}
-        {tab !== "archived" && sortedRows.length > 0 && (
-          <p className="section-footer">Swipe left on a group to archive it.</p>
-        )}
-      </Section>
 
-      {tab === "active" && tabCounts.settled > 0 && (
-        <Section>
-          <List>
-            <RowButton
-              onClick={() => setTab("settled")}
-              leading={<IconTile icon="checkmark" color="var(--green)" />}
-              title={`${tabCounts.settled} settled group${tabCounts.settled !== 1 ? "s" : ""}`}
-              subtitle="Everyone's square. Review or archive them."
-              chevron
+        <div className="mt-3">
+          {sortedRows.length === 0 ? (
+            <EmptyState
+              icon={<People size={56} weight={1.4} />}
+              title={emptyCopy.title}
+              message={emptyCopy.message}
+              action={
+                groups.length === 0 && !query ? (
+                  <button onClick={openCreate} className="btn-prominent">
+                    New Group
+                  </button>
+                ) : undefined
+              }
             />
-          </List>
-        </Section>
-      )}
-
-      {sheet === "create" && (
-        <Sheet
-          ref={sheetRef}
-          title="New Group"
-          dirty={!!groupName.trim() && !busy}
-          onClose={() => {
-            setSheet(null);
-            setGroupName("");
-          }}
-          trailing={
-            <SheetIconButton
-              icon="checkmark"
-              label="Create group"
-              prominent
-              disabled={!groupName.trim() || busy}
-              onClick={() => void handleCreateGroup()}
-            />
-          }
-        >
-          <form onSubmit={handleCreateGroup}>
-            <List>
-              <FieldRow
-                autoFocus
-                value={groupName}
-                onChange={(e) => setGroupName(e.target.value)}
-                placeholder="Group name"
-                aria-label="Group name"
-                enterKeyHint="done"
-                maxLength={60}
-              />
-            </List>
-            <p className="section-footer">A trip, a flat, a team — anything you split costs for.</p>
-            {formError && <p className="t-footnote mt-3 px-4 text-neg">{formError}</p>}
-            <button type="submit" hidden aria-hidden tabIndex={-1} />
-          </form>
-        </Sheet>
-      )}
-
-      {sheet === "join" && (
-        <Sheet
-          ref={sheetRef}
-          title="Join a Group"
-          dirty={!!joinCode.trim() && !busy}
-          onClose={() => {
-            setSheet(null);
-            setJoinCode("");
-          }}
-          trailing={
-            <SheetIconButton
-              icon="checkmark"
-              label="Join group"
-              prominent
-              disabled={!joinCode.trim() || busy}
-              onClick={() => void handleJoinGroup()}
-            />
-          }
-        >
-          <form onSubmit={handleJoinGroup}>
-            <List>
-              <FieldRow
-                autoFocus
-                value={joinCode}
-                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
-                placeholder="Invite code"
-                aria-label="Invite code"
-                autoCapitalize="characters"
-                autoCorrect="off"
-                spellCheck={false}
-                enterKeyHint="go"
-                inputClassName="font-semibold uppercase tracking-[0.2em]"
-              />
-            </List>
-            <p className="section-footer">
-              Ask any member for the 6-character code, or scan the QR code on their phone.
+          ) : (
+            <div className="list-section">
+              {sortedRows.map((row) => (
+                <SwipeRow
+                  key={row.group.id}
+                  actions={[
+                    tab === "archived"
+                      ? { label: "Restore", tone: "accent", onClick: () => handleToggleArchive(row.group.id, false) }
+                      : { label: "Archive", tone: "neutral", onClick: () => handleToggleArchive(row.group.id, true) },
+                  ]}
+                >
+                  <GroupRow
+                    group={row.group}
+                    net={row.net}
+                    loaded={row.loaded}
+                    lastActivityTs={row.lastActivityTs}
+                    pendingCount={row.pendingCount}
+                    href={`/groups/${row.group.id}`}
+                  />
+                </SwipeRow>
+              ))}
+            </div>
+          )}
+          {sortedRows.length > 0 && (
+            <p className="list-footer flex items-center gap-1.5">
+              <Archive size={14} />
+              {tab === "archived" ? "Swipe left to restore a group." : "Swipe left to archive a group."}
             </p>
-            {formError && <p className="t-footnote mt-3 px-4 text-neg">{formError}</p>}
-            <button type="submit" hidden aria-hidden tabIndex={-1} />
+          )}
+        </div>
+      </section>
+
+      {showCreate && (
+        <GlassModal
+          title="New Group"
+          onClose={() => setShowCreate(false)}
+          dirty={!!groupName.trim() && !busy}
+          confirm={{ label: "Create", formId: "create-group", disabled: !groupName.trim(), busy, onConfirm: () => {} }}
+        >
+          <form id="create-group" onSubmit={handleCreateGroup} className="pt-2">
+            <ListSection elevated footer="You can add a photo, a description and members after creating it.">
+              <Row className="!py-0">
+                <input
+                  autoFocus
+                  value={groupName}
+                  onChange={(e) => setGroupName(e.target.value)}
+                  placeholder="Group Name"
+                  aria-label="Group name"
+                  enterKeyHint="done"
+                  className="row-input py-[13px]"
+                />
+              </Row>
+            </ListSection>
+            {formError && <p className="list-footer !text-[var(--neg)]">{formError}</p>}
           </form>
-        </Sheet>
+        </GlassModal>
+      )}
+
+      {showJoin && (
+        <GlassModal
+          title="Join Group"
+          onClose={() => setShowJoin(false)}
+          dirty={!!joinCode.trim() && !busy}
+          confirm={{ label: "Join", formId: "join-group", disabled: !joinCode.trim(), busy, onConfirm: () => {} }}
+        >
+          <form id="join-group" onSubmit={handleJoinGroup} className="pt-2">
+            <ListSection elevated footer="Ask someone in the group for the six-character code, or open their invite link.">
+              <Row className="!py-0">
+                <input
+                  autoFocus
+                  value={joinCode}
+                  onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                  placeholder="Invite Code"
+                  aria-label="Invite code"
+                  autoCapitalize="characters"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  enterKeyHint="go"
+                  className="row-input py-[13px] tracking-[0.18em] font-semibold"
+                />
+              </Row>
+            </ListSection>
+            {formError && <p className="list-footer !text-[var(--neg)]">{formError}</p>}
+          </form>
+        </GlassModal>
       )}
     </Screen>
   );

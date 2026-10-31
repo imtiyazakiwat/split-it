@@ -11,7 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase-db";
 import { DirectTransfer } from "./types";
-import { notifyUsers } from "./send-notification";
+import { actorName, notifyUsers, rupees } from "./send-notification";
 import { fromPaise, roundMoney, toPaise } from "./money";
 import { transferAllocations, unallocatedAmount } from "./transfer-allocation";
 
@@ -80,15 +80,6 @@ export interface NewTransfer {
   receiptUrls?: string[];
 }
 
-async function displayName(uid: string): Promise<string> {
-  try {
-    const snap = await getDoc(doc(db, "users", uid));
-    return (snap.data()?.displayName as string) || "Someone";
-  } catch {
-    return "Someone";
-  }
-}
-
 export async function createTransfer(data: NewTransfer): Promise<string> {
   const amount = roundMoney(data.amount);
   if (!(amount > 0)) throw new Error("Enter an amount greater than zero.");
@@ -109,16 +100,13 @@ export async function createTransfer(data: NewTransfer): Promise<string> {
   });
   await batch.commit();
 
-  try {
-    const name = await displayName(data.fromUid);
-    notifyUsers([data.toUid], {
-      title: "Money received",
-      body: `${name} says they sent you ₹${amount}. Confirm it to settle up.`,
-      link: `/chat/${data.fromUid}`,
-    });
-  } catch {
-    // notification is best-effort; the transfer is already recorded
-  }
+  // Only the sender creates a transfer, so the signed-in user is `fromUid` and
+  // there's no need to read their user document for a name. Best-effort.
+  notifyUsers([data.toUid], {
+    title: `${actorName()} sent you ${rupees(amount)}`,
+    body: "Confirm you received it to settle up.",
+    link: `/chat/${data.fromUid}`,
+  });
 
   return ref.id;
 }
@@ -128,6 +116,13 @@ export async function cancelTransfer(transfer: DirectTransfer): Promise<void> {
   await updateDoc(doc(db, "transfers", transfer.id), {
     status: "cancelled",
     updatedAt: Date.now(),
+  });
+  // The receiver was told "X sent you ₹N, confirm it". Without this, that
+  // request silently vanished from their screen.
+  notifyUsers([transfer.toUid], {
+    title: actorName(),
+    body: `Withdrew the ${rupees(transfer.amount)} payment. Nothing to confirm.`,
+    link: `/chat/${transfer.fromUid}`,
   });
 }
 
@@ -328,7 +323,8 @@ async function notifyAllocation(
   transfer: DirectTransfer,
   planned: PlannedLegRef[]
 ): Promise<void> {
-  const name = await displayName(transfer.toUid);
+  // The receiver books the payment, so the signed-in user is `toUid`.
+  const name = actorName();
   const names = await Promise.all(
     planned.map(async (leg) => {
       const snap = await getDoc(doc(db, "groups", leg.groupId));
@@ -370,15 +366,12 @@ export async function includeTransferInGroup(
 }
 
 async function notifyCounterparty(transfer: DirectTransfer, body: string): Promise<void> {
-  try {
-    notifyUsers([transfer.fromUid], {
-      title: "SplitIt",
-      body,
-      link: `/chat/${transfer.toUid}`,
-    });
-  } catch {
-    // best-effort
-  }
+  // The receiver responds, so the signed-in user is `toUid`: title with them.
+  notifyUsers([transfer.fromUid], {
+    title: actorName(),
+    body,
+    link: `/chat/${transfer.toUid}`,
+  });
 }
 
 // ── Read helpers ────────────────────────────────────────────

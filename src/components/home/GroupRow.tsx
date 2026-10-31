@@ -1,32 +1,32 @@
 "use client";
 
+import Link from "next/link";
+import NavHint from "@/components/NavHint";
 import { formatCurrency } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { Group } from "@/lib/types";
-import { RowLink } from "@/components/kit/List";
-import { GroupAvatar } from "@/components/kit/Tile";
-import { SwipeRow } from "@/components/kit/SwipeRow";
 import Skeleton from "@/components/ui/Skeleton";
+import { Avatar } from "@/components/ui/Controls";
+import { ChevronRight } from "@/components/ui/Icons";
 
 function timeAgo(ts: number): string {
+  if (!ts) return "";
   const diff = Date.now() - ts;
   const m = Math.floor(diff / 60000);
-  if (m < 1) return "just now";
+  if (m < 1) return "Just now";
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   const d = Math.floor(h / 24);
-  if (d < 30) return `${d}d ago`;
-  return `${Math.floor(d / 30)}mo ago`;
+  if (d === 1) return "Yesterday";
+  if (d < 7) return new Date(ts).toLocaleDateString("en-IN", { weekday: "long" });
+  return new Date(ts).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
 /**
- * One group in the home list. Purely presentational: balances and timestamps
- * are derived once by the home screen from the shared group-data cache.
- *
- * A real <Link> (via RowLink), so /groups/[id] — the heaviest route — is
- * prefetched before the tap. Archive/Restore is a trailing swipe action here;
- * the same action lives in the group's own menu for anyone who doesn't swipe.
+ * One row in the inset-grouped Groups list. One row = one tap target: the
+ * whole row pushes the group. Archive/Restore moved to a swipe action (with
+ * the same action in the group's info sheet as the non-gesture path).
  */
 export default function GroupRow({
   group,
@@ -35,7 +35,6 @@ export default function GroupRow({
   lastActivityTs,
   pendingCount = 0,
   href,
-  action,
 }: {
   group: Group;
   net: number;
@@ -43,64 +42,51 @@ export default function GroupRow({
   lastActivityTs: number;
   pendingCount?: number;
   href: string;
-  action?: { label: string; ariaLabel: string; onClick: () => void };
 }) {
   const settled = isSettled(net);
   const members = group.memberIds.length;
 
-  const trailing = !loaded ? (
-    <span className="flex flex-col items-end gap-1.5" aria-label="Loading balance">
-      <Skeleton className="h-3 w-12 rounded-md" />
-      <Skeleton className="h-4 w-16 rounded-md" />
-    </span>
-  ) : settled ? (
-    <span className="t-subhead shrink-0 text-label-2">Settled</span>
-  ) : (
-    <span className="flex shrink-0 flex-col items-end">
-      <span className="t-caption text-label-2">{net > 0 ? "you're owed" : "you owe"}</span>
-      <span className={`num t-headline ${net > 0 ? "text-pos" : "text-neg"}`}>
-        {formatCurrency(Math.abs(net))}
-      </span>
-    </span>
-  );
-
-  const subtitle = (
-    <>
-      {members} member{members !== 1 ? "s" : ""} · {timeAgo(lastActivityTs)}
-      {pendingCount > 0 && (
-        <span className="font-medium text-warn"> · {pendingCount} to approve</span>
-      )}
-    </>
-  );
-
-  const row = (
-    <RowLink
-      href={href}
-      inset={72}
-      tall
-      leading={<GroupAvatar id={group.id} name={group.name} photoURL={group.photoURL} size={44} />}
-      title={group.name}
-      titleClassName="font-semibold"
-      subtitle={subtitle}
-      trailing={trailing}
-    />
-  );
-
-  if (!action) return row;
   return (
-    <SwipeRow
-      inset={72}
-      actions={[
-        {
-          label: action.label,
-          icon: action.label === "Restore" ? "archivebox.up" : "archivebox",
-          color: "var(--indigo)",
-          removesRow: true,
-          onAction: action.onClick,
-        },
-      ]}
-    >
-      {row}
-    </SwipeRow>
+    <Link href={href} className="list-row is-tall" style={{ ["--sep-inset" as string]: "72px" }}>
+      <NavHint />
+      <span className="relative shrink-0">
+        <Avatar name={group.name} photoURL={group.photoURL} size={44} seed={group.id} />
+        {pendingCount > 0 && (
+          <span
+            className="absolute -top-1 -right-1 min-w-[20px] h-[20px] px-1 rounded-full bg-[var(--red)] text-white text-[12px] font-semibold grid place-items-center ring-2 ring-[var(--surface)]"
+            aria-label={`${pendingCount} waiting for you`}
+          >
+            {pendingCount}
+          </span>
+        )}
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="block t-headline text-[var(--text-primary)] truncate">{group.name}</span>
+        <span className="block t-subhead text-[var(--text-secondary)] truncate mt-px">
+          {members} {members === 1 ? "member" : "members"}
+          {lastActivityTs ? ` · ${timeAgo(lastActivityTs)}` : ""}
+        </span>
+      </span>
+
+      <span className="shrink-0 text-right">
+        {!loaded ? (
+          <span className="flex flex-col items-end gap-1.5">
+            <Skeleton className="h-3 w-12 rounded-md" />
+            <Skeleton className="h-4 w-16 rounded-md" />
+          </span>
+        ) : settled ? (
+          <span className="t-subhead text-[var(--text-secondary)]">Settled up</span>
+        ) : (
+          <>
+            <span className="block t-caption text-[var(--text-secondary)]">{net > 0 ? "you get back" : "you owe"}</span>
+            <span className={`block t-headline t-numeral ${net > 0 ? "text-[var(--pos)]" : "text-[var(--neg)]"}`}>
+              {formatCurrency(Math.abs(net))}
+            </span>
+          </>
+        )}
+      </span>
+      <ChevronRight className="row-chevron -mr-1" />
+    </Link>
   );
 }

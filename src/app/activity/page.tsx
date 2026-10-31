@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { formatCurrency } from "@/lib/balance";
@@ -15,15 +16,20 @@ import { groupItemLink } from "@/lib/statement";
 import LoginScreen from "@/components/LoginScreen";
 import ReportPanel from "@/components/activity/ReportPanel";
 import Skeleton from "@/components/ui/Skeleton";
-import Screen from "@/components/kit/Screen";
-import { BarButton } from "@/components/kit/BarButton";
-import { Menu } from "@/components/kit/Menu";
-import { List, RowLink, Section, sepInset } from "@/components/kit/List";
-import { CategoryTile, IconTile } from "@/components/kit/Tile";
-import { EmptyState, SearchField, Segmented } from "@/components/kit/Controls";
-import { Icon } from "@/components/kit/Icon";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import Menu from "@/components/ui/Menu";
+import { ListSection } from "@/components/ui/List";
+import { EmptyState, SearchField, Segmented } from "@/components/ui/Controls";
+import { Arrows, CategoryGlyph, CheckCircle, ChevronRight, Clock, categoryTint } from "@/components/ui/Icons";
 
 type Tab = "all" | "expenses" | "settlements" | "report";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "expenses", label: "Expenses" },
+  { id: "settlements", label: "Payments" },
+  { id: "report", label: "Summary" },
+];
 
 function dateBucket(ts: number): string {
   const now = new Date();
@@ -36,111 +42,91 @@ function dateBucket(ts: number): string {
   return d.toLocaleDateString("en-IN", {
     day: "numeric",
     month: "long",
-    year: d.getFullYear() === now.getFullYear() ? undefined : "numeric",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
   });
-}
-
-function timeLabel(ts: number): string {
-  return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
 function ExpenseRow({ record }: { record: ExpenseRecord }) {
   return (
-    <RowLink
-      href={groupItemLink(record.groupId, { kind: "expense", id: record.id })}
-      inset="tile"
-      tall
-      chevron={false}
-      leading={<CategoryTile id={record.category} />}
-      title={record.description}
-      subtitle={
-        <>
-          {record.paidByName} paid · {record.groupName}
-          {record.edited ? " · edited" : ""}
-        </>
-      }
-      trailing={
-        <span className="flex shrink-0 flex-col items-end">
-          <span className="num t-subhead font-semibold">{formatCurrency(record.amount)}</span>
-          <span className="t-caption text-label-2">
-            {record.myShare > 0 ? `your share ${formatCurrency(record.myShare)}` : timeLabel(record.ts)}
-          </span>
+    <>
+      <span className="icon-tile" style={{ background: categoryTint(record.category) }}>
+        <CategoryGlyph id={record.category} size={18} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block t-body text-[var(--text-primary)] truncate">{record.description}</span>
+        <span className="block t-subhead text-[var(--text-secondary)] truncate mt-px">
+          {record.groupName} · {record.paidByName} paid
+          {record.edited ? " · Edited" : ""}
         </span>
-      }
-    />
+      </span>
+      <span className="shrink-0 text-right">
+        <span className="block t-subhead font-semibold t-numeral text-[var(--text-primary)]">{formatCurrency(record.amount)}</span>
+        {record.myShare > 0 && (
+          <span className="block t-caption text-[var(--text-secondary)] t-numeral">yours {formatCurrency(record.myShare)}</span>
+        )}
+      </span>
+    </>
   );
 }
 
 function SettlementRow({ record }: { record: SettlementRecord }) {
   const isOffset = record.settlementKind === "offset";
-  const tile = isOffset ? (
-    <IconTile icon="arrow.left.right" color="var(--indigo)" />
-  ) : record.status === "approved" ? (
-    <IconTile icon="checkmark" color="var(--green)" />
-  ) : record.status === "pending" ? (
-    <IconTile icon="clock" color="var(--orange)" />
-  ) : (
-    <IconTile icon="xmark" color="var(--gray)" />
-  );
-  const title = isOffset
-    ? `${record.fromName} ⇄ ${record.toName}`
-    : `${record.fromName} paid ${record.toName}`;
-  const status = isOffset
-    ? "Offset · no money moved"
-    : record.status === "approved"
-    ? "Settled"
-    : record.status === "pending"
-    ? "Awaiting approval"
-    : "Declined";
+  const color =
+    isOffset ? "var(--indigo)" : record.status === "approved" ? "var(--green)" : record.status === "pending" ? "var(--orange)" : "var(--gray)";
+  const status =
+    isOffset ? "Offset · no money moved" : record.status === "approved" ? "Settled" : record.status === "pending" ? "Waiting for approval" : "Declined";
   return (
-    <RowLink
-      href={groupItemLink(record.groupId, { kind: "settlement", id: record.id })}
-      inset="tile"
-      tall
-      chevron={false}
-      leading={tile}
-      title={title}
-      subtitle={
-        <>
-          <span className={record.status === "pending" && !isOffset ? "text-warn" : undefined}>{status}</span>
-          {` · ${record.groupName}`}
-          {record.note ? ` · ${record.note}` : ""}
-        </>
-      }
-      trailing={
-        <span className="flex shrink-0 flex-col items-end">
-          <span
-            className={`num t-subhead font-semibold ${record.status === "rejected" ? "text-label-3 line-through" : ""}`}
-          >
-            {formatCurrency(record.amount)}
-          </span>
-          <span className="t-caption text-label-2">{timeLabel(record.ts)}</span>
+    <>
+      <span className="icon-tile" style={{ background: color }}>
+        {isOffset ? <Arrows size={17} /> : <CheckCircle size={18} />}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block t-body text-[var(--text-primary)] truncate">
+          {record.fromName} → {record.toName}
         </span>
-      }
-    />
+        <span
+          className={`block t-subhead truncate mt-px ${
+            record.status === "pending" ? "text-[var(--warning)]" : record.status === "rejected" ? "text-[var(--neg)]" : "text-[var(--text-secondary)]"
+          }`}
+        >
+          {status} <span className="text-[var(--text-secondary)]">· {record.groupName}{record.note ? ` · ${record.note}` : ""}</span>
+        </span>
+      </span>
+      <span className="shrink-0 t-subhead font-semibold t-numeral text-[var(--text-primary)]">{formatCurrency(record.amount)}</span>
+    </>
   );
 }
 
 export default function ActivityPage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const { groups, groupsLoaded, datasets, allLoaded } = useGroupData();
   const [tab, setTab] = useState<Tab>("all");
   const [groupFilter, setGroupFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const uid = user?.uid;
 
-  const allRecords = useMemo(() => (uid ? buildActivityRecords(uid, datasets) : []), [uid, datasets]);
+  const allRecords = useMemo(
+    () => (uid ? buildActivityRecords(uid, datasets) : []),
+    [uid, datasets]
+  );
 
   const scopedDatasets = useMemo(
-    () => (groupFilter === "all" ? datasets : datasets.filter((d) => d.group.id === groupFilter)),
+    () =>
+      groupFilter === "all"
+        ? datasets
+        : datasets.filter((d) => d.group.id === groupFilter),
     [datasets, groupFilter]
   );
 
   // Records in scope for the report: filtered by group only. Mixing the text
-  // search in would give a report whose spend totals were filtered but whose
-  // balances and settled-% (from the full ledger) were not.
+  // search in here would produce a report whose spend totals were filtered but
+  // whose balances and settled-% (derived from the full ledger) were not.
   const groupScopedRecords = useMemo(
-    () => (groupFilter === "all" ? allRecords : allRecords.filter((r) => r.groupId === groupFilter)),
+    () =>
+      groupFilter === "all"
+        ? allRecords
+        : allRecords.filter((r) => r.groupId === groupFilter),
     [allRecords, groupFilter]
   );
 
@@ -177,145 +163,104 @@ export default function ActivityPage() {
     return scopedRecords;
   }, [scopedRecords, tab]);
 
-  if (loading) {
-    return (
-      <Screen title="Activity" large tabBar>
-        <ActivitySkeleton />
-      </Screen>
-    );
-  }
+  if (loading) return <Screen title="Activity" large>{null}</Screen>;
   if (!user) return <LoginScreen />;
 
-  const buckets: { label: string; records: ActivityRecord[] }[] = [];
+  const sections: { bucket: string; records: ActivityRecord[] }[] = [];
   for (const record of visible) {
-    const label = dateBucket(record.ts);
-    const last = buckets[buckets.length - 1];
-    if (last && last.label === label) last.records.push(record);
-    else buckets.push({ label, records: [record] });
+    const bucket = dateBucket(record.ts);
+    const last = sections[sections.length - 1];
+    if (last && last.bucket === bucket) last.records.push(record);
+    else sections.push({ bucket, records: [record] });
   }
 
+  const scopeName = groupFilter === "all" ? "All Groups" : groups.find((g) => g.id === groupFilter)?.name || "Group";
+
   const stillLoading = !groupsLoaded || (groups.length > 0 && !allLoaded);
-  const filteredGroup = groupFilter === "all" ? null : groups.find((g) => g.id === groupFilter);
 
   return (
     <Screen
       title="Activity"
       large
-      tabBar
+      subtitle={groupFilter === "all" ? "Across all your groups" : scopeName}
       trailing={
         groups.length > 1 ? (
           <Menu
-            title="Show activity from"
+            label="Show activity from"
             items={[
               { label: "All Groups", checked: groupFilter === "all", onSelect: () => setGroupFilter("all") },
-              "separator",
-              ...groups.map((g) => ({
-                label: g.name,
-                checked: groupFilter === g.id,
-                onSelect: () => setGroupFilter(g.id),
-              })),
+              { divider: true },
+              ...groups.map((g) => ({ label: g.name, checked: groupFilter === g.id, onSelect: () => setGroupFilter(g.id) })),
             ]}
-          >
-            {(props) => (
-              <BarButton
-                icon="line.3.decrease"
-                label={filteredGroup ? `Filtered by ${filteredGroup.name}. Change filter` : "Filter by group"}
-                className={filteredGroup ? "!text-tint" : ""}
-                {...props}
-              />
+            trigger={(t) => (
+              <BarButton {...t} text aria-label={`Filter: ${scopeName}`}>
+                <span className="max-w-[140px] truncate">{groupFilter === "all" ? "Filter" : scopeName}</span>
+              </BarButton>
             )}
-          </Menu>
+          />
         ) : undefined
       }
     >
-      <Segmented
-        label="Activity views"
-        value={tab}
-        onChange={setTab}
-        options={[
-          { id: "all", label: "All" },
-          { id: "expenses", label: "Expenses" },
-          { id: "settlements", label: "Payments" },
-          { id: "report", label: "Report" },
-        ]}
-      />
+      <Segmented label="Activity views" value={tab} onChange={setTab} options={TABS} />
 
-      {filteredGroup && (
-        <div className="mt-3 flex">
-          <button
-            type="button"
-            onClick={() => setGroupFilter("all")}
-            className="capsule is-tint h-8 gap-1.5 px-3 text-[13px]"
-            aria-label={`Showing only ${filteredGroup.name}. Show all groups`}
-          >
-            <span className="max-w-[60vw] truncate">{filteredGroup.name}</span>
-            <Icon name="xmark" size={12} strokeWidth={3} />
-          </button>
-        </div>
-      )}
-
-      {tab !== "report" && (
+      {tab !== "report" && (groupScopedRecords.length > 8 || search !== "") && (
         <SearchField
           value={search}
           onChange={setSearch}
-          placeholder={tab === "settlements" ? "Search payments" : "Search expenses, people, groups"}
+          placeholder="Search"
           label="Search activity"
           className="mt-3"
         />
       )}
 
-      {stillLoading && scopedRecords.length === 0 ? (
-        <div className="section">
-          <ActivitySkeleton />
-        </div>
-      ) : tab === "report" && report ? (
-        <div className="mt-4">
+      <div className="mt-4">
+        {stillLoading && scopedRecords.length === 0 ? (
+          <div className="list-section">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="list-row is-tall">
+                <Skeleton className="w-[30px] h-[30px] rounded-[8px]" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-3/4 rounded-md" />
+                  <Skeleton className="h-3 w-1/2 rounded-md" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : tab === "report" && report ? (
           <ReportPanel report={report} records={groupScopedRecords} />
-        </div>
-      ) : buckets.length === 0 ? (
-        <div className="card mt-4">
+        ) : sections.length === 0 ? (
           <EmptyState
-            compact
-            icon={search ? "magnifyingglass" : "clock"}
-            title={search ? "No Results" : tab === "expenses" ? "No Expenses Yet" : tab === "settlements" ? "No Payments Yet" : "No Activity Yet"}
+            icon={<Clock size={56} weight={1.4} />}
+            title={search ? "No Results" : "No Activity"}
             message={
               search
                 ? `Nothing matches “${search}”.`
-                : "Expenses and payments from all your groups show up here as they happen."
+                : tab === "expenses"
+                ? "Expenses added in any of your groups show up here."
+                : tab === "settlements"
+                ? "Payments and settle-ups show up here."
+                : "Expenses and payments across your groups show up here."
             }
           />
-        </div>
-      ) : (
-        buckets.map((bucket) => (
-          <Section key={bucket.label} header={bucket.label}>
-            <List>
-              {bucket.records.map((record) =>
-                record.kind === "expense" ? (
-                  <ExpenseRow key={record.key} record={record} />
-                ) : (
-                  <SettlementRow key={record.key} record={record} />
-                )
-              )}
-            </List>
-          </Section>
-        ))
-      )}
+        ) : (
+          sections.map((section) => (
+            <ListSection key={section.records[0].key} header={section.bucket} className="!mt-5 first:!mt-0">
+              {section.records.map((record) => (
+                <button
+                  key={record.key}
+                  type="button"
+                  onClick={() => router.push(groupItemLink(record.groupId, { kind: record.kind, id: record.id }))}
+                  className="list-row is-tall"
+                  style={{ ["--sep-inset" as string]: "58px" }}
+                >
+                  {record.kind === "expense" ? <ExpenseRow record={record} /> : <SettlementRow record={record} />}
+                  <ChevronRight className="row-chevron -mr-1" />
+                </button>
+              ))}
+            </ListSection>
+          ))
+        )}
+      </div>
     </Screen>
-  );
-}
-
-function ActivitySkeleton() {
-  return (
-    <div className="card list" aria-hidden>
-      {[0, 1, 2, 3].map((i) => (
-        <div key={i} className="row is-tall" style={sepInset(58)}>
-          <Skeleton className="h-[30px] w-[30px] rounded-[8px]" />
-          <div className="flex-1">
-            <Skeleton className="h-4 w-3/4 rounded-md" />
-            <Skeleton className="mt-2 h-3 w-1/2 rounded-md" />
-          </div>
-        </div>
-      ))}
-    </div>
   );
 }

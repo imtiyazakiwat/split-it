@@ -1,40 +1,43 @@
-"use client";
-
-import Screen from "@/components/kit/Screen";
 import Skeleton from "@/components/ui/Skeleton";
 
 /**
- * Layout-matching placeholder for a group (header, balance card, summary,
- * rows). Also the route's loading.tsx, which is what lets /groups/[id] be
- * prefetched at all (see that file).
+ * Layout-matching skeleton for a group: header, balance card, balances list
+ * and activity, shown while the group document loads.
  */
 export default function GroupDetailSkeleton() {
   return (
-    <Screen title="" back="/" tabBar>
-      <div className="flex flex-col items-center pt-2" aria-hidden>
-        <Skeleton className="h-[84px] w-[84px] rounded-[22px]" />
-        <Skeleton className="mt-4 h-7 w-44 rounded-lg" />
-        <Skeleton className="mt-2 h-4 w-32 rounded-md" />
-      </div>
-      <div className="card mt-6 p-4" aria-hidden>
-        <Skeleton className="h-3 w-20 rounded-md" />
-        <Skeleton className="mt-2 h-9 w-36 rounded-lg" />
-        <Skeleton className="mt-4 h-[50px] w-full rounded-full" />
-      </div>
-      <div className="section" aria-hidden>
-        <Skeleton className="mx-4 mb-2 h-3 w-20 rounded-md" />
-        <div className="card list">
+    <div className="flex-1 flex flex-col bg-[var(--background)] min-h-full">
+      <header className="pt-[env(safe-area-inset-top)]">
+        <div className="max-w-md mx-auto h-[52px] px-4 flex items-center justify-between">
+          <Skeleton className="w-11 h-11 rounded-full" />
+          <div className="flex gap-2">
+            <Skeleton className="w-11 h-11 rounded-full" />
+            <Skeleton className="w-11 h-11 rounded-full" />
+          </div>
+        </div>
+      </header>
+      <main className="flex-1 max-w-md w-full mx-auto px-4 pb-[var(--content-bottom)]">
+        <div className="flex flex-col items-center pt-1 pb-5">
+          <Skeleton className="w-[88px] h-[88px] rounded-full" />
+          <Skeleton className="h-7 w-40 mt-3 rounded-lg" />
+          <Skeleton className="h-4 w-48 mt-2 rounded-md" />
+        </div>
+        <div className="list-section px-4 pt-4 pb-4">
+          <Skeleton className="h-4 w-24 rounded-md" />
+          <Skeleton className="h-9 w-36 mt-2 rounded-lg" />
+          <Skeleton className="h-[50px] w-full mt-4 rounded-full" />
+        </div>
+        <Skeleton className="h-3 w-20 mt-7 mb-2 ml-4 rounded-md" />
+        <div className="list-section">
           {[0, 1, 2].map((i) => (
-            <div key={i} className="row is-tall" style={{ ["--sep-inset" as string]: "58px" }}>
-              <Skeleton className="h-[30px] w-[30px] rounded-[8px]" />
-              <div className="flex-1">
-                <Skeleton className="h-4 w-2/3 rounded-md" />
-                <Skeleton className="mt-2 h-3 w-1/3 rounded-md" />
-              </div>
+            <div key={i} className="list-row">
+              <Skeleton className="w-9 h-9 rounded-full" />
+              <Skeleton className="h-4 flex-1 max-w-[50%] rounded-md" />
+              <Skeleton className="h-4 w-14 ml-auto rounded-md" />
             </div>
           ))}
         </div>
-      </div>
-    </Screen>
+      </main>
+    </div>
   );
 }

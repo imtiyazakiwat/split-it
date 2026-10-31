@@ -9,46 +9,39 @@ import {
   useState,
   ReactNode,
 } from "react";
-import { Icon } from "@/components/kit/Icon";
-
-type Tone = "success" | "error" | "info";
 
 interface ToastOptions {
   message: string;
+  /**
+   * success shows a check; error shows an exclamation; info shows nothing.
+   * Defaults by wording, so a "Couldn't …" toast never wears a success check.
+   */
+  variant?: "success" | "info" | "error";
   actionLabel?: string;
   onAction?: () => void;
-  /** ms. Defaults to 2.4 s, or 5 s when there is an action to take. */
-  duration?: number;
-  /** Inferred from the wording when omitted ("Couldn't…" reads as an error). */
-  tone?: Tone;
+  duration?: number; // ms
 }
 
 interface ToastState extends ToastOptions {
   id: number;
-  leaving: boolean;
 }
 
 const ToastContext = createContext<{ showToast: (o: ToastOptions) => void } | undefined>(
   undefined
 );
 
-const ERROR_WORDING = /^(couldn['’]?t|could not|can['’]?t|failed|unable|error|export failed)/i;
-
-function toneOf(t: ToastOptions): Tone {
-  if (t.tone) return t.tone;
-  return ERROR_WORDING.test(t.message.trim()) ? "error" : "success";
-}
-
 /**
- * iOS HUD: a glass capsule that drops in under the status bar, with a glyph
- * that says what kind of news it is. Auto-dismisses (2.4 s; 5 s with Undo),
- * pauses while touched, and flicks away upward.
+ * Minimal single-slot banner. Auto-dismisses after `duration` (default 4s).
+ * Supports one optional action; tapping it runs `onAction` and dismisses.
+ * iOS HUD: a glass capsule that drops in at the top centre, clear of the tab
+ * bar and of sheet commit buttons. Timer pauses while touched, and an upward
+ * swipe dismisses it.
  */
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<ToastState | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const remainingRef = useRef(0);
-  const startedAtRef = useRef(0);
+  const remainingRef = useRef<number>(0);
+  const startedAtRef = useRef<number>(0);
   const touchYRef = useRef<number | null>(null);
 
   const clearTimer = () => {
@@ -56,43 +49,39 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     timerRef.current = null;
   };
 
-  const leave = useCallback(() => {
+  const armTimer = (ms: number) => {
     clearTimer();
-    setToast((t) => (t ? { ...t, leaving: true } : t));
-    timerRef.current = setTimeout(() => setToast(null), 240);
+    remainingRef.current = ms;
+    startedAtRef.current = Date.now();
+    timerRef.current = setTimeout(() => setToast(null), ms);
+  };
+
+  const showToast = useCallback((o: ToastOptions) => {
+    clearTimer();
+    setToast({ id: Date.now(), ...o });
+    const ms = o.duration ?? 4000;
+    remainingRef.current = ms;
+    startedAtRef.current = Date.now();
+    timerRef.current = setTimeout(() => setToast(null), ms);
   }, []);
-
-  const arm = useCallback(
-    (ms: number) => {
-      clearTimer();
-      remainingRef.current = ms;
-      startedAtRef.current = Date.now();
-      timerRef.current = setTimeout(leave, ms);
-    },
-    [leave]
-  );
-
-  const showToast = useCallback(
-    (o: ToastOptions) => {
-      clearTimer();
-      setToast({ id: Date.now(), leaving: false, ...o });
-      arm(o.duration ?? (o.actionLabel ? 5000 : 2400));
-    },
-    [arm]
-  );
 
   useEffect(() => () => clearTimer(), []);
 
   function handleAction() {
     toast?.onAction?.();
-    leave();
+    clearTimer();
+    setToast(null);
   }
 
+  // Pause the countdown while a finger is down so slow readers don't lose it.
   function onTouchStart(e: React.TouchEvent) {
     touchYRef.current = e.touches[0]?.clientY ?? null;
-    if (timerRef.current && !toast?.leaving) {
+    if (timerRef.current) {
       clearTimer();
-      remainingRef.current = Math.max(0, remainingRef.current - (Date.now() - startedAtRef.current));
+      remainingRef.current = Math.max(
+        0,
+        remainingRef.current - (Date.now() - startedAtRef.current)
+      );
     }
   }
 
@@ -100,61 +89,63 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     const startY = touchYRef.current;
     touchYRef.current = null;
     const endY = e.changedTouches[0]?.clientY;
-    if (startY !== null && endY !== undefined && startY - endY > 18) {
-      leave();
+    // Upward flick dismisses, like flicking away a notification.
+    if (startY !== null && endY !== undefined && startY - endY > 24) {
+      clearTimer();
+      setToast(null);
       return;
     }
-    if (toast && !toast.leaving) arm(Math.max(1200, remainingRef.current));
+    if (toast) armTimer(remainingRef.current);
   }
-
-  const tone = toast ? toneOf(toast) : "success";
 
   return (
     <ToastContext.Provider value={{ showToast }}>
       {children}
-      <div className="hud-layer" role="status" aria-live="polite">
-        {toast && (
+      {toast && (
+        <div
+          className="fixed inset-x-0 z-[60] top-[calc(env(safe-area-inset-top)+8px)] px-4 pointer-events-none flex justify-center"
+          role="status"
+          aria-live="polite"
+        >
           <div
             key={toast.id}
             onTouchStart={onTouchStart}
             onTouchEnd={onTouchEnd}
-            className={`hud glass-thick ${toast.leaving ? "is-leaving" : ""}`}
+            className="glass glass-strong pointer-events-auto max-w-[min(100%,420px)] rounded-full min-h-[48px] pl-4 pr-2 py-1.5 flex items-center gap-2.5 animate-toast-in"
           >
-            <span
-              className="shrink-0"
-              style={{
-                color: tone === "error" ? "var(--orange)" : tone === "info" ? "var(--tint)" : "var(--green)",
-              }}
-              aria-hidden
-            >
-              <Icon
-                name={
-                  tone === "error"
-                    ? "exclamationmark.triangle"
-                    : tone === "info"
-                    ? "info.circle"
-                    : "checkmark.circle"
-                }
-                size={22}
-                strokeWidth={2.1}
-              />
+            {toastVariant(toast) === "success" && (
+              <span className="shrink-0 w-[22px] h-[22px] rounded-full bg-[var(--fill)] text-[var(--text-primary)] grid place-items-center" aria-hidden>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5" /></svg>
+              </span>
+            )}
+            {toastVariant(toast) === "error" && (
+              <span className="shrink-0 w-[22px] h-[22px] rounded-full bg-[var(--red)] text-white grid place-items-center text-[14px] font-bold leading-none" aria-hidden>
+                !
+              </span>
+            )}
+            <span className="min-w-0 flex-1 text-[15px] leading-[20px] font-semibold text-[var(--text-primary)] line-clamp-2 py-1 pr-2">
+              {toast.message}
             </span>
-            <span className="hud-text">{toast.message}</span>
             {toast.actionLabel && (
               <button
-                type="button"
                 onClick={handleAction}
-                className="btn btn-tinted is-sm shrink-0"
-                style={{ height: 36 }}
+                className="shrink-0 min-h-[36px] px-3.5 rounded-full bg-[var(--tint-accent)] text-[15px] font-semibold text-[var(--brand)]"
               >
                 {toast.actionLabel}
               </button>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </ToastContext.Provider>
   );
+}
+
+const FAILURE = /^(couldn[’']?t|can[’']?t|failed|error|unable|that item isn)/i;
+
+function toastVariant(t: ToastOptions): "success" | "info" | "error" {
+  if (t.variant) return t.variant;
+  return FAILURE.test(t.message.trim()) ? "error" : "success";
 }
 
 export function useToast() {

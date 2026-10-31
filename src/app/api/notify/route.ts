@@ -1,70 +1,51 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { Firestore } from "firebase-admin/firestore";
 import { getDb, getMessaging, verifyCaller } from "@/lib/firebase-admin";
+import {
+  LIMITS,
+  cleanText,
+  collectTargets,
+  consumeRate,
+  dedupeTag,
+  isDeadTokenError,
+  parseNotifyRequest,
+  resolveGroupRecipients,
+  type DeviceTarget,
+  type RateState,
+  type RecipientDevices,
+} from "@/lib/notify-policy";
 
 /**
- * POST /api/notify
- *
- * Sends a push notification via Firebase Cloud Messaging HTTP v1 API
- * using the Firebase Admin SDK (OAuth 2.0 / service account auth).
- *
- * Server-side env vars required:
- *   FIREBASE_CLIENT_EMAIL  — from Firebase Console > Service Accounts
- *   FIREBASE_PRIVATE_KEY   — the private key from the same service account JSON
+ * POST /api/notify — sends a push through FCM (HTTP v1, via the Admin SDK).
  *
  * Auth:  Authorization: Bearer <Firebase ID token>
- * Body:  { uids: string[], title: string, body: string, link?: string }
+ * Body:  one of
+ *   { groupId, body, link?, title?, uids? }  members of a group the caller is in
+ *   { uids, title, body, link? }             people the caller shares a group or
+ *                                            a direct transfer with
+ *   { test: true }                           a fixed message to the caller's own
+ *                                            devices
  *
- * The route used to accept an arbitrary FCM registration token plus arbitrary
- * text, so anyone who got hold of a token could push a convincing fake ("Asha
- * paid you INR 5,000") to that device. Now the caller proves who they are, the
- * recipients are filtered down to people who actually share a group with the
- * caller, and the device tokens are read server-side — a client never gets to
- * name the device it is pushing to.
+ * The caller never names a device. Recipients are resolved and authorised here,
+ * and their tokens are read here, so nobody can push arbitrary text to a device
+ * they merely saw once. All decisions live in src/lib/notify-policy.ts.
  *
- * The message is sent DATA-ONLY, deliberately. Including a `notification` block
- * makes FCM render the push itself while *also* invoking the service worker's
- * onBackgroundMessage handler, which renders it a second time — every push
- * arrived twice whenever the app was backgrounded. With data only, the service
- * worker is the single renderer, and it can control the icon, the click target
- * and the dedupe tag. See public/firebase-messaging-sw.js.
+ * Messages are DATA-ONLY on purpose: a `notification` block makes FCM render the
+ * push itself and ALSO invoke the service worker, which showed every push twice.
+ * public/sw.js is the single renderer.
+ *
+ * Changes from the previous version, each fixing a measured or reported problem:
+ * - Tokens come from users/{uid}/devices (one per install) as well as the legacy
+ *   single field, so a second device no longer silently loses notifications.
+ * - Authorisation no longer reads every transfer the caller was ever part of on
+ *   every push; it checks the one pair in question.
+ * - Group mode resolves members and the title server-side, which removed two
+ *   client reads from every expense notification.
+ * - Per-caller rate limit, a TTL so a stale push isn't delivered days later, and
+ *   a generic 500 instead of echoing internal error text.
  */
 
-const MAX_RECIPIENTS = 50;
-const MAX_TITLE = 120;
-const MAX_BODY = 400;
-const MAX_TAG = 96;
-
-/**
- * Links are used as in-app navigation targets by the service worker, so only
- * same-origin absolute paths are accepted. This keeps a push from being turned
- * into a redirect to an attacker's page.
- */
-function safeLink(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const link = value.trim();
-  if (!link.startsWith("/") || link.startsWith("//")) return null;
-  return link.slice(0, 512);
-}
-
-/** Small stable hash, so a long link still contributes to the dedupe identity. */
-function shortHash(input: string): string {
-  let h = 5381;
-  for (let i = 0; i < input.length; i++) h = ((h << 5) + h + input.charCodeAt(i)) | 0;
-  return (h >>> 0).toString(36);
-}
-
-/**
- * Two pushes collapse into one only when they say the same thing *and* go to the
- * same place. Keying on title/body alone meant "Asha added an expense" for two
- * different groups replaced each other, and the survivor could carry the wrong
- * link.
- */
-function dedupeTag(title: string, body: string, link: string | null): string {
-  const source = `${title}|${body}|${link ?? ""}`;
-  if (source.length <= MAX_TAG) return source;
-  const suffix = `#${shortHash(source)}`;
-  return `${source.slice(0, MAX_TAG - suffix.length)}${suffix}`;
-}
+const TTL_SECONDS = 24 * 60 * 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -73,135 +54,200 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Unauthenticated" }, { status: 401 });
     }
 
-    const payload = await req.json();
-    const requested: unknown = payload?.uids;
-    const title = typeof payload?.title === "string" ? payload.title.trim() : "";
-    const body = typeof payload?.body === "string" ? payload.body.trim() : "";
-    const link = safeLink(payload?.link);
-
-    if (!Array.isArray(requested) || requested.length === 0 || !title || !body) {
-      return NextResponse.json(
-        { error: "Missing required fields: uids, title, body" },
-        { status: 400 }
-      );
+    let payload: unknown;
+    try {
+      payload = await req.json();
+    } catch {
+      return NextResponse.json({ error: "Invalid request" }, { status: 400 });
     }
-
-    const uids = [
-      ...new Set(requested.filter((u): u is string => typeof u === "string" && !!u)),
-    ].slice(0, MAX_RECIPIENTS);
+    const parsed = parseNotifyRequest(payload);
+    if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+    const request = parsed.request;
 
     const db = getDb();
-
-    // Authorization: you may notify people you share a group with, or people
-    // you have a direct transfer relationship with (the transfers collection
-    // stores `participants: [fromUid, toUid]`). Without the second check,
-    // chat messages and transfer notifications between two people who share a
-    // group would sometimes fail if the Firestore read lagged.
-    const [groupSnap, transferSnap] = await Promise.all([
-      db
-        .collection("groups")
-        .where("memberIds", "array-contains", callerUid)
-        .get(),
-      db
-        .collection("transfers")
-        .where("participants", "array-contains", callerUid)
-        .get(),
-    ]);
-    const reachable = new Set<string>();
-    for (const doc of groupSnap.docs) {
-      for (const uid of (doc.get("memberIds") as string[]) || []) reachable.add(uid);
-    }
-    for (const doc of transferSnap.docs) {
-      for (const uid of (doc.get("participants") as string[]) || []) reachable.add(uid);
-    }
-    reachable.delete(callerUid);
-
-    const allowed = uids.filter((uid) => reachable.has(uid));
-    if (allowed.length === 0) {
-      // The response deliberately doesn't distinguish this from "they have no
-      // device registered" — a caller shouldn't be able to probe who shares a
-      // group with them. The server log does distinguish it, which is where it
-      // needs to be visible when a push goes missing.
-      console.warn(
-        `[notify] caller ${callerUid} may not notify any of: ${uids.join(", ")}`
+    if (!(await consumeRateLimit(db, callerUid))) {
+      return NextResponse.json(
+        { error: "Too many notifications. Try again in a few minutes." },
+        { status: 429 }
       );
-      return NextResponse.json({ success: true, sent: 0, skipped: uids.length });
     }
 
-    // Device tokens are resolved server-side, so the client never supplies one.
-    const userDocs = await db.getAll(
-      ...allowed.map((uid) => db.collection("users").doc(uid))
-    );
-    // Kept as uid/token pairs rather than a bare token list: FCM reports
-    // failures per token, and pruning a dead one means knowing whose document
-    // to clear.
-    const targets = userDocs
-      .map((doc) => ({ uid: doc.id, token: doc.get("fcmToken") as unknown }))
-      .filter(
-        (t): t is { uid: string; token: string } =>
-          typeof t.token === "string" && !!t.token
-      );
-    const tokens = targets.map((t) => t.token);
-    if (tokens.length === 0) {
-      console.warn(
-        `[notify] no registered device for any of ${allowed.length} allowed recipient(s)`
-      );
+    let recipients: string[];
+    let title: string;
+    let body: string;
+    let link: string | null;
+
+    if (request.test) {
+      recipients = [callerUid];
+      title = "Notifications are on";
+      body = "This is a test from SplitIt. If you can see it, you're all set.";
+      link = "/settings";
+    } else if (request.groupId) {
+      const snap = await db.collection("groups").doc(request.groupId).get();
+      const memberIds = (snap.get("memberIds") as unknown[] | undefined) ?? [];
+      if (!snap.exists || snap.get("deletedAt") || !memberIds.includes(callerUid)) {
+        return NextResponse.json({ error: "Not allowed" }, { status: 403 });
+      }
+      recipients = resolveGroupRecipients(callerUid, memberIds, request.uids);
+      title = request.title || cleanText(snap.get("name"), LIMITS.MAX_TITLE) || "SplitIt";
+      body = request.body;
+      link = request.link;
+    } else {
+      recipients = await reachableRecipients(db, callerUid, request.uids);
+      title = request.title;
+      body = request.body;
+      link = request.link;
+    }
+
+    const requestedCount = request.test ? 1 : request.uids.length || recipients.length;
+    if (recipients.length === 0) {
+      // Deliberately indistinguishable from "they have no device": a caller
+      // shouldn't be able to probe who shares a group with them. The log says
+      // which it was, because that's where a missing push gets investigated.
+      console.warn(`[notify] ${callerUid}: no reachable recipients`);
+      return NextResponse.json({ success: true, sent: 0, skipped: requestedCount });
+    }
+
+    const targets = await loadTargets(db, recipients);
+    if (targets.length === 0) {
+      console.warn(`[notify] ${callerUid}: ${recipients.length} recipient(s), no registered device`);
       return NextResponse.json({
         success: true,
         sent: 0,
-        skipped: uids.length,
-        noDevice: allowed.length,
+        skipped: requestedCount - recipients.length,
+        noDevice: recipients.length,
       });
     }
 
-    const truncatedTitle = title.slice(0, MAX_TITLE);
-    const truncatedBody = body.slice(0, MAX_BODY);
     // FCM data payloads carry strings only.
-    const data: Record<string, string> = {
-      title: truncatedTitle,
-      body: truncatedBody,
-      tag: dedupeTag(truncatedTitle, truncatedBody, link),
-    };
+    const data: Record<string, string> = { title, body, tag: dedupeTag(title, body, link) };
     if (link) data.link = link;
 
-    const messaging = getMessaging();
-    const response = await messaging.sendEachForMulticast({
-      tokens,
+    const response = await getMessaging().sendEachForMulticast({
+      tokens: targets.map((t) => t.token),
       data,
-      webpush: { headers: { Urgency: "high" } },
+      webpush: { headers: { Urgency: "high", TTL: String(TTL_SECONDS) } },
     });
 
-    // A token dies when the user clears site data, uninstalls the PWA or revokes
-    // permission. Left in place it fails on every future send — which is exactly
-    // how "notifications just stopped working" presents: silently, and forever.
-    // Clearing it lets the next sign-in register a fresh one.
-    const deadTokenErrors = new Set([
-      "messaging/registration-token-not-registered",
-      "messaging/invalid-registration-token",
-      "messaging/invalid-argument",
-    ]);
-    const stale: string[] = [];
+    const dead: DeviceTarget[] = [];
     response.responses.forEach((r, i) => {
       if (r.success) return;
-      const code = r.error?.code ?? "unknown";
-      console.error(`[notify] send failed for ${targets[i].uid}: ${code}`);
-      if (deadTokenErrors.has(code)) stale.push(targets[i].uid);
+      const code = r.error?.code;
+      console.error(`[notify] send failed for ${targets[i].uid}: ${code ?? "unknown"}`);
+      if (isDeadTokenError(code)) dead.push(targets[i]);
     });
-    if (stale.length > 0) {
-      await Promise.allSettled(
-        stale.map((uid) => db.collection("users").doc(uid).update({ fcmToken: "" }))
-      );
-    }
+    if (dead.length > 0) await pruneDeadTargets(db, dead);
 
     return NextResponse.json({
       success: true,
       sent: response.successCount,
       failed: response.failureCount,
-      skipped: uids.length - allowed.length,
-      pruned: stale.length,
+      skipped: requestedCount - recipients.length,
+      pruned: dead.length,
     });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Internal error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Logged in full server-side; the client gets nothing internal.
+    console.error("[notify] failed:", err);
+    return NextResponse.json({ error: "Couldn't send notification" }, { status: 500 });
   }
+}
+
+/**
+ * Fixed-window limit per caller, stored in rateLimits/{uid}. That collection has
+ * no client rules, so only this server can read or write it.
+ */
+async function consumeRateLimit(db: Firestore, uid: string): Promise<boolean> {
+  const ref = db.collection("rateLimits").doc(uid);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const { allowed, next } = consumeRate(
+      snap.exists ? (snap.data() as Partial<RateState>) : undefined,
+      Date.now()
+    );
+    if (allowed) tx.set(ref, { ...next, updatedAt: Date.now() });
+    return allowed;
+  });
+}
+
+/**
+ * The requested uids the caller may reach: anyone sharing a group with them, or
+ * anyone they have a direct transfer with.
+ *
+ * The group check reads only the caller's groups, projected to memberIds. The
+ * old version also read EVERY transfer the caller had ever been party to, on
+ * every push, so its cost grew with history forever. Transfers are now checked
+ * per remaining pair with limit(1) — two equality filters, which Firestore
+ * serves without a composite index.
+ */
+async function reachableRecipients(
+  db: Firestore,
+  callerUid: string,
+  requested: string[]
+): Promise<string[]> {
+  const candidates = requested.filter((uid) => uid !== callerUid);
+  if (candidates.length === 0) return [];
+
+  const groups = await db
+    .collection("groups")
+    .where("memberIds", "array-contains", callerUid)
+    .select("memberIds")
+    .get();
+  const reachable = new Set<string>();
+  for (const g of groups.docs) {
+    for (const uid of (g.get("memberIds") as unknown[] | undefined) ?? []) {
+      if (typeof uid === "string") reachable.add(uid);
+    }
+  }
+
+  const unresolved = candidates.filter((uid) => !reachable.has(uid));
+  const transfers = db.collection("transfers");
+  const pairChecks = await Promise.all(
+    unresolved.map(async (uid) => {
+      const [sent, received] = await Promise.all([
+        transfers.where("fromUid", "==", callerUid).where("toUid", "==", uid).limit(1).get(),
+        transfers.where("fromUid", "==", uid).where("toUid", "==", callerUid).limit(1).get(),
+      ]);
+      return { uid, ok: !sent.empty || !received.empty };
+    })
+  );
+  for (const c of pairChecks) if (c.ok) reachable.add(c.uid);
+
+  return candidates.filter((uid) => reachable.has(uid));
+}
+
+/** Enabled device tokens plus the legacy single-token field, per recipient. */
+async function loadTargets(db: Firestore, uids: string[]): Promise<DeviceTarget[]> {
+  const recipients: RecipientDevices[] = await Promise.all(
+    uids.map(async (uid) => {
+      const userRef = db.collection("users").doc(uid);
+      const [user, devices] = await Promise.all([
+        userRef.get(),
+        userRef.collection("devices").where("enabled", "==", true).get(),
+      ]);
+      return {
+        uid,
+        legacyToken: user.get("fcmToken"),
+        devices: devices.docs.map((d) => ({
+          id: d.id,
+          token: d.get("token"),
+          enabled: d.get("enabled"),
+        })),
+      };
+    })
+  );
+  return collectTargets(recipients);
+}
+
+/**
+ * Removes tokens FCM says will never work again, so the next send doesn't fail
+ * on them too and the device can register a fresh one.
+ */
+async function pruneDeadTargets(db: Firestore, dead: DeviceTarget[]): Promise<void> {
+  const writes: Promise<unknown>[] = [];
+  for (const t of dead) {
+    const userRef = db.collection("users").doc(t.uid);
+    if (t.deviceId) writes.push(userRef.collection("devices").doc(t.deviceId).delete());
+    if (t.legacy) writes.push(userRef.update({ fcmToken: "" }));
+  }
+  await Promise.allSettled(writes);
 }

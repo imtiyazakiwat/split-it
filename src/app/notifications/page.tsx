@@ -1,37 +1,51 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import { useGroupData } from "@/lib/group-data-context";
 import { usePayments } from "@/lib/payments-context";
 import { computeCounterpartyBalances } from "@/lib/global-balance";
-import { hasUnread } from "@/lib/chat-thread";
-import { activeExpenses, canRespondToSettlement, formatCurrency, settlementCreator } from "@/lib/balance";
+import { hasUnread } from "@/lib/chat";
+import {
+  updateSettlementStatus,
+} from "@/lib/firestore";
+import {
+  activeExpenses,
+  canRespondToSettlement,
+  formatCurrency,
+  settlementCreator,
+} from "@/lib/balance";
 import { groupItemLink } from "@/lib/statement";
 import { transferAllocations } from "@/lib/transfer-allocation";
 import { Settlement } from "@/lib/types";
 import LoginScreen from "@/components/LoginScreen";
 import { useToast } from "@/components/ui/Toast";
+import Screen from "@/components/ui/Screen";
+import { ListSection } from "@/components/ui/List";
+import { EmptyState } from "@/components/ui/Controls";
+import { Bell, Bubble, CheckCircle, ChevronRight, Receipt, RupeeCircle } from "@/components/ui/Icons";
 import { hapticSuccess } from "@/lib/haptics";
-import Screen from "@/components/kit/Screen";
-import { List, RowLink, Section, sepInset } from "@/components/kit/List";
-import { IconTile } from "@/components/kit/Tile";
-import { Button, EmptyState } from "@/components/kit/Controls";
-import { NavLink } from "@/components/kit/nav";
 
 type NotificationKind = "request" | "status" | "expense" | "transfer" | "message";
 
 interface NotificationItem {
   key: string;
   ts: number;
-  /** Empty for direct transfers and chat, which carry `href` instead. */
+  /**
+   * Empty for notifications that don't belong to a group — a direct transfer or
+   * a chat message. Those carry `href` instead, since there is no group item to
+   * deep-link into.
+   */
   groupId: string;
   groupName: string;
   kind: NotificationKind;
   title: React.ReactNode;
   subtitle: string;
   settlement?: Settlement;
+  /** The expense this notification is about, when it is about one. */
   expenseId?: string;
+  /** Explicit navigation target, used when there is no group item to link to. */
   href?: string;
 }
 
@@ -43,29 +57,40 @@ function dateBucket(ts: number): string {
   if (days <= 0) return "Today";
   if (days === 1) return "Yesterday";
   if (days < 7) return d.toLocaleDateString("en-IN", { weekday: "long" });
-  return d.toLocaleDateString("en-IN", { day: "numeric", month: "long" });
+  return d.toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "long",
+    ...(d.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
+  });
 }
 
 function timeLabel(ts: number): string {
   return new Date(ts).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
 }
 
-function KindTile({ kind }: { kind: NotificationKind }) {
-  if (kind === "request") return <IconTile icon="clock" color="var(--orange)" />;
-  if (kind === "status") return <IconTile icon="checkmark" color="var(--green)" />;
-  if (kind === "transfer") return <IconTile icon="indianrupee" color="var(--teal)" />;
-  if (kind === "message") return <IconTile icon="message" color="var(--blue)" />;
-  return <IconTile icon="receipt" color="var(--indigo)" />;
+function KindIcon({ kind }: { kind: NotificationKind }) {
+  const map: Record<NotificationKind, { color: string; icon: React.ReactNode }> = {
+    request: { color: "var(--orange)", icon: <Bell size={17} /> },
+    status: { color: "var(--green)", icon: <CheckCircle size={18} /> },
+    transfer: { color: "var(--green)", icon: <RupeeCircle size={18} /> },
+    message: { color: "var(--blue)", icon: <Bubble size={17} /> },
+    expense: { color: "var(--indigo)", icon: <Receipt size={17} /> },
+  };
+  const { color, icon } = map[kind];
+  return (
+    <span className="icon-tile !w-9 !h-9 !rounded-[10px]" style={{ background: color }}>
+      {icon}
+    </span>
+  );
 }
-
-const B = ({ children }: { children: React.ReactNode }) => <span className="font-semibold">{children}</span>;
-const M = ({ children }: { children: React.ReactNode }) => <span className="text-label-2">{children}</span>;
 
 export default function NotificationsPage() {
   const { user, loading } = useAuth();
+  const router = useRouter();
   const showToast = useToast();
   const { datasets } = useGroupData();
-  // Direct transfers and chat live outside any group.
+  // Direct transfers and chat live outside any group, so they were invisible
+  // here: this page only ever walked group expenses and settlements.
   const { transfers, threads } = usePayments();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [seenAt] = useState<number>(() => {
@@ -83,7 +108,9 @@ export default function NotificationsPage() {
         target === uid ? "You" : group.members?.[target]?.displayName || "Someone";
 
       for (const s of settlements) {
-        // Whoever did NOT create a settlement is the one who has to act.
+        // Either side can raise a settlement: a payment you say you made, or
+        // a payment someone recorded against you. Whoever did NOT create it is
+        // the one who has to act.
         if (canRespondToSettlement(s, uid)) {
           const creator = settlementCreator(s);
           const isOffset = s.kind === "offset";
@@ -95,16 +122,22 @@ export default function NotificationsPage() {
             kind: "request",
             title: isOffset ? (
               <>
-                <B>{name(creator)}</B> <M>wants to cancel out</M> <B>{formatCurrency(s.amount)}</B>{" "}
-                <M>in {group.name}</M>
+                <span className="font-semibold">{name(creator)}</span>
+                <span className="text-[var(--text-secondary)]"> wants to cancel out </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
+                <span className="text-[var(--text-secondary)]"> in {group.name}</span>
               </>
             ) : s.fromUid === creator ? (
               <>
-                <B>{name(s.fromUid)}</B> <M>says they paid you</M> <B>{formatCurrency(s.amount)}</B>
+                <span className="font-semibold">{name(s.fromUid)}</span>
+                <span className="text-[var(--text-secondary)]"> says they paid you </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
               </>
             ) : (
               <>
-                <B>{name(creator)}</B> <M>recorded your payment of</M> <B>{formatCurrency(s.amount)}</B>
+                <span className="font-semibold">{name(creator)}</span>
+                <span className="text-[var(--text-secondary)]"> recorded your payment of </span>
+                <span className="font-semibold">{formatCurrency(s.amount)}</span>
               </>
             ),
             subtitle: `${group.name}${s.note ? ` · ${s.note}` : ""}`,
@@ -119,14 +152,23 @@ export default function NotificationsPage() {
             kind: "status",
             title: (
               <>
-                <M>Your settlement with</M> <B>{name(s.fromUid === uid ? s.toUid : s.fromUid)}</B> <M>was</M>{" "}
-                <span className={s.status === "approved" ? "font-semibold text-pos" : "font-semibold text-neg"}>
+                <span className="text-[var(--text-secondary)]">Your settlement with </span>
+                <span className="font-semibold">
+                  {name(s.fromUid === uid ? s.toUid : s.fromUid)}
+                </span>
+                <span className="text-[var(--text-secondary)]"> was </span>
+                <span
+                  className={
+                    s.status === "approved"
+                      ? "font-semibold text-[var(--pos)]"
+                      : "font-semibold text-[var(--neg)]"
+                  }
+                >
                   {s.status}
                 </span>
               </>
             ),
             subtitle: `${formatCurrency(s.amount)} · ${group.name}`,
-            settlement: s,
           });
         }
       }
@@ -142,7 +184,11 @@ export default function NotificationsPage() {
           expenseId: e.id,
           title: (
             <>
-              <B>{name(e.createdBy)}</B> <M>{e.editAction === "edited" ? "updated" : "added"}</M> <B>{e.description}</B>
+              <span className="font-semibold">{name(e.createdBy)}</span>
+              <span className="text-[var(--text-secondary)]">
+                {e.editAction === "edited" ? " updated " : " added "}
+              </span>
+              <span className="font-semibold">{e.description}</span>
             </>
           ),
           subtitle: `${formatCurrency(e.amount)} · ${group.name}`,
@@ -150,7 +196,9 @@ export default function NotificationsPage() {
       }
     }
 
-    // ── Direct transfers ──
+    // ── Direct transfers ──────────────────────────────────────────────
+    // Names come from the shared-group profile mirror; someone you only ever
+    // paid directly falls back to a generic label rather than a raw uid.
     const nameByUid = new Map(
       computeCounterpartyBalances(uid, datasets, transfers).map((c) => [c.uid, c.displayName])
     );
@@ -161,7 +209,8 @@ export default function NotificationsPage() {
       const other = incoming ? t.fromUid : t.toUid;
 
       if (incoming && t.status === "pending") {
-        // The one actionable transfer state: only this user can say what it was.
+        // The one genuinely actionable transfer state: money is claimed to have
+        // arrived and only this user can say what it was.
         items.push({
           key: `tr-req-${t.id}`,
           ts: t.updatedAt || t.createdAt,
@@ -171,7 +220,10 @@ export default function NotificationsPage() {
           href: `/chat/${other}`,
           title: (
             <>
-              <B>{personName(other)}</B> <M>sent you</M> <B>{formatCurrency(t.amount)}</B> <M>— confirm it</M>
+              <span className="font-semibold">{personName(other)}</span>
+              <span className="text-[var(--text-secondary)]"> sent you </span>
+              <span className="font-semibold">{formatCurrency(t.amount)}</span>
+              <span className="text-[var(--text-secondary)]"> — confirm it</span>
             </>
           ),
           subtitle: t.note ? `Direct payment · ${t.note}` : "Direct payment",
@@ -179,7 +231,7 @@ export default function NotificationsPage() {
         continue;
       }
 
-      // The sender hearing back about their payment.
+      // The sender hearing back about what happened to their payment.
       if (!incoming && t.status !== "pending") {
         const legs = transferAllocations(t);
         const groupNameOf = (groupId: string) =>
@@ -203,8 +255,20 @@ export default function NotificationsPage() {
           href: `/chat/${other}`,
           title: (
             <>
-              <M>Your</M> <B>{formatCurrency(t.amount)}</B> <M>to</M> <B>{personName(other)}</B>{" "}
-              <span className={t.status === "declined" ? "text-neg" : "text-label-2"}>{outcome}</span>
+              <span className="text-[var(--text-secondary)]">Your </span>
+              <span className="font-semibold">{formatCurrency(t.amount)}</span>
+              <span className="text-[var(--text-secondary)]"> to </span>
+              <span className="font-semibold">{personName(other)}</span>
+              <span
+                className={
+                  t.status === "declined"
+                    ? " text-[var(--neg)]"
+                    : " text-[var(--text-secondary)]"
+                }
+              >
+                {" "}
+                {outcome}
+              </span>
             </>
           ),
           subtitle: "Direct payment",
@@ -212,7 +276,10 @@ export default function NotificationsPage() {
       }
     }
 
-    // ── Chat: one row per conversation, not per message ──
+    // ── Chat ──────────────────────────────────────────────────────────
+    // One row per conversation, not per message: a thread with nine unread
+    // messages is one thing to deal with, and only the thread summary is loaded
+    // on this screen anyway.
     for (const thread of threads) {
       if (!thread.lastMessageAt || !thread.lastMessage) continue;
       if (thread.lastMessageFrom === uid) continue;
@@ -227,7 +294,10 @@ export default function NotificationsPage() {
         href: `/chat/${other}`,
         title: (
           <>
-            <B>{personName(other)}</B> <M>{hasUnread(thread, uid) ? "messaged you" : "said"}</M>
+            <span className="font-semibold">{personName(other)}</span>
+            <span className="text-[var(--text-secondary)]">
+              {hasUnread(thread, uid) ? " messaged you" : " said"}
+            </span>
           </>
         ),
         subtitle: thread.lastMessage,
@@ -243,122 +313,113 @@ export default function NotificationsPage() {
     localStorage.setItem("splitit-notif-seen", String(maxTs));
   }, [allItems]);
 
-  if (loading) {
-    return (
-      <Screen title="Notifications" back="/" tabBar>
-        <div />
-      </Screen>
-    );
-  }
+  if (loading) return <Screen title="Notifications" backHref="/">{null}</Screen>;
   if (!user) return <LoginScreen />;
 
-  // groupId comes from the item, built from the group whose subcollection the
-  // settlement was read out of — `s.groupId` is a denormalised copy that could
-  // send the write to the wrong path.
-  async function respond(s: Settlement, groupId: string, status: "approved" | "rejected") {
+  // groupId comes from the notification item, which was built from the group
+  // whose subcollection the settlement was actually read out of. `s.groupId` is
+  // a denormalized copy on the document, so a stale or wrong value there would
+  // send the write to the wrong group's path.
+  async function respond(
+    s: Settlement,
+    groupId: string,
+    status: "approved" | "rejected"
+  ) {
     setBusyId(s.id);
     try {
-      const { updateSettlementStatus } = await import("@/lib/firestore");
       await updateSettlementStatus(groupId, s.id, status);
       hapticSuccess();
-      showToast({ message: status === "approved" ? "Settlement approved" : "Request declined" });
+      showToast({
+        message:
+          status === "approved"
+            ? "Settlement approved"
+            : "Request declined",
+      });
     } catch (err) {
-      showToast({ message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update" });
+      showToast({
+        message: err instanceof Error ? `Couldn't update: ${err.message}` : "Couldn't update",
+      });
     } finally {
       setBusyId(null);
     }
   }
 
-  const hrefOf = (item: NotificationItem) =>
-    item.href ??
-    groupItemLink(
-      item.groupId,
-      item.expenseId
-        ? { kind: "expense", id: item.expenseId }
-        : item.settlement
-        ? { kind: "settlement", id: item.settlement.id }
-        : undefined
+  const sections: { bucket: string; items: NotificationItem[] }[] = [];
+  for (const item of allItems) {
+    const bucket = dateBucket(item.ts);
+    const last = sections[sections.length - 1];
+    if (last && last.bucket === bucket) last.items.push(item);
+    else sections.push({ bucket, items: [item] });
+  }
+  const open = (item: NotificationItem) =>
+    router.push(
+      item.href ??
+        groupItemLink(
+          item.groupId,
+          item.expenseId
+            ? { kind: "expense", id: item.expenseId }
+            : item.settlement
+            ? { kind: "settlement", id: item.settlement.id }
+            : undefined
+        )
     );
 
-  const requests = allItems.filter((i) => i.kind === "request" && i.settlement);
-  const rest = allItems.filter((i) => !(i.kind === "request" && i.settlement));
-  const buckets: { label: string; items: NotificationItem[] }[] = [];
-  for (const item of rest) {
-    const label = dateBucket(item.ts);
-    const last = buckets[buckets.length - 1];
-    if (last && last.label === label) last.items.push(item);
-    else buckets.push({ label, items: [item] });
-  }
-
   return (
-    <Screen title="Notifications" back="/" tabBar>
+    <Screen title="Notifications" backHref="/" large tabBar>
       {allItems.length === 0 ? (
         <EmptyState
-          icon="bell"
-          title="You're All Caught Up"
-          message="Payments, messages and new expenses will show up here."
+          icon={<Bell size={56} weight={1.4} />}
+          title="No Notifications"
+          message="Payments, messages and new expenses show up here."
         />
       ) : (
-        <>
-          {requests.length > 0 && (
-            <Section header="Needs your response" tight>
-              <List>
-                {requests.map((item) => {
-                  const s = item.settlement!;
-                  const busy = busyId === s.id;
-                  return (
-                    <div key={item.key} className="px-4 py-3" style={sepInset(58)}>
-                      <NavLink href={hrefOf(item)} className="flex items-start gap-3">
-                        <KindTile kind={item.kind} />
-                        <span className="min-w-0 flex-1">
-                          <span className="t-body block">{item.title}</span>
-                          <span className="t-subhead block truncate text-label-2">
-                            {item.subtitle} · {timeLabel(item.ts)}
-                          </span>
-                        </span>
-                        {item.ts > seenAt && <span className="dot mt-2 bg-[var(--tint)]" aria-label="New" />}
-                      </NavLink>
-                      <div className="mt-3 flex gap-2 pl-[42px]">
-                        <Button size="sm" busy={busy} onClick={() => void respond(s, item.groupId, "approved")}>
-                          Approve
-                        </Button>
-                        <Button size="sm" variant="gray" disabled={busy} onClick={() => void respond(s, item.groupId, "rejected")}>
-                          Decline
-                        </Button>
-                      </div>
+        sections.map((section) => (
+          <ListSection key={section.items[0].key} header={section.bucket} className="!mt-5 first:!mt-0">
+            {section.items.map((item) => {
+              const unread = item.ts > seenAt;
+              return (
+                <div key={item.key} className="list-row-wrap" style={{ ["--sep-inset" as string]: "64px" }}>
+                  <button type="button" onClick={() => open(item)} className="list-row is-tall !items-start">
+                    <span className="relative mt-0.5">
+                      <KindIcon kind={item.kind} />
+                      {unread && (
+                        <span className="absolute -left-2.5 top-3 w-[9px] h-[9px] rounded-full bg-[var(--blue)]" aria-label="New" />
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block t-subhead leading-[20px] text-[var(--text-primary)]">{item.title}</span>
+                      <span className="block t-footnote text-[var(--text-secondary)] mt-0.5 truncate">{item.subtitle}</span>
+                    </span>
+                    <span className="shrink-0 flex items-center gap-1 t-footnote text-[var(--text-secondary)] pt-0.5">
+                      {timeLabel(item.ts)}
+                      <ChevronRight className="row-chevron" size={12} />
+                    </span>
+                  </button>
+                  {item.kind === "request" && item.settlement && (
+                    <div className="flex gap-2 px-4 pb-3 -mt-1 pl-[64px]">
+                      <button
+                        type="button"
+                        disabled={busyId === item.settlement.id}
+                        onClick={() => void respond(item.settlement!, item.groupId, "approved")}
+                        className="btn-prominent btn-small"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busyId === item.settlement.id}
+                        onClick={() => void respond(item.settlement!, item.groupId, "rejected")}
+                        className="btn-gray btn-small !text-[var(--neg)]"
+                      >
+                        Decline
+                      </button>
                     </div>
-                  );
-                })}
-              </List>
-            </Section>
-          )}
-
-          {buckets.map((bucket, i) => (
-            <Section key={bucket.label} header={bucket.label} tight={i === 0 && requests.length === 0}>
-              <List>
-                {bucket.items.map((item) => (
-                  <RowLink
-                    key={item.key}
-                    href={hrefOf(item)}
-                    inset="tile"
-                    tall
-                    chevron={false}
-                    leading={<KindTile kind={item.kind} />}
-                    title={item.title}
-                    wrap
-                    subtitle={item.subtitle}
-                    trailing={
-                      <span className="flex shrink-0 flex-col items-end gap-1.5 self-start pt-0.5">
-                        <span className="t-caption text-label-2">{timeLabel(item.ts)}</span>
-                        {item.ts > seenAt && <span className="dot bg-[var(--tint)]" aria-label="New" />}
-                      </span>
-                    }
-                  />
-                ))}
-              </List>
-            </Section>
-          ))}
-        </>
+                  )}
+                </div>
+              );
+            })}
+          </ListSection>
+        ))
       )}
     </Screen>
   );

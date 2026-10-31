@@ -2,22 +2,21 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import dynamic from "next/dynamic";
 import { useAuth } from "@/lib/auth-context";
 import { useSingleGroup } from "@/lib/group-data-context";
 import {
+  updateGroupProfile,
   updateSettlementStatus,
+  updateExpense,
   deleteExpense,
   deleteGroup,
   removeMember,
   addExpense,
-  updateExpense,
   setGroupArchived,
 } from "@/lib/firestore";
 import { Expense, Settlement } from "@/lib/types";
 import {
   activeExpenses as onlyActive,
-  canRespondToSettlement,
   computeBalances,
   computeDirectDebts,
   computeSettlementProgress,
@@ -25,33 +24,35 @@ import {
   simplifyDebts,
   splitEqually,
   formatCurrency,
-  settlementCreator,
 } from "@/lib/balance";
 import { isSettled } from "@/lib/money";
 import { isArchivedFor } from "@/lib/group-filters";
 import { groupItemLink } from "@/lib/statement";
-import { uploadMultipleReceipts } from "@/lib/storage";
-import { showLocalNotification } from "@/lib/notifications";
+import { uploadImage, uploadMultipleReceipts } from "@/lib/storage";
+import GlassModal from "@/components/ui/GlassModal";
+import Screen, { BarButton } from "@/components/ui/Screen";
+import Menu from "@/components/ui/Menu";
+import { ButtonRow, FieldRow, IconTile, ListSection, Row } from "@/components/ui/List";
+import { Avatar, AvatarStack, EmptyState, Switch } from "@/components/ui/Controls";
+import { Archive, Camera, Ellipsis, Leave, Pencil, People, PersonAdd, Plus, Qr, Trash } from "@/components/ui/Icons";
+import ConfirmDialog from "@/components/ui/ConfirmDialog";
 import { useToast } from "@/components/ui/Toast";
 import { hapticSuccess } from "@/lib/haptics";
+import { activateFileInputOnKey } from "@/lib/keyboard";
+import dynamic from "next/dynamic";
 import type { NewExpenseInput } from "@/components/AddExpenseModal";
-import ActivityTimeline from "@/components/group/ActivityTimeline";
-import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
-import LoginScreen from "@/components/LoginScreen";
-import Screen from "@/components/kit/Screen";
-import { BarButton } from "@/components/kit/BarButton";
-import { Menu, type MenuItem } from "@/components/kit/Menu";
-import { Card, List, RowButton, Section } from "@/components/kit/List";
-import { Avatar, AvatarStack } from "@/components/kit/Avatar";
-import { GroupAvatar, IconTile } from "@/components/kit/Tile";
-import { Button, EmptyState, Meter } from "@/components/kit/Controls";
-import { ConfirmSheet } from "@/components/kit/ActionSheet";
-import { useNav } from "@/components/kit/nav";
 
 /**
- * Sheets load on demand, not with the screen: each sits behind a boolean and
- * is closed when the screen opens, and this is the heaviest route in the app.
- * `ssr: false` — client-only surfaces with nothing to render on the server.
+ * Sheets are loaded on demand, not with the screen.
+ *
+ * Every one of these sits behind a boolean or a null check and is closed when
+ * the screen opens, yet all seven were statically imported — so opening a group
+ * downloaded and parsed the code for all of them, plus `qrcode` (pulled in by
+ * InviteQrSheet), before anything could paint. This is the heaviest route in the
+ * app, so it is the one where that mattered most.
+ *
+ * `ssr: false` because these are client-only surfaces; there is nothing useful
+ * to render for them on the server, and it keeps them out of the SSR pass.
  */
 const AddExpenseModal = dynamic(() => import("@/components/AddExpenseModal"), { ssr: false });
 const SettleUpModal = dynamic(() => import("@/components/SettleUpModal"), { ssr: false });
@@ -60,8 +61,9 @@ const AddMemberModal = dynamic(() => import("@/components/group/AddMemberModal")
 const ActivityDetailModal = dynamic(() => import("@/components/group/ActivityDetailModal"), { ssr: false });
 const PersonStatementSheet = dynamic(() => import("@/components/group/PersonStatementSheet"), { ssr: false });
 const InviteQrSheet = dynamic(() => import("@/components/group/InviteQrSheet"), { ssr: false });
-const MembersSheet = dynamic(() => import("@/components/group/MembersSheet"), { ssr: false });
-const EditGroupSheet = dynamic(() => import("@/components/group/EditGroupSheet"), { ssr: false });
+import ActivityTimeline from "@/components/group/ActivityTimeline";
+import GroupDetailSkeleton from "@/components/group/GroupDetailSkeleton";
+import LoginScreen from "@/components/LoginScreen";
 
 function timeAgoShort(ts: number): string {
   const m = Math.floor((Date.now() - ts) / 60000);
@@ -79,47 +81,53 @@ function createdAgoText(createdAt: number): string {
   return `${days} days ago`;
 }
 
-type ConfirmState = {
-  title: string;
-  message?: string;
-  confirmLabel: string;
-  destructive?: boolean;
-  onConfirm: () => void | Promise<void>;
-};
-
 function GroupPageInner() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
-  const nav = useNav();
   const { user, loading } = useAuth();
-  // Reads from the one shared subscription set instead of opening more
+  // Reads from the one shared subscription set instead of opening three more
   // listeners every time this screen mounts.
   const { group, expenses, settlements, loading: groupLoading, notFound } = useSingleGroup(id);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [settleTarget, setSettleTarget] = useState<{ toUid: string; amount: number } | null>(null);
   const [forwardTarget, setForwardTarget] = useState<Settlement | null>(null);
-  const [sheet, setSheet] = useState<"members" | "invite" | "addMember" | "edit" | null>(null);
-  // Which detail sheet is open lives in the URL, not in state: a notification
-  // can point straight at one item, and closing is just a navigation.
+  const [showGroupInfo, setShowGroupInfo] = useState(false);
+  const [showAddMember, setShowAddMember] = useState(false);
+  // Which detail sheet is open lives in the URL, not in state: a
+  // notification can then point straight at one item, and closing the sheet
+  // is just a navigation. `?expense=` / `?settlement=` carry the id.
   const searchParams = useSearchParams();
   const openExpenseId = searchParams.get("expense");
   const openSettlementId = searchParams.get("settlement");
   const missingDeepLinkRef = useRef<string | null>(null);
-  // True when this screen pushed the ?expense= entry itself, so closing can
-  // pop it instead of leaving a duplicate history entry behind.
-  const detailPushedRef = useRef(false);
-  // Which member's pairwise statement is open, by uid, so it follows live data.
+  // Which member's pairwise statement is open. Held by uid so the sheet
+  // follows live data instead of a snapshot taken at tap time.
   const [statementUid, setStatementUid] = useState<string | null>(null);
+  const [showInvite, setShowInvite] = useState(false);
+  const [showEditGroup, setShowEditGroup] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDesc, setEditDesc] = useState("");
+  const [editUseSimplified, setEditUseSimplified] = useState(false);
+  const [editPhotoFile, setEditPhotoFile] = useState<File | null>(null);
+  const [editPhotoPreview, setEditPhotoPreview] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState("");
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
-  const [confirmState, setConfirmState] = useState<ConfirmState | null>(null);
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    message?: string;
+    confirmLabel: string;
+    destructive?: boolean;
+    onConfirm: () => void | Promise<void>;
+  } | null>(null);
   // Expense ids hidden locally during the undo window (deferred-commit delete).
   const [pendingDeleteIds, setPendingDeleteIds] = useState<Set<string>>(new Set());
   const [optimisticExpenses, setOptimisticExpenses] = useState<Expense[]>([]);
-  const [busySettlement, setBusySettlement] = useState<string | null>(null);
   const showToast = useToast();
 
-  // A notification can outlive what it points at. Say so once instead of
-  // opening an empty sheet or silently ignoring the link.
+  // A notification can outlive the thing it points at — the expense gets
+  // deleted, or the settlement belongs to a group you have since left. Say so
+  // once instead of opening an empty sheet or silently ignoring the link.
   useEffect(() => {
     const target = openExpenseId || openSettlementId;
     if (!target || groupLoading) return;
@@ -129,12 +137,14 @@ function GroupPageInner() {
       : settlements.some((s) => s.id === openSettlementId);
     if (!found) {
       missingDeepLinkRef.current = target;
-      showToast({ message: "That item isn\u2019t here any more.", tone: "info" });
+      showToast({ message: "That item isn\u2019t here any more." });
     }
   }, [openExpenseId, openSettlementId, expenses, settlements, groupLoading, showToast]);
 
+
   if (loading) return <GroupDetailSkeleton />;
-  // Was `null` — a blank screen — whenever auth hadn't resolved.
+  // Previously rendered `null`, i.e. a blank white screen, whenever auth hadn't
+  // resolved — the most visible symptom of the Android sign-in problem.
   if (!user) return <LoginScreen />;
 
   const currentUser = user;
@@ -142,15 +152,15 @@ function GroupPageInner() {
   if (!group) {
     if (notFound) {
       return (
-        <Screen title="" back="/" tabBar>
+        <Screen title="Group" backHref="/">
           <EmptyState
-            icon="person.2"
-            title="Group Not Available"
+            icon={<People size={56} weight={1.4} />}
+            title="Group Unavailable"
             message="It may have been deleted, or you may no longer be a member."
             action={
-              <Button size="md" onClick={() => nav.back("/")}>
+              <button onClick={() => router.push("/")} className="btn-prominent">
                 Back to Groups
-              </Button>
+              </button>
             }
           />
         </Screen>
@@ -159,8 +169,8 @@ function GroupPageInner() {
     return <GroupDetailSkeleton />;
   }
 
-  // Hold the skeleton until the first expense/settlement snapshot lands, so
-  // balances never flash ₹0 before the real numbers arrive.
+  // Hold the skeleton until the first expense/settlement snapshot lands, so the
+  // stats and balances never flash ₹0 before the real numbers arrive.
   if (groupLoading && expenses.length === 0 && settlements.length === 0) {
     return <GroupDetailSkeleton />;
   }
@@ -170,12 +180,14 @@ function GroupPageInner() {
     uid === currentUser.uid
       ? "You"
       : group?.members[uid]?.displayName ||
-        // Someone removed can still appear in old expenses; "Unknown" made it
-        // look like corrupt data.
+        // Someone who was removed can still appear in old expenses; naming them
+        // "Unknown" made it look like corrupt data.
         (group?.memberIds.includes(uid) ? "Member" : "Former member");
 
-  // Merge optimistic (pending) expenses with live ones; an optimistic entry
-  // hides as soon as a matching real one arrives, keyed by content.
+  // Merge optimistic (pending) expenses with the live ones. An optimistic entry
+  // is hidden as soon as a matching real expense arrives (Firestore delivers our
+  // own write near-instantly via latency compensation), keyed by content — this
+  // avoids both a duplicate flash and a gap during reconciliation.
   const realExpenseKeys = new Set(
     expenses.map((e) => `${e.createdBy}|${e.amount}|${e.description}|${e.paidBy}`)
   );
@@ -186,39 +198,37 @@ function GroupPageInner() {
     ...expenses,
   ];
 
+  // Only deleted expenses leave the ledger. Filtering on any `editAction` (as
+  // before) dropped every *edited* expense from the balances, so amounts drifted
+  // apart from reality the moment anyone corrected an entry.
   const detailExpense = openExpenseId
     ? mergedExpenses.find((e) => e.id === openExpenseId) ?? null
     : null;
   const detailSettlement = openSettlementId
     ? settlements.find((s) => s.id === openSettlementId) ?? null
     : null;
-  const closeDetail = () => {
-    if (detailPushedRef.current) {
-      detailPushedRef.current = false;
-      router.back();
-    } else {
-      router.replace(`/groups/${group.id}`, { scroll: false });
-    }
-  };
-  const openExpense = (e: Expense) => {
-    detailPushedRef.current = true;
-    router.push(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
-  };
-  const openSettlement = (s: Settlement) => {
-    detailPushedRef.current = true;
-    router.push(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
-  };
+  const closeDetail = () => router.replace(`/groups/${group.id}`, { scroll: false });
+  // Replace, not push: a detail sheet is an overlay on this screen, not a
+  // screen of its own. Pushing gave every opened item a browser-history
+  // entry that the in-app stack (keyed by pathname) can't see, so Back only
+  // stripped the query string. Deep links still open the sheet directly.
+  const openExpense = (e: Expense) =>
+    router.replace(groupItemLink(group.id, { kind: "expense", id: e.id }), { scroll: false });
+  const openSettlement = (s: Settlement) =>
+    router.replace(groupItemLink(group.id, { kind: "settlement", id: s.id }), { scroll: false });
 
   const iArchived = isArchivedFor(group, currentUser.uid);
-  // Only deleted expenses leave the ledger; edited ones stay.
   const balanceExpenses = onlyActive(mergedExpenses).filter((e) => !pendingDeleteIds.has(e.id));
   const balances = computeBalances(group.memberIds, balanceExpenses, settlements);
-  // Direct pairwise debts by default; simplification is opt-in per group
-  // because it can route a debt through someone you never shared a bill with.
+  // Direct pairwise debts by default: you only ever owe the people you
+  // actually shared expenses with, which is the figure people can check
+  // against their own memory. Simplification is opt-in per group because it
+  // routes debts through third parties — fewer transfers, but it can tell you
+  // to pay someone you never shared a bill with.
   const transactions = group.useSimplifiedDebts
     ? simplifyDebts(balances)
     : computeDirectDebts(group.memberIds, balanceExpenses, settlements);
-  // People the current user owes (for the forward-payment flow).
+  // People the current user owes (used for the "forward payment" flow).
   const myCreditors = transactions
     .filter((t) => t.fromUid === currentUser.uid)
     .map((t) => ({ uid: t.toUid, name: memberName(t.toUid), amount: t.amount }));
@@ -228,12 +238,18 @@ function GroupPageInner() {
   }
 
   function getExpensesOwedTo(toUid: string): Expense[] {
+    if (!group) return [];
     // Expenses already covered by a prior settlement to this person shouldn't
-    // reappear (pending or approved both count; only rejected stay open).
+    // reappear in the picker (pending or approved requests both count; only
+    // rejected ones are still outstanding).
     const settledExpenseIds = new Set<string>();
     settlements.forEach((s) => {
-      if (s.fromUid === currentUser.uid && s.toUid === toUid && s.status !== "rejected") {
-        (s.expenseIds || []).forEach((eid) => settledExpenseIds.add(eid));
+      if (
+        s.fromUid === currentUser.uid &&
+        s.toUid === toUid &&
+        s.status !== "rejected"
+      ) {
+        (s.expenseIds || []).forEach((id) => settledExpenseIds.add(id));
       }
     });
     return onlyActive(expenses).filter((e) => {
@@ -243,51 +259,52 @@ function GroupPageInner() {
     });
   }
 
-  // These writes used to be fire-and-forget: a rejected write showed success
-  // while the balance never changed.
+  async function respondToSettlement(s: Settlement, status: "approved" | "rejected") {
+    if (!group) return;
+    await updateSettlementStatus(s.groupId || group.id, s.id, status);
+  }
+
+  // These writes were fire-and-forget: a rejected write (e.g. a rules failure)
+  // showed a success toast while the balance silently never changed.
   async function handleApproveSettlement(s: Settlement) {
     if (!group) return;
-    setBusySettlement(s.id);
     try {
-      await updateSettlementStatus(s.groupId || group.id, s.id, "approved");
-      hapticSuccess();
-      showToast({ message: `Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}` });
-      showLocalNotification(
-        "Settlement approved",
-        `You approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
-        `/groups/${group.id}`
-      );
+      await respondToSettlement(s, "approved");
+      // The toast is the confirmation. This used to also raise a system
+      // notification telling the user about the tap they had just made — noise
+      // on desktop, and on Android `new Notification()` throws outright.
+      showToast({
+        message: `Approved ${formatCurrency(s.amount)} from ${memberName(s.fromUid)}`,
+      });
     } catch (err) {
-      showToast({ message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve" });
-    } finally {
-      setBusySettlement(null);
+      showToast({
+        message: err instanceof Error ? `Couldn't approve: ${err.message}` : "Couldn't approve",
+      });
     }
   }
 
   async function handleRejectSettlement(s: Settlement) {
     if (!group) return;
-    setBusySettlement(s.id);
     try {
-      await updateSettlementStatus(s.groupId || group.id, s.id, "rejected");
-      showToast({ message: "Request declined", tone: "info" });
+      await respondToSettlement(s, "rejected");
+      showToast({ message: "Request declined" });
     } catch (err) {
-      showToast({ message: err instanceof Error ? `Couldn't decline: ${err.message}` : "Couldn't decline" });
-    } finally {
-      setBusySettlement(null);
+      showToast({
+        message: err instanceof Error ? `Couldn't decline: ${err.message}` : "Couldn't decline",
+      });
     }
   }
 
   function handleDeleteGroup() {
     if (!group) return;
     setConfirmState({
-      title: `Delete “${group.name}”?`,
-      message: "This removes the group and its balances for everyone in it. This can't be undone.",
-      confirmLabel: "Delete Group",
+      title: "Delete group?",
+      message: `This removes “${group.name}” and its balances for everyone in it. This can't be undone.`,
+      confirmLabel: "Delete",
       destructive: true,
       onConfirm: async () => {
         await deleteGroup(group.id);
-        setSheet(null);
-        nav.back("/");
+        router.push("/");
       },
     });
   }
@@ -296,14 +313,15 @@ function GroupPageInner() {
     if (!group) return;
     const name = memberName(uid);
     const net = balances.find((b) => b.uid === uid)?.netAmount ?? 0;
-    const warn = !isSettled(net)
-      ? `\n\n${name} still has an unsettled balance of ${formatCurrency(
-          Math.abs(net)
-        )}. Removing them drops it from the group's balances.`
-      : "";
+    const warn =
+      !isSettled(net)
+        ? `\n\nHeads up: ${name} still has an unsettled balance of ${formatCurrency(
+            Math.abs(net)
+          )}. Removing them drops it from the group's balances.`
+        : "";
     setConfirmState({
       title: `Remove ${name}?`,
-      message: `${name} will no longer be part of “${group.name}”.${warn}`,
+      message: `Remove ${name} from “${group.name}”?${warn}`,
       confirmLabel: "Remove",
       destructive: true,
       onConfirm: () => removeMember(group.id, uid),
@@ -314,9 +332,11 @@ function GroupPageInner() {
     if (!group) return;
     const gid = group.id;
     const net = balances.find((b) => b.uid === currentUser.uid)?.netAmount ?? 0;
+
     const apply = async () => {
       try {
         await setGroupArchived(gid, currentUser.uid, !iArchived);
+        setShowGroupInfo(false);
         showToast({ message: iArchived ? "Group restored" : "Group archived" });
       } catch (err) {
         showToast({
@@ -324,15 +344,16 @@ function GroupPageInner() {
         });
       }
     };
-    // Archiving never writes off a debt, but it does move money somewhere the
-    // user isn't looking, so say so first.
+
+    // Archiving never writes off a debt, but it does move the group somewhere
+    // the user isn't looking, so say so plainly before hiding money.
     if (!iArchived && !isSettled(net)) {
       setConfirmState({
         title: "Archive with an open balance?",
         message: `You still have an unsettled balance of ${formatCurrency(
           Math.abs(net)
-        )} here. Archiving only tidies your Groups list — the balance stays and keeps counting in your totals. Only you see this.`,
-        confirmLabel: "Archive Anyway",
+        )} here. Archiving only tidies your home screen — the balance stays, and it keeps counting towards your totals.`,
+        confirmLabel: "Archive anyway",
         onConfirm: apply,
       });
       return;
@@ -349,38 +370,98 @@ function GroupPageInner() {
     setConfirmState({
       title: `Leave “${group.name}”?`,
       message: `You'll be removed from this group.${warn}`,
-      confirmLabel: "Leave Group",
+      confirmLabel: "Leave",
       destructive: true,
       onConfirm: async () => {
         await removeMember(group.id, currentUser.uid);
-        nav.back("/");
+        router.push("/");
       },
     });
+  }
+
+  function handleOpenEditGroup() {
+    if (!group) return;
+    setEditName(group.name);
+    setEditDesc(group.description || "");
+    setEditUseSimplified(group.useSimplifiedDebts === true);
+    setEditPhotoPreview(group.photoURL || "");
+    setEditPhotoFile(null);
+    setShowEditGroup(true);
+    setEditError("");
+  }
+
+  function handleEditPhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setEditPhotoFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setEditPhotoPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  async function handleSaveGroupProfile(e: React.FormEvent) {
+    e.preventDefault();
+    if (!group || !editName.trim()) {
+      setEditError("Group name is required.");
+      return;
+    }
+    setEditBusy(true);
+    setEditError("");
+    try {
+      let photoURL = editPhotoPreview || undefined;
+      if (editPhotoFile) {
+        photoURL = await uploadImage(editPhotoFile, "group-avatar");
+      }
+      await updateGroupProfile(group.id, {
+        name: editName.trim(),
+        description: editDesc.trim() || undefined,
+        photoURL,
+        useSimplifiedDebts: editUseSimplified,
+      });
+      showToast({ message: "Group updated" });
+      setShowEditGroup(false);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to update group");
+    } finally {
+      setEditBusy(false);
+    }
+  }
+
+
+  function handleEditExpense(expense: Expense) {
+    setEditingExpense(expense);
   }
 
   function handleDeleteExpense(expense: Expense) {
     if (!group) return;
     const gid = group.id;
-    const eid = expense.id;
+    const id = expense.id;
     const deletedBy = currentUser.uid;
     // Hide immediately; commit to Firestore only after the undo window.
-    setPendingDeleteIds((prev) => new Set(prev).add(eid));
+    setPendingDeleteIds((prev) => new Set(prev).add(id));
     const timer = setTimeout(() => {
-      deleteExpense(gid, eid, deletedBy);
-      showLocalNotification("Expense deleted", `${expense.description} was deleted by admin`, `/groups/${gid}`);
-      // The id stays in pendingDeleteIds: the incoming editAction:"deleted"
-      // keeps it hidden, so removing it here would only risk a flash.
+      // Leave the id in pendingDeleteIds on success: the incoming
+      // editAction:"deleted" keeps it hidden, and removing it here would only
+      // risk a reappear flash. On failure it must come back, or the expense
+      // looks deleted while still counting towards every balance.
+      deleteExpense(gid, id, deletedBy).catch(() => {
+        setPendingDeleteIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        showToast({ message: `Couldn't delete “${expense.description}” — it's back.` });
+      });
     }, 5000);
     showToast({
       message: `“${expense.description}” deleted`,
       actionLabel: "Undo",
       duration: 5000,
-      tone: "info",
       onAction: () => {
         clearTimeout(timer);
         setPendingDeleteIds((prev) => {
           const next = new Set(prev);
-          next.delete(eid);
+          next.delete(id);
           return next;
         });
       },
@@ -388,7 +469,7 @@ function GroupPageInner() {
   }
 
   // Optimistic add: show the expense immediately, persist in the background,
-  // and let the live listener reconcile (matching entries are de-duped above).
+  // and let the live listener reconcile (matching entries are de-duped below).
   async function handleAddExpense(input: NewExpenseInput) {
     if (!group) return;
     const gid = group.id;
@@ -426,7 +507,7 @@ function GroupPageInner() {
       showToast({ message: `Expense added · ${formatCurrency(input.amount)}` });
       hapticSuccess();
     } catch {
-      showToast({ message: "Couldn't add the expense — tap + to try again." });
+      showToast({ message: "Couldn't add expense — tap + to retry." });
     } finally {
       setOptimisticExpenses((prev) => prev.filter((x) => x.id !== tempId));
     }
@@ -440,12 +521,15 @@ function GroupPageInner() {
       original.splits.length === input.splitMemberIds.length &&
       original.splits.every((s) => input.splitMemberIds.includes(s.uid));
     // Preserve an uneven split's shape: only fall back to an equal split when
-    // the people involved actually changed.
+    // the people involved actually changed. Rescaling keeps each person's
+    // proportion of a legacy exact/percentage expense intact.
     const keepsUnevenSplit = sameMembers && original.splitType !== "equal";
     const splits = keepsUnevenSplit
       ? rescaleSplits(original.splits, input.amount)
       : splitEqually(input.amount, input.splitMemberIds);
-    // The stored splitType has to follow the splits.
+    // The stored splitType has to follow the splits. Leaving it alone meant an
+    // expense that fell back to an equal split still read as "exact", so the
+    // next edit would try to rescale amounts that were no longer uneven.
     const splitType = keepsUnevenSplit ? original.splitType : "equal";
     setEditingExpense(null);
     try {
@@ -478,10 +562,15 @@ function GroupPageInner() {
   }
 
   const visibleExpenses = balanceExpenses;
+
+  // ── Derived stats for the header/summary cards ──
   const totalSpent = visibleExpenses.reduce((sum, e) => sum + e.amount, 0);
   const expenseCount = visibleExpenses.length;
 
-  // Settlement progress is measured in money, not in tagged expenses.
+  // Settlement progress is measured in money, not in "expenses that happen to
+  // be tagged on a settlement". The old count relied on `expenseIds`, which is
+  // only written when the payer manually ticks items, so a fully paid-up group
+  // reported 0% settled while an empty group reported 100%.
   const progress = computeSettlementProgress(group.memberIds, visibleExpenses, settlements);
 
   const lastActivityItem = [
@@ -495,7 +584,7 @@ function GroupPageInner() {
     })),
   ].sort((a, b) => b.ts - a.ts)[0];
 
-  // Largest single debt the current user owes drives the balance card.
+  // Largest single debt the current user owes (drives the "You owe" hero).
   const myDebts = transactions
     .filter((t) => t.fromUid === currentUser.uid)
     .sort((a, b) => b.amount - a.amount);
@@ -505,286 +594,201 @@ function GroupPageInner() {
   const topDebt = myDebts[0];
   const topCredit = myCredits[0];
 
-  // Current members always show; people who've left only while they still
+  // Per-member net balances for the balance chips (creditors first). Current
+  // members always show; people who have left only appear while they still
   // carry a balance, so their share of the ledger stays visible.
   const memberBalances = [...balances]
     .filter((b) => group.memberIds.includes(b.uid) || !isSettled(b.netAmount))
     .sort((a, b) => b.netAmount - a.netAmount);
 
-  // Records only the current user can answer — first, until answered.
-  const waitingOnMe = settlements
-    .filter((s) => canRespondToSettlement(s, currentUser.uid))
-    .sort((a, b) => b.createdAt - a.createdAt);
-
-  const menuItems: MenuItem[] = [
-    { label: "Invite People", icon: "qrcode", onSelect: () => setSheet("invite") },
-    { label: "Members", icon: "person.2", onSelect: () => setSheet("members") },
-    ...(isAdmin ? [{ label: "Edit Group", icon: "pencil", onSelect: () => setSheet("edit") }] : []),
-    "separator",
-    {
-      label: iArchived ? "Restore to Groups" : "Archive",
-      subtitle: iArchived ? undefined : "Only hides it for you",
-      icon: iArchived ? "archivebox.up" : "archivebox",
-      onSelect: handleToggleArchive,
-    },
-    ...(!isAdmin
-      ? [{ label: "Leave Group", icon: "leave", destructive: true, onSelect: handleLeaveGroup }]
-      : []),
-  ];
-
-  const people = group.memberIds.map((uid) => ({
+  const createdAgo = createdAgoText(group.createdAt);
+  const memberPeople = group.memberIds.map((uid) => ({
     id: uid,
     name: group.members[uid]?.displayName || "Member",
     photoURL: group.members[uid]?.photoURL,
   }));
+  const groupMenu = [
+    { label: "Invite People", icon: <Qr size={20} />, onSelect: () => setShowInvite(true) },
+    { label: "Group Info", icon: <People size={20} />, onSelect: () => setShowGroupInfo(true) },
+    ...(isAdmin ? [{ label: "Edit Group", icon: <Pencil size={20} />, onSelect: handleOpenEditGroup }] : []),
+    { divider: true as const },
+    { label: iArchived ? "Restore Group" : "Archive Group", icon: <Archive size={20} />, onSelect: handleToggleArchive },
+    ...(!isAdmin ? [{ label: "Leave Group", icon: <Leave size={20} />, destructive: true, onSelect: handleLeaveGroup }] : []),
+  ];
 
   return (
     <Screen
       title={group.name}
-      back="/"
-      heroTitle
-      tabBar
+      backHref="/"
+      inlineTitleAfter={120}
       trailing={
         <>
-          <BarButton icon="plus" label="Add expense" onClick={() => setShowAddExpense(true)} />
-          <Menu items={menuItems} title={group.name}>
-            {(props) => <BarButton icon="ellipsis" label="Group options" {...props} />}
-          </Menu>
+          <Menu
+            label="Group actions"
+            items={groupMenu}
+            trigger={(t) => (
+              <BarButton {...t} aria-label="More">
+                <Ellipsis size={21} />
+              </BarButton>
+            )}
+          />
+          <BarButton prominent onClick={() => setShowAddExpense(true)} aria-label="Add expense">
+            <Plus size={21} />
+          </BarButton>
         </>
       }
     >
-      {/* Header */}
-      <div className="flex flex-col items-center px-2 pb-1 pt-1 text-center">
-        <GroupAvatar id={group.id} name={group.name} photoURL={group.photoURL} size={84} />
-        <h2 data-hero-title className="t-title1 mt-3 max-w-full [overflow-wrap:anywhere]">{group.name}</h2>
-        {group.description && <p className="t-subhead mt-0.5 text-label-2">{group.description}</p>}
-        <div className="mt-2 flex items-center gap-2">
-          <AvatarStack people={people} size={24} max={5} />
-          <span className="t-footnote text-label-2">
-            {group.memberIds.length} member{group.memberIds.length !== 1 ? "s" : ""} · Created{" "}
-            {createdAgoText(group.createdAt)}
-            {iArchived ? " · Archived" : ""}
-          </span>
-        </div>
-      </div>
+      {/* Header (Contacts-style): photo, name, members. Tapping opens info. */}
+      <button
+        type="button"
+        onClick={() => setShowGroupInfo(true)}
+        className="w-full flex flex-col items-center text-center pt-1 pb-5"
+        aria-label={`${group.name}, group info`}
+      >
+        <Avatar name={group.name} photoURL={group.photoURL} size={88} seed={group.id} />
+        <h1 className="t-title1 text-[var(--text-primary)] mt-3 max-w-full truncate px-4">{group.name}</h1>
+        <span className="mt-1.5 flex items-center gap-2 t-subhead text-[var(--text-secondary)]">
+          <AvatarStack people={memberPeople} size={20} />
+          {group.memberIds.length} {group.memberIds.length === 1 ? "member" : "members"} · Created {createdAgo}
+        </span>
+      </button>
 
-      {/* Balance card: the one money action this screen exists for. */}
-      <Card className="mt-5 p-4">
+      {/* Where you stand, and the one action that changes it. */}
+      <div className="list-section px-4 pt-3.5 pb-4">
         {topDebt ? (
           <>
-            <p className="t-subhead text-label-2">You owe {memberName(topDebt.toUid)}</p>
-            <p className="amount-hero mt-1 text-[34px] text-neg">{formatCurrency(topDebt.amount)}</p>
+            <p className="t-subhead text-[var(--text-secondary)]">You owe {memberName(topDebt.toUid)}</p>
+            <p className="t-large-title t-numeral text-[var(--neg)] truncate">{formatCurrency(topDebt.amount)}</p>
             {myDebts.length > 1 && (
-              <p className="t-footnote mt-1 text-label-2">
-                and {myDebts.length - 1} other{myDebts.length > 2 ? "s" : ""} — see Balances
+              <p className="t-footnote text-[var(--text-secondary)]">
+                and {myDebts.length - 1} other{myDebts.length > 2 ? "s" : ""} in this group
               </p>
             )}
-            <Button
-              block
-              className="mt-4"
-              icon="banknote"
+            <button
+              type="button"
               onClick={() => handleOpenSettle(topDebt.toUid, topDebt.amount)}
+              className="btn-prominent w-full mt-3.5"
             >
               Settle Up
-            </Button>
+            </button>
           </>
         ) : topCredit ? (
           <>
-            <p className="t-subhead text-label-2">{memberName(topCredit.fromUid)} owes you</p>
-            <p className="amount-hero mt-1 text-[34px] text-pos">{formatCurrency(topCredit.amount)}</p>
-            <p className="t-footnote mt-2 text-label-2">
+            <p className="t-subhead text-[var(--text-secondary)]">{memberName(topCredit.fromUid)} owes you</p>
+            <p className="t-large-title t-numeral text-[var(--pos)] truncate">{formatCurrency(topCredit.amount)}</p>
+            <p className="t-footnote text-[var(--text-secondary)] mt-0.5">
               {myCredits.length > 1
-                ? `${myCredits.length} people owe you here. Each one settles up from their phone.`
+                ? `${myCredits.length - 1} more ${myCredits.length > 2 ? "people owe" : "person owes"} you here.`
                 : `Waiting for ${memberName(topCredit.fromUid)} to settle up.`}
             </p>
           </>
         ) : (
-          <div className="flex items-center gap-3">
-            <IconTile icon="checkmark" color="var(--green)" size="lg" />
-            <div>
-              <p className="t-headline">You&rsquo;re all settled up</p>
-              <p className="t-subhead text-label-2">No outstanding balances in this group.</p>
+          <>
+            <p className="t-subhead text-[var(--text-secondary)]">Your balance</p>
+            <p className="t-title1 text-[var(--text-primary)]">All settled up</p>
+          </>
+        )}
+
+        <div className="mt-4 pt-3.5 grid grid-cols-3 gap-2 relative before:absolute before:inset-x-0 before:top-0 before:h-[0.5px] before:bg-[var(--separator)]">
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Total spent</p>
+            <p className="t-headline t-numeral text-[var(--text-primary)] truncate">{formatCurrency(totalSpent)}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Expenses</p>
+            <p className="t-headline t-numeral text-[var(--text-primary)]">{expenseCount}</p>
+          </div>
+          <div className="min-w-0">
+            <p className="t-caption text-[var(--text-secondary)]">Last activity</p>
+            <p className="t-headline text-[var(--text-primary)] truncate">
+              {lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}
+            </p>
+          </div>
+        </div>
+        {!progress.isEmpty && (
+          <div className="mt-3">
+            <div className="flex items-baseline justify-between t-caption text-[var(--text-secondary)]">
+              <span>
+                {isSettled(progress.outstanding)
+                  ? "Everyone is square"
+                  : `${formatCurrency(progress.outstanding)} still to settle`}
+              </span>
+              <span className="font-semibold text-[var(--text-primary)]">{progress.pct}%</span>
+            </div>
+            <div className="meter mt-1.5" role="meter" aria-valuenow={progress.pct} aria-valuemin={0} aria-valuemax={100} aria-label="Settled">
+              <span style={{ width: `${progress.pct}%` }} />
             </div>
           </div>
         )}
-      </Card>
+      </div>
 
-      {/* Needs a decision from the current user. */}
-      {waitingOnMe.length > 0 && (
-        <Section header="Waiting on You">
-          <List>
-            {waitingOnMe.map((s) => {
-              const isOffset = s.kind === "offset";
-              const creator = settlementCreator(s);
-              const text = isOffset
-                ? `${memberName(creator)} wants to cancel out ${formatCurrency(s.amount)} between you`
-                : s.fromUid === creator
-                ? `${memberName(s.fromUid)} says they paid you ${formatCurrency(s.amount)}`
-                : `${memberName(creator)} recorded your payment of ${formatCurrency(s.amount)}`;
-              const busy = busySettlement === s.id;
-              return (
-                <div key={s.id} className="px-4 py-3" style={{ ["--sep-inset" as string]: "58px" }}>
-                  <button type="button" onClick={() => openSettlement(s)} className="flex w-full items-start gap-3 text-left">
-                    <IconTile icon={isOffset ? "arrow.left.right" : "clock"} color={isOffset ? "var(--indigo)" : "var(--orange)"} />
-                    <span className="min-w-0 flex-1">
-                      <span className="t-body block">{text}</span>
-                      {s.note && <span className="t-subhead block truncate text-label-2">“{s.note}”</span>}
-                    </span>
-                  </button>
-                  <div className="mt-3 flex gap-2 pl-[42px]">
-                    <Button size="sm" busy={busy} onClick={() => handleApproveSettlement(s)}>
-                      {isOffset ? "Accept" : "Approve"}
-                    </Button>
-                    {myCreditors.length > 0 && !isOffset && s.toUid === currentUser.uid && (
-                      <Button size="sm" variant="gray" disabled={busy} onClick={() => setForwardTarget(s)}>
-                        Forward
-                      </Button>
-                    )}
-                    <Button size="sm" variant="gray" disabled={busy} onClick={() => handleRejectSettlement(s)}>
-                      Decline
-                    </Button>
-                  </div>
-                </div>
-              );
-            })}
-          </List>
-        </Section>
-      )}
-
-      {/* Summary */}
-      <Section header="Summary">
-        <Card className="p-4">
-          <div className="flex items-end justify-between gap-3">
-            <div className="min-w-0">
-              <p className="t-footnote text-label-2">Total spent</p>
-              <p className="num t-title2 truncate">{formatCurrency(totalSpent)}</p>
-            </div>
-            <p className="t-subhead shrink-0 text-label-2">
-              {expenseCount} expense{expenseCount !== 1 ? "s" : ""}
-            </p>
-          </div>
-          <div className="mt-4">
-            <Meter value={progress.pct} label="Settled" />
-            <div className="t-footnote mt-1.5 flex justify-between gap-3 text-label-2">
-              <span>
-                <span className="font-semibold text-label">{progress.pct}%</span> settled
+      {/* Balances: one row per person. Tap for your statement with them. */}
+      <ListSection
+        header="Balances"
+        footer={group.useSimplifiedDebts ? "Combine payments is on: the plan routes payments through fewer people." : undefined}
+      >
+        {memberBalances.map((b) => {
+          const isMe = b.uid === currentUser.uid;
+          const settled = isSettled(b.netAmount);
+          const pos = !settled && b.netAmount > 0;
+          const left = !group.memberIds.includes(b.uid);
+          const name = isMe ? "You" : memberName(b.uid);
+          const detail = (
+            <span className="flex flex-col items-end leading-tight">
+              <span className="t-caption text-[var(--text-secondary)]">
+                {settled ? "settled" : pos ? "gets back" : "owes"}
               </span>
-              <span className="truncate text-right">
-                {progress.isEmpty
-                  ? "Nothing to settle"
-                  : isSettled(progress.outstanding)
-                  ? "Everyone's square"
-                  : `${formatCurrency(progress.outstanding)} still to move`}
+              <span
+                className={`t-subhead font-semibold t-numeral ${
+                  settled ? "text-[var(--text-secondary)]" : pos ? "text-[var(--pos)]" : "text-[var(--neg)]"
+                }`}
+              >
+                {formatCurrency(settled ? 0 : Math.abs(b.netAmount))}
               </span>
-            </div>
-          </div>
-          <p className="t-footnote mt-3 truncate text-label-2">
-            Last activity{" "}
-            <span className="text-label">{lastActivityItem ? timeAgoShort(lastActivityItem.ts) : "—"}</span>
-            {lastActivityItem ? ` · ${lastActivityItem.label}` : ""}
-          </p>
-        </Card>
-      </Section>
-
-      {/* Balances */}
-      <Section header="Balances" footer={group.useSimplifiedDebts ? "Combine Payments is on: who pays whom is reshuffled for fewer transfers." : undefined}>
-        <List>
-          {memberBalances.map((b) => {
-            const isMe = b.uid === currentUser.uid;
-            const settled = isSettled(b.netAmount);
-            const pos = !settled && b.netAmount > 0;
-            const left = !group.memberIds.includes(b.uid);
-            const name = isMe ? "You" : memberName(b.uid);
-            const status = settled
-              ? "Settled"
-              : isMe
-              ? pos
-                ? "You get back"
-                : "You owe"
-              : pos
-              ? "Gets back"
-              : "Owes";
-            const amount = (
-              <span className={`num t-headline shrink-0 ${settled ? "text-label-3" : pos ? "text-pos" : "text-neg"}`}>
-                {settled ? formatCurrency(0) : `${pos ? "+" : "−"}${formatCurrency(Math.abs(b.netAmount))}`}
-              </span>
-            );
-            const common = {
-              inset: "avatar" as const,
-              leading: (
-                <Avatar
-                  name={isMe ? currentUser.displayName || "You" : group.members[b.uid]?.displayName || name}
-                  photoURL={group.members[b.uid]?.photoURL}
-                  size={40}
-                />
-              ),
-              title: name,
-              subtitle: left ? `${status} · Left the group` : status,
-              trailing: amount,
-            };
-            // Your own row has no pairwise statement to show.
-            return isMe ? (
-              <div key={b.uid} className="row is-tall" style={{ ["--sep-inset" as string]: "68px" }}>
-                {common.leading}
-                <span className="row-main">
-                  <span className="row-title font-semibold">{name}</span>
-                  <span className="row-subtitle">{common.subtitle}</span>
-                </span>
-                {amount}
-              </div>
-            ) : (
-              <RowButton
-                key={b.uid}
-                {...common}
-                chevron
-                onClick={() => setStatementUid(b.uid)}
-                ariaLabel={`${name}, ${status} ${formatCurrency(Math.abs(b.netAmount))}. View statement`}
-              />
-            );
-          })}
-        </List>
-      </Section>
-
-      {group.memberIds.length === 1 && (
-        <Section>
-          <List>
-            <RowButton
-              onClick={() => setSheet("invite")}
-              leading={<IconTile icon="qrcode" color="var(--blue)" />}
-              title="Invite People"
-              subtitle="Share a link or QR code to get the group started."
+            </span>
+          );
+          const leading = (
+            <Avatar name={group.members[b.uid]?.displayName || name} photoURL={group.members[b.uid]?.photoURL} size={36} seed={b.uid} />
+          );
+          return isMe ? (
+            <Row key={b.uid} leading={leading} separatorInset={64} title={name} subtitle="Your balance in this group" detail={detail} />
+          ) : (
+            <ButtonRow
+              key={b.uid}
+              onClick={() => setStatementUid(b.uid)}
+              aria-label={`Your statement with ${name}`}
+              leading={leading}
+              separatorInset={64}
+              title={name}
+              subtitle={left ? "Left the group" : undefined}
+              detail={detail}
               chevron
             />
-          </List>
-        </Section>
-      )}
+          );
+        })}
+      </ListSection>
 
-      <ActivityTimeline
-        expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
-        settlements={settlements}
-        memberName={memberName}
-        currentUid={currentUser.uid}
-        isAdmin={isAdmin}
-        onDeleteExpense={handleDeleteExpense}
-        onOpenExpense={openExpense}
-        onOpenSettlement={openSettlement}
-        emptyAction={
-          <Button size="md" icon="plus" onClick={() => setShowAddExpense(true)}>
-            Add Expense
-          </Button>
-        }
-      />
-      {isAdmin && expenseCount > 0 && (
-        <p className="section-footer">Swipe left on an expense to delete it.</p>
-      )}
+      <div className="mt-7">
+        <div className="list-header-prominent">Activity</div>
+        <ActivityTimeline
+          expenses={mergedExpenses.filter((e) => !pendingDeleteIds.has(e.id))}
+          settlements={settlements}
+          memberName={memberName}
+          currentUid={currentUser.uid}
+          isAdmin={isAdmin}
+          onEditExpense={handleEditExpense}
+          onDeleteExpense={handleDeleteExpense}
+          onApprove={handleApproveSettlement}
+          onReject={handleRejectSettlement}
+          onForward={(s) => setForwardTarget(s)}
+          canForward={myCreditors.length > 0}
+          onOpenExpense={openExpense}
+          onOpenSettlement={openSettlement}
+        />
+      </div>
 
       {showAddExpense && (
-        <AddExpenseModal
-          group={group}
-          currentUid={currentUser.uid}
-          onSubmit={handleAddExpense}
-          onClose={() => setShowAddExpense(false)}
-        />
+        <AddExpenseModal group={group} currentUid={currentUser.uid} onSubmit={handleAddExpense} onClose={() => setShowAddExpense(false)} />
       )}
 
       {settleTarget && (
@@ -800,32 +804,9 @@ function GroupPageInner() {
         />
       )}
 
-      {sheet === "invite" && (
-        <InviteQrSheet groupName={group.name} inviteCode={group.inviteCode} onClose={() => setSheet(null)} />
+      {showInvite && (
+        <InviteQrSheet groupName={group.name} inviteCode={group.inviteCode} onClose={() => setShowInvite(false)} />
       )}
-      {sheet === "members" && (
-        <MembersSheet
-          group={group}
-          currentUid={currentUser.uid}
-          isAdmin={isAdmin}
-          memberName={memberName}
-          onInvite={() => setSheet("invite")}
-          onAddMember={() => setSheet("addMember")}
-          onRemove={handleRemoveMember}
-          onClose={() => setSheet((s) => (s === "members" ? null : s))}
-        />
-      )}
-      {sheet === "addMember" && (
-        <AddMemberModal groupId={group.id} existingUids={group.memberIds} onClose={() => setSheet(null)} />
-      )}
-      {sheet === "edit" && (
-        <EditGroupSheet
-          group={group}
-          onDelete={handleDeleteGroup}
-          onClose={() => setSheet((s) => (s === "edit" ? null : s))}
-        />
-      )}
-
       {statementUid && (
         <PersonStatementSheet
           group={group}
@@ -849,6 +830,96 @@ function GroupPageInner() {
         />
       )}
 
+      {/* Group Info */}
+      {showGroupInfo && (
+        <GlassModal title="Group Info" onClose={() => setShowGroupInfo(false)}>
+          <div className="flex flex-col items-center text-center pt-2 pb-1">
+            <Avatar name={group.name} photoURL={group.photoURL} size={72} seed={group.id} />
+            <p className="t-title2 text-[var(--text-primary)] mt-2.5 max-w-full truncate">{group.name}</p>
+            {group.description && (
+              <p className="t-subhead text-[var(--text-secondary)] mt-0.5 selectable">{group.description}</p>
+            )}
+          </div>
+
+          <ListSection elevated>
+            <ButtonRow
+              onClick={() => {
+                setShowGroupInfo(false);
+                setShowInvite(true);
+              }}
+              leading={<IconTile color="var(--blue)"><Qr size={17} /></IconTile>}
+              separatorInset={58}
+              title="Invite People"
+              chevron
+            />
+            {isAdmin && (
+              <ButtonRow
+                onClick={() => {
+                  setShowGroupInfo(false);
+                  setShowAddMember(true);
+                }}
+                leading={<IconTile color="var(--green)"><PersonAdd size={17} /></IconTile>}
+                separatorInset={58}
+                title="Add Member"
+                chevron
+              />
+            )}
+            {isAdmin && (
+              <ButtonRow
+                onClick={() => {
+                  setShowGroupInfo(false);
+                  handleOpenEditGroup();
+                }}
+                leading={<IconTile color="var(--gray)"><Pencil size={17} /></IconTile>}
+                separatorInset={58}
+                title="Edit Group"
+                chevron
+              />
+            )}
+          </ListSection>
+
+          <ListSection
+            elevated
+            header={`${group.memberIds.length} ${group.memberIds.length === 1 ? "Member" : "Members"}`}
+            footer={isAdmin ? "Tap a member to remove them." : undefined}
+          >
+            {group.memberIds.map((uid) => {
+              const leading = (
+                <Avatar name={group.members[uid]?.displayName || "Member"} photoURL={group.members[uid]?.photoURL} size={36} seed={uid} />
+              );
+              const props = {
+                leading,
+                separatorInset: 64,
+                title: memberName(uid),
+                subtitle: group.members[uid]?.email || undefined,
+                detail: uid === group.createdBy ? "Admin" : undefined,
+              };
+              return isAdmin && uid !== group.createdBy ? (
+                <ButtonRow key={uid} onClick={() => handleRemoveMember(uid)} {...props} />
+              ) : (
+                <Row key={uid} {...props} />
+              );
+            })}
+          </ListSection>
+
+          <ListSection
+            elevated
+            footer={
+              iArchived
+                ? "Archived groups stay out of your list. Restoring brings it back."
+                : "Archiving hides it from your Groups list without changing any balance. Only you see this."
+            }
+          >
+            <ButtonRow onClick={handleToggleArchive} title={iArchived ? "Restore Group" : "Archive Group"} action />
+            {!isAdmin && <ButtonRow onClick={handleLeaveGroup} title="Leave Group" destructive />}
+          </ListSection>
+        </GlassModal>
+      )}
+
+      {showAddMember && (
+        <AddMemberModal groupId={group.id} existingUids={group.memberIds} onClose={() => setShowAddMember(false)} />
+      )}
+
       {(detailExpense || detailSettlement) && (
         <ActivityDetailModal
           expense={detailExpense}
@@ -857,15 +928,87 @@ function GroupPageInner() {
           memberName={memberName}
           currentUid={currentUser.uid}
           isAdmin={isAdmin}
-          canForward={myCreditors.length > 0}
-          busy={detailSettlement ? busySettlement === detailSettlement.id : false}
-          onEditExpense={(e) => setEditingExpense(e)}
+          onEditExpense={handleEditExpense}
           onDeleteExpense={handleDeleteExpense}
-          onApprove={handleApproveSettlement}
-          onReject={handleRejectSettlement}
-          onForward={(s) => setForwardTarget(s)}
           onClose={closeDetail}
         />
+      )}
+
+      {/* Edit Group: delete lives here, at the bottom, behind confirmation. */}
+      {showEditGroup && (
+        <GlassModal
+          title="Edit Group"
+          large
+          onClose={() => setShowEditGroup(false)}
+          dirty={
+            !editBusy &&
+            (editName !== group.name ||
+              editDesc !== (group.description || "") ||
+              editUseSimplified !== (group.useSimplifiedDebts === true) ||
+              !!editPhotoFile)
+          }
+          confirm={{ label: "Save", formId: "edit-group", disabled: !editName.trim(), busy: editBusy, onConfirm: () => {} }}
+        >
+          <form id="edit-group" onSubmit={handleSaveGroupProfile}>
+            <div className="flex flex-col items-center pt-2">
+              <label
+                role="button"
+                tabIndex={0}
+                aria-label="Change group photo"
+                onKeyDown={activateFileInputOnKey}
+                className="relative cursor-pointer rounded-full flex flex-col items-center"
+              >
+                <Avatar name={editName || group.name} photoURL={editPhotoPreview} size={88} seed={group.id} />
+                <span className="mt-2 t-subhead font-semibold text-[var(--brand)] flex items-center gap-1">
+                  <Camera size={16} /> {editPhotoPreview ? "Change Photo" : "Add Photo"}
+                </span>
+                <input type="file" accept="image/*" onChange={handleEditPhotoChange} className="hidden" />
+              </label>
+            </div>
+
+            <ListSection elevated>
+              <FieldRow label="Name">
+                <input
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Required"
+                  aria-label="Group name"
+                  className="row-input py-[13px]"
+                />
+              </FieldRow>
+              <FieldRow label="Description">
+                <input
+                  value={editDesc}
+                  onChange={(e) => setEditDesc(e.target.value)}
+                  placeholder="Optional"
+                  aria-label="Description"
+                  className="row-input py-[13px]"
+                />
+              </FieldRow>
+            </ListSection>
+
+            <ListSection
+              elevated
+              footer="Off: you settle directly with each person you shared expenses with. On: the app reshuffles who pays whom so there are fewer payments, which can ask you to pay someone you never shared a bill with."
+            >
+              <Row title="Combine Payments">
+                <Switch checked={editUseSimplified} onChange={setEditUseSimplified} label="Combine payments" />
+              </Row>
+            </ListSection>
+
+            {editError && <p className="list-footer !text-[var(--neg)]">{editError}</p>}
+
+            <ListSection elevated footer="Deletes the group and its balances for everyone. This can’t be undone.">
+              <ButtonRow
+                onClick={handleDeleteGroup}
+                disabled={editBusy}
+                leading={<span className="text-[var(--red)]"><Trash size={20} /></span>}
+                title="Delete Group"
+                destructive
+              />
+            </ListSection>
+          </form>
+        </GlassModal>
       )}
 
       {editingExpense && (
@@ -878,7 +1021,7 @@ function GroupPageInner() {
         />
       )}
       {confirmState && (
-        <ConfirmSheet
+        <ConfirmDialog
           title={confirmState.title}
           message={confirmState.message}
           confirmLabel={confirmState.confirmLabel}
@@ -893,8 +1036,9 @@ function GroupPageInner() {
 
 /**
  * `useSearchParams` makes everything below it client-rendered, so the tree is
- * wrapped in a Suspense boundary as the Next docs recommend. The fallback is
- * the same skeleton the page shows while its data loads.
+ * wrapped in a Suspense boundary as the Next docs recommend. The fallback is the
+ * same skeleton the page shows while its data loads, so a deep link doesn't
+ * flash something different on the way in.
  */
 export default function GroupPage() {
   return (
