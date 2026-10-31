@@ -1,5 +1,7 @@
-import { DirectTransfer } from "./types";
+import { DirectTransfer, Expense, Group, Settlement } from "./types";
 import { unallocatedAmount } from "./transfer-allocation";
+import { pairwiseNet } from "./balance";
+import { isSettled } from "./money";
 
 /**
  * Pure selectors over a list of transfers, with no Firestore dependency.
@@ -30,17 +32,44 @@ export function pendingForMe(transfers: DirectTransfer[], meUid: string): Direct
   return transfers.filter((t) => t.toUid === meUid && t.status === "pending");
 }
 
+/** The slice of group data needed to ask "could this payment settle anything?". */
+export interface SettleableDataset {
+  group: Pick<Group, "id" | "memberIds">;
+  expenses: Expense[];
+  settlements: Settlement[];
+}
+
 /**
- * Money the receiver confirmed but hasn't fully attributed to a group. Worth
- * surfacing: it's the case where a balance still looks unsettled even though the
- * payment went through.
+ * Confirmed money that could still settle a group balance, so it's worth
+ * asking the receiver to attach it.
  *
- * Tests the unallocated remainder rather than "has it been booked at all", so a
- * payment larger than the first group's debt keeps offering the rest up instead of
- * disappearing the moment one leg is written.
+ * "Received, not for a group" leaves a transfer `accepted` with nothing
+ * allocated, which is a deliberate final answer. The old test (accepted and
+ * anything unallocated) therefore listed every such payment forever: the
+ * receiver answered, and the row came straight back as "Waiting on you".
+ *
+ * A payment now stays in the list only while the sender still owes the
+ * receiver in a group they both belong to, i.e. while attaching it would
+ * actually move a balance. Once nothing is owed there, the decision has
+ * nothing left to change and the reminder goes away. The money itself is
+ * unaffected: it still counts as a personal balance everywhere it did.
+ *
+ * Without datasets (no group data loaded yet) nothing is listed, so a cold
+ * start never flashes a reminder that the loaded data would then retract.
  */
-export function unappliedForMe(transfers: DirectTransfer[], meUid: string): DirectTransfer[] {
-  return transfers.filter(
-    (t) => t.toUid === meUid && t.status === "accepted" && unallocatedAmount(t) > 0
-  );
+export function unappliedForMe(
+  transfers: DirectTransfer[],
+  meUid: string,
+  datasets: SettleableDataset[] = []
+): DirectTransfer[] {
+  return transfers.filter((t) => {
+    if (t.toUid !== meUid || t.status !== "accepted") return false;
+    if (isSettled(unallocatedAmount(t))) return false;
+    return datasets.some(
+      (d) =>
+        d.group.memberIds?.includes(meUid) &&
+        d.group.memberIds?.includes(t.fromUid) &&
+        pairwiseNet(t.fromUid, meUid, d.expenses, d.settlements) > 0.009
+    );
+  });
 }

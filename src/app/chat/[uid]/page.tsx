@@ -77,6 +77,7 @@ function TransferBubble({
   onCancel,
   onRepair,
   onNavigate,
+  canAttach,
 }: {
   item: ConversationItem;
   otherName: string;
@@ -87,6 +88,8 @@ function TransferBubble({
   onCancel: (t: DirectTransfer) => void;
   onRepair: (t: DirectTransfer) => void;
   onNavigate: (href: string) => void;
+  /** The sender still owes the receiver in a shared group, so attaching would settle something. */
+  canAttach: boolean;
 }) {
   const t = item.transfer!;
   const mine = item.side === "me";
@@ -206,7 +209,7 @@ function TransferBubble({
         )}
         {/* Still offered once part of the payment is booked: the remainder can
             go to another group whenever a new balance shows up there. */}
-        {!mine && t.status === "accepted" && !isSettled(unassigned) && (
+        {!mine && t.status === "accepted" && !isSettled(unassigned) && canAttach && (
           <button
             onClick={() => onDecide(t)}
             className="btn-gray btn-small w-full mt-2.5"
@@ -347,13 +350,17 @@ function MessageBubble({ item }: { item: ConversationItem }) {
   const mine = item.side === "me";
   return (
     <div className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-      <div
-        title={timeLabel(item.ts)}
-        className={`max-w-[75%] rounded-[19px] px-3.5 py-[7px] ${
-          mine ? "bg-[var(--brand-solid)] text-white" : "bg-[var(--surface)] text-[var(--text-primary)]"
-        }`}
-      >
-        <p className="text-[17px] leading-[22px] tracking-[-0.01em] whitespace-pre-wrap break-words selectable">{item.message!.text}</p>
+      <div className={`max-w-[75%] flex flex-col ${mine ? "items-end" : "items-start"}`}>
+        <div
+          className={`rounded-[19px] px-3.5 py-[7px] ${
+            mine ? "bg-[var(--brand-solid)] text-white" : "bg-[var(--surface)] text-[var(--text-primary)]"
+          }`}
+        >
+          <p className="text-[17px] leading-[22px] tracking-[-0.01em] whitespace-pre-wrap break-words selectable">{item.message!.text}</p>
+        </div>
+        <time dateTime={new Date(item.ts).toISOString()} className="text-[11px] leading-[14px] text-[var(--text-secondary)] mt-0.5 px-1.5">
+          {timeLabel(item.ts)}
+        </time>
       </div>
     </div>
   );
@@ -374,7 +381,7 @@ function ChatPageInner() {
   const searchParams = useSearchParams();
   const { user, loading } = useAuth();
   const { datasets, groupsLoaded } = useGroupData();
-  const { transfers, threadWith } = usePayments();
+  const { transfers, threadWith, unattributed } = usePayments();
   const showToast = useToast();
   const goBack = useBack("/pay");
 
@@ -459,6 +466,8 @@ function ChatPageInner() {
       ),
     [datasets]
   );
+
+  const attachableIds = new Set(unattributed.map((t) => t.id));
 
   if (loading || (user && !groupsLoaded)) return <ChatSkeleton />;
   if (!user) return <LoginScreen />;
@@ -580,6 +589,7 @@ function ChatPageInner() {
                       onCancel={handleCancelTransfer}
                       onRepair={handleRepairTransfer}
                       onNavigate={navigate}
+                      canAttach={attachableIds.has(item.transfer!.id)}
                     />
                   )}
                   {item.kind === "settlement" && (
