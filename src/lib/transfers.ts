@@ -117,6 +117,13 @@ export async function cancelTransfer(transfer: DirectTransfer): Promise<void> {
     status: "cancelled",
     updatedAt: Date.now(),
   });
+  // The receiver was told "X sent you ₹N, confirm it". Without this, that
+  // request silently vanished from their screen.
+  notifyUsers([transfer.toUid], {
+    title: actorName(),
+    body: `Withdrew the ${rupees(transfer.amount)} payment. Nothing to confirm.`,
+    link: `/chat/${transfer.fromUid}`,
+  });
 }
 
 /** The receiver saying the money never arrived. */

@@ -35,5 +35,8 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "5.0.2"
+  },
+  "overrides": {
+    "jwks-rsa": "3.2.2"
   }
 }
